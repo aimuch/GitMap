@@ -1,0 +1,7 @@
+node_modules
+dist
+# 你的笔记数据。想用 git 备份笔记的话，删掉下面这一行
+data
+.DS_Store
+dist-electron
+release

@@ -1,0 +1,46 @@
+# 在各自的系统上构建三个平台的桌面安装包。
+# 把项目推到 GitHub 后，在 Actions 页面手动运行，或推送 v 开头的标签（如 v0.1.0）触发。
+name: Desktop installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: dist:mac
+          - os: windows-latest
+            script: dist:win
+          - os: ubuntu-latest
+            script: dist:linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run ${{ matrix.script }}
+        env:
+          # 没有配置签名证书：只打包，不签名、不发布
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenNotion-${{ matrix.os }}
+          path: |
+            release/*.dmg
+            release/*.exe
+            release/*.zip
+            release/*.AppImage
+            release/*.tar.gz
+          if-no-files-found: error

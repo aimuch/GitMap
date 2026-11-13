@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512">
+  <defs>
+    <linearGradient id="tile" x1="6" y1="2" x2="58" y2="62" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFAB52"/>
+      <stop offset="1" stop-color="#EE4628"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="32" y1="0" x2="32" y2="30" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#tile)"/>
+  <rect width="64" height="64" rx="15" fill="url(#sheen)"/>
+  <!-- 后面一页：暗示页面可以层层嵌套 -->
+  <rect x="25" y="11.5" width="25" height="35" rx="5" fill="#fff" opacity=".4" transform="rotate(9 37.5 29)"/>
+  <!-- 前面一页，右上角折起 -->
+  <path d="M17.5 17a5.5 5.5 0 0 1 5.5-5.5h13.2L46 21.3V47a5.500 5.500 0 0 1-5.500 5.500H23a5.500 5.500 0 0 1-5.500-5.500z" fill="#fff"/>
+  <path d="M36.200 11.500v5.800a4 4 0 0 0 4 4H46z" fill="#EE4628" opacity=".3"/>
+  <!-- 一个个“块” -->
+  <rect x="22.500" y="26.500" width="5.500" height="5.500" rx="1.700" fill="#EE4628"/>
+  <rect x="31" y="27.700" width="10.500" height="3.100" rx="1.550" fill="#EE4628" opacity=".5"/>
+  <rect x="22.500" y="35" width="5.500" height="5.500" rx="1.700" fill="#FFAB52"/>
+  <rect x="31" y="36.200" width="7" height="3.100" rx="1.550" fill="#EE4628" opacity=".38"/>
+  <rect x="22.500" y="43.500" width="5.500" height="5.500" rx="1.700" fill="#EE4628" opacity=".3"/>
+  <rect x="31" y="44.700" width="9" height="3.100" rx="1.550" fill="#EE4628" opacity=".26"/>
+</svg>
