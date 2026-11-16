@@ -24,6 +24,10 @@ export function registerNestedEditor(component: ComponentType<NestedEditorProps>
   NestedEditor = component;
 }
 
+export function getNestedEditor(): ComponentType<NestedEditorProps> | null {
+  return NestedEditor;
+}
+
 /** 同一页面内多个相同同步块实例的实时广播总线 */
 const syncPeers = new Map<string, Map<string, (blocks: unknown[]) => void>>();
 

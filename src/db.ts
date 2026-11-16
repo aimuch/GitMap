@@ -1,7 +1,9 @@
 /** 数据库（表格 / 看板）相关的纯逻辑：默认结构、读写属性、排序、筛选、类型转换、导出。 */
 import type {
+  ActionStep,
   CalcFn,
   DatabaseDef,
+  FilterGroup,
   FilterOp,
   FilterRule,
   PageMeta,
@@ -13,7 +15,9 @@ import type {
   ViewDef,
 } from "../shared/types";
 import { runFormula, type FormulaValue } from "./formula";
-import { getState, updatePage } from "./store";
+import { createPage, getState, updatePage } from "./store";
+
+export const SUB_PARENT_KEY = "__subParent";
 
 export const TAG_COLORS = ["gray", "brown", "orange", "yellow", "green", "blue", "purple", "pink", "red"] as const;
 
@@ -25,6 +29,7 @@ export const PROP_TYPES: { type: PropType; label: string }[] = [
   { type: "date", label: "日期" },
   { type: "checkbox", label: "复选框" },
   { type: "url", label: "网址" },
+  { type: "button", label: "按钮" },
   { type: "relation", label: "关联" },
   { type: "rollup", label: "汇总" },
   { type: "formula", label: "公式" },
@@ -207,6 +212,7 @@ function defaultConfig(page: PageMeta, type: PropType): Partial<PropertyDef> {
     return { rollup: { relationProp: relation?.id ?? "", targetProp: "title", fn: "show" } };
   }
   if (type === "formula") return { formula: "" };
+  if (type === "button") return { buttonLabel: "执行", buttonActions: [] };
   return {};
 }
 
@@ -224,9 +230,220 @@ export function removeProperty(page: PageMeta, propId: string) {
   }));
 }
 
+const automationLock = new Set<string>();
+
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function resolveActionValue(val: PropValue | undefined): PropValue {
+  if (val === "$today") return todayIso();
+  return val ?? null;
+}
+
+export async function executeRowActions(row: PageMeta, dbPage: PageMeta, steps: ActionStep[] | undefined) {
+  if (!steps || steps.length === 0) return;
+  const latest = getState().pages[row.id] ?? row;
+  const nextProps = { ...latest.props };
+  let mutated = false;
+  for (const step of steps) {
+    if (step.type === "set_prop" && step.propId) {
+      nextProps[step.propId] = resolveActionValue(step.value);
+      mutated = true;
+    } else if (step.type === "create_row") {
+      const title = (step.title || "自动新建记录").replace(/\{\{title\}\}/g, latest.title || "无标题");
+      await createPage({ parentId: dbPage.id, title });
+    }
+  }
+  if (mutated) {
+    updatePage(row.id, { props: nextProps });
+  }
+}
+
+export function runRowCreatedAutomations(rowId: string, dbPage: PageMeta) {
+  const db = getDatabase(getState().pages[dbPage.id] ?? dbPage);
+  const row = getState().pages[rowId];
+  if (!row || !db.automations?.length) return;
+  for (const auto of db.automations) {
+    if (auto.enabled && auto.trigger.type === "row_created") {
+      void executeRowActions(row, dbPage, auto.actions);
+    }
+  }
+}
+
 export function setProp(row: PageMeta, propId: string, value: PropValue) {
   const latest = getState().pages[row.id] ?? row;
+  const prevValue = latest.props[propId];
   updatePage(row.id, { props: { ...latest.props, [propId]: value } });
+
+  if (prevValue === value || !latest.parentId) return;
+  const lockKey = `${row.id}:${propId}`;
+  if (automationLock.has(lockKey)) return;
+  const dbPage = getState().pages[latest.parentId];
+  const automations = dbPage?.database?.automations;
+  if (!dbPage || !automations?.length) return;
+
+  const matched = automations.filter((a) => {
+    if (!a.enabled || a.trigger.type !== "prop_changed" || a.trigger.propId !== propId) return false;
+    if (!a.trigger.value) return true;
+    if (typeof value === "boolean") return String(value) === a.trigger.value;
+    if (Array.isArray(value)) return value.includes(a.trigger.value);
+    return String(value ?? "") === a.trigger.value;
+  });
+  if (matched.length === 0) return;
+
+  automationLock.add(lockKey);
+  try {
+    const freshRow = getState().pages[row.id] ?? latest;
+    for (const auto of matched) {
+      void executeRowActions(freshRow, dbPage, auto.actions);
+    }
+  } finally {
+    window.setTimeout(() => automationLock.delete(lockKey), 0);
+  }
+}
+
+/* ---------- 子任务树（Sub-items）与通用分组（Group by） ---------- */
+
+export interface FlatSubRow {
+  row: PageMeta;
+  depth: number;
+  childCount: number;
+}
+
+export function getSubParentId(row: PageMeta): string | null {
+  const v = row.props[SUB_PARENT_KEY];
+  return typeof v === "string" && v ? v : null;
+}
+
+export function buildSubItemTree(rows: PageMeta[], collapsedIds: ReadonlySet<string>): FlatSubRow[] {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const childrenMap = new Map<string, PageMeta[]>();
+  const topRows: PageMeta[] = [];
+
+  for (const r of rows) {
+    const pid = getSubParentId(r);
+    // 防止环引用，且父行不在当前过滤列表里时自动作为顶层展示
+    if (pid && pid !== r.id && byId.has(pid)) {
+      let cur: string | null = pid;
+      let cycle = false;
+      const seen = new Set<string>([r.id]);
+      while (cur && byId.has(cur)) {
+        if (seen.has(cur)) {
+          cycle = true;
+          break;
+        }
+        seen.add(cur);
+        cur = getSubParentId(byId.get(cur)!);
+      }
+      if (!cycle) {
+        const list = childrenMap.get(pid);
+        if (list) list.push(r);
+        else childrenMap.set(pid, [r]);
+        continue;
+      }
+    }
+    topRows.push(r);
+  }
+
+  const out: FlatSubRow[] = [];
+  const walk = (list: PageMeta[], depth: number) => {
+    for (const r of list) {
+      const kids = childrenMap.get(r.id) ?? [];
+      out.push({ row: r, depth, childCount: kids.length });
+      if (kids.length > 0 && !collapsedIds.has(r.id)) {
+        walk(kids, depth + 1);
+      }
+    }
+  };
+  walk(topRows, 0);
+  return out;
+}
+
+export interface RowGroup {
+  key: string;
+  label: string;
+  option?: SelectOption;
+  rows: PageMeta[];
+  defaultProps: Record<string, PropValue>;
+}
+
+export function groupRowsByProp(rows: PageMeta[], db: DatabaseDef, propId: string | null | undefined): RowGroup[] | null {
+  if (!propId) return null;
+  const def = db.properties.find((p) => p.id === propId);
+  if (!def) return null;
+
+  if (def.type === "select") {
+    const opts = def.options ?? [];
+    const known = new Set(opts.map((o) => o.id));
+    const groups: RowGroup[] = opts.map((opt) => ({
+      key: opt.id,
+      label: opt.name,
+      option: opt,
+      rows: rows.filter((r) => r.props[def.id] === opt.id),
+      defaultProps: { [def.id]: opt.id },
+    }));
+    const ungrouped = rows.filter((r) => !known.has(String(r.props[def.id] ?? "")));
+    if (ungrouped.length > 0 || groups.length === 0) {
+      groups.push({ key: "__empty__", label: "未分组", rows: ungrouped, defaultProps: {} });
+    }
+    return groups;
+  }
+
+  if (def.type === "checkbox") {
+    return [
+      {
+        key: "true",
+        label: `${def.name}：已勾选`,
+        rows: rows.filter((r) => cellValue(r, def) === true),
+        defaultProps: { [def.id]: true },
+      },
+      {
+        key: "false",
+        label: `${def.name}：未勾选`,
+        rows: rows.filter((r) => cellValue(r, def) !== true),
+        defaultProps: { [def.id]: false },
+      },
+    ];
+  }
+
+  if (def.type === "multiSelect") {
+    const opts = def.options ?? [];
+    const groups: RowGroup[] = opts.map((opt) => ({
+      key: opt.id,
+      label: opt.name,
+      option: opt,
+      rows: rows.filter((r) => Array.isArray(r.props[def.id]) && (r.props[def.id] as string[]).includes(opt.id)),
+      defaultProps: { [def.id]: [opt.id] },
+    }));
+    const empty = rows.filter((r) => !Array.isArray(r.props[def.id]) || (r.props[def.id] as string[]).length === 0);
+    if (empty.length > 0) groups.push({ key: "__empty__", label: "未选择", rows: empty, defaultProps: {} });
+    return groups;
+  }
+
+  const map = new Map<string, PageMeta[]>();
+  const emptyRows: PageMeta[] = [];
+  for (const r of rows) {
+    const txt = valueText(cellValue(r, def), def).trim();
+    if (!txt) {
+      emptyRows.push(r);
+      continue;
+    }
+    const list = map.get(txt);
+    if (list) list.push(r);
+    else map.set(txt, [r]);
+  }
+  const out: RowGroup[] = [...map.entries()].map(([label, list]) => ({
+    key: label,
+    label,
+    rows: list,
+    defaultProps: def.type === "text" || def.type === "date" || def.type === "url" ? { [def.id]: label } : {},
+  }));
+  if (emptyRows.length > 0 || out.length === 0) {
+    out.push({ key: "__empty__", label: "未填写", rows: emptyRows, defaultProps: {} });
+  }
+  return out;
 }
 
 /** 新增一个选项并返回它（名称已存在时直接返回已有的）。 */
@@ -558,12 +775,33 @@ function matchRule(row: PageMeta, rule: FilterRule, db: DatabaseDef): boolean {
   return text !== q;
 }
 
+export function countActiveFilters(db: DatabaseDef, view: ViewDef): number {
+  const base = (view.filters ?? []).filter((r) => isActiveFilter(r, db)).length;
+  const groups = (view.filterGroups ?? []).reduce(
+    (sum, g) => sum + g.rules.filter((r) => isActiveFilter(r, db)).length,
+    0,
+  );
+  return base + groups;
+}
+
+function evalGroup(row: PageMeta, group: FilterGroup, db: DatabaseDef): boolean {
+  const active = group.rules.filter((r) => isActiveFilter(r, db));
+  if (active.length === 0) return true;
+  return group.mode === "or"
+    ? active.some((r) => matchRule(row, r, db))
+    : active.every((r) => matchRule(row, r, db));
+}
+
 export function matchesFilters(row: PageMeta, db: DatabaseDef, view: ViewDef): boolean {
   const rules = (view.filters ?? []).filter((rule) => isActiveFilter(rule, db));
-  if (rules.length === 0) return true;
-  return view.filterMode === "or"
-    ? rules.some((rule) => matchRule(row, rule, db))
-    : rules.every((rule) => matchRule(row, rule, db));
+  const activeGroups = (view.filterGroups ?? []).filter((g) => g.rules.some((r) => isActiveFilter(r, db)));
+  if (rules.length === 0 && activeGroups.length === 0) return true;
+
+  const predicates: boolean[] = [
+    ...rules.map((r) => matchRule(row, r, db)),
+    ...activeGroups.map((g) => evalGroup(row, g, db)),
+  ];
+  return view.filterMode === "or" ? predicates.some(Boolean) : predicates.every(Boolean);
 }
 
 /**

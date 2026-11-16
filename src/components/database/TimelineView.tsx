@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, FileText, GanttChart, Plus } from "lucide-react";
 import type { DatabaseDef, PageMeta, ViewDef } from "../../../shared/types";
-import { addProperty, updateView } from "../../db";
+import { addProperty } from "../../db";
 import { navigate, setPeekRowId } from "../../store";
 import { cx } from "../Popover";
 import { toIso } from "./CalendarView";
@@ -11,11 +11,14 @@ interface Props {
   db: DatabaseDef;
   view: ViewDef;
   rows: PageMeta[];
+  onPatchView: (patch: Partial<ViewDef>) => void;
   onCreate: (dateProp: string, date: string) => void;
 }
 
 const DAY = 86_400_000;
 const DAY_WIDTH = 34;
+const ROW_HEIGHT = 36;
+const HEAD_HEIGHT = 50;
 /** 一屏显示多少天 */
 const SPAN = 42;
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
@@ -27,19 +30,18 @@ const parse = (value: unknown): number | null => {
 
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 
-/** 时间轴：每行一条横条，从开始日期画到结束日期。 */
-export function TimelineView({ page, db, view, rows, onCreate }: Props) {
+/** 时间轴：每行一条横条，并在配置了前后置依赖列时绘制 SVG 依赖箭头与冲突提示。 */
+export function TimelineView({ page, db, view, rows, onPatchView, onCreate }: Props) {
   const dateProps = db.properties.filter((p) => p.type === "date");
   const startDef = dateProps.find((p) => p.id === view.dateProp) ?? dateProps[0];
   const endDef = dateProps.find((p) => p.id === view.endProp && p.id !== startDef?.id);
-  // 默认从一周前开始，今天落在偏左的位置
+  const depDef = db.dependencyProp ? db.properties.find((p) => p.id === db.dependencyProp && p.type === "relation") : undefined;
   const [origin, setOrigin] = useState(() => startOfDay(new Date()) - 7 * DAY);
   const today = startOfDay(new Date());
 
   const days = useMemo(
     () =>
       Array.from({ length: SPAN }, (_, i) => {
-        // 用日历日推进而不是加毫秒，避开夏令时那天不是 24 小时的问题
         const base = new Date(origin);
         return new Date(base.getFullYear(), base.getMonth(), base.getDate() + i);
       }),
@@ -54,7 +56,7 @@ export function TimelineView({ page, db, view, rows, onCreate }: Props) {
         <button
           type="button"
           className="primary-btn"
-          onClick={() => updateView(page, view.id, { dateProp: addProperty(page, "date") })}
+          onClick={() => onPatchView({ dateProp: addProperty(page, "date") })}
         >
           <Plus size={16} /> 添加“日期”属性
         </button>
@@ -79,8 +81,33 @@ export function TimelineView({ page, db, view, rows, onCreate }: Props) {
       continue;
     }
     const end = endDef ? parse(row.props[endDef.id]) : null;
-    // 结束早于开始时按一天处理，免得画出负宽度
     scheduled.push({ row, from, to: end !== null && end >= from ? end : from });
+  }
+
+  // 计算前后置依赖箭头几何坐标
+  const scheduledIndex = new Map(scheduled.map((item, idx) => [item.row.id, { ...item, idx }]));
+  const depEdges: { key: string; d: string; conflict: boolean }[] = [];
+  if (depDef) {
+    scheduled.forEach(({ row, from }, targetIdx) => {
+      const predIds = Array.isArray(row.props[depDef.id]) ? (row.props[depDef.id] as string[]) : [];
+      for (const predId of predIds) {
+        const pred = scheduledIndex.get(predId);
+        if (!pred) continue;
+        const predEndCol = Math.max(0, Math.min(SPAN - 1, dayIndex(pred.to)));
+        const targetStartCol = Math.max(0, Math.min(SPAN - 1, dayIndex(from)));
+        const x1 = 200 + (predEndCol + 1) * DAY_WIDTH - 2;
+        const y1 = HEAD_HEIGHT + pred.idx * ROW_HEIGHT + ROW_HEIGHT / 2;
+        const x2 = 200 + targetStartCol * DAY_WIDTH + 2;
+        const y2 = HEAD_HEIGHT + targetIdx * ROW_HEIGHT + ROW_HEIGHT / 2;
+        const conflict = from < pred.to;
+        const midX = x2 >= x1 + 14 ? (x1 + x2) / 2 : x1 + 14;
+        const d =
+          x2 >= x1 + 10
+            ? `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`
+            : `M ${x1} ${y1} L ${x1 + 10} ${y1} L ${x1 + 10} ${(y1 + y2) / 2} L ${x2 - 10} ${(y1 + y2) / 2} L ${x2 - 10} ${y2} L ${x2} ${y2}`;
+        depEdges.push({ key: `${predId}->${row.id}`, d, conflict });
+      }
+    });
   }
 
   const monthLabel = (d: Date, i: number) => (i === 0 || d.getDate() === 1 ? `${d.getFullYear()}年${d.getMonth() + 1}月` : "");
@@ -103,7 +130,37 @@ export function TimelineView({ page, db, view, rows, onCreate }: Props) {
       </div>
 
       <div className="timeline-scroll">
-        <div className="timeline-grid" style={{ width: 200 + SPAN * DAY_WIDTH }}>
+        <div className="timeline-grid" style={{ width: 200 + SPAN * DAY_WIDTH, position: "relative" }}>
+          {depEdges.length > 0 && (
+            <svg
+              className="timeline-deps-svg"
+              width={200 + SPAN * DAY_WIDTH}
+              height={HEAD_HEIGHT + scheduled.length * ROW_HEIGHT}
+              aria-label="前后置依赖连线"
+            >
+              <defs>
+                <marker id="tl-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0,1 L7,4 L0,7 Z" fill="var(--accent)" />
+                </marker>
+                <marker id="tl-arrow-err" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0,1 L7,4 L0,7 Z" fill="var(--danger)" />
+                </marker>
+              </defs>
+              {depEdges.map((edge) => (
+                <path
+                  key={edge.key}
+                  d={edge.d}
+                  fill="none"
+                  stroke={edge.conflict ? "var(--danger)" : "var(--accent)"}
+                  strokeWidth="1.6"
+                  strokeDasharray={edge.conflict ? "4 2" : undefined}
+                  markerEnd={edge.conflict ? "url(#tl-arrow-err)" : "url(#tl-arrow)"}
+                  opacity="0.82"
+                />
+              ))}
+            </svg>
+          )}
+
           <div className="timeline-row timeline-head">
             <div className="timeline-name">名称</div>
             <div className="timeline-track" style={{ width: SPAN * DAY_WIDTH }}>

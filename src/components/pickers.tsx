@@ -102,11 +102,16 @@ const PRESET_KEYS = Object.keys(COVER_PRESETS);
 
 export const randomCover = () => PRESET_KEYS[Math.floor(Math.random() * 8)];
 
-export function coverStyle(cover: string): CSSProperties {
+export function coverStyle(cover: string, coverY = 50): CSSProperties {
   if (COVER_PRESETS[cover]) return { background: COVER_PRESETS[cover] };
   // 只接受本应用上传目录里的图片
   if (/^\/uploads\/[a-f0-9]{16}\.[a-z0-9]{1,8}$/.test(cover)) {
-    return { backgroundImage: `url("${cover}")`, backgroundSize: "cover", backgroundPosition: "center" };
+    const y = typeof coverY === "number" && Number.isFinite(coverY) ? Math.max(0, Math.min(100, coverY)) : 50;
+    return {
+      backgroundImage: `url("${cover}")`,
+      backgroundSize: "cover",
+      backgroundPosition: `center ${y}%`,
+    };
   }
   return { background: "var(--hover)" };
 }

@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import {
   ArrowUpDown,
+  BarChart3,
   CalendarDays,
+  ClipboardList,
   Eye,
   EyeOff,
   GanttChart,
@@ -13,16 +15,18 @@ import {
   Search,
   Table2,
   Trash2,
+  Zap,
 } from "lucide-react";
-import type { PageMeta, PropValue, ViewDef } from "../../../shared/types";
+import type { DatabaseDef, PageMeta, PropValue, ViewDef } from "../../../shared/types";
 import {
   PROP_TYPES,
   addProperty,
+  countActiveFilters,
   defaultsFromFilters,
   getDatabase,
-  isActiveFilter,
   matchesFilters,
   rowMatches,
+  runRowCreatedAutomations,
   shortId,
   sortRows,
   updateDatabase,
@@ -31,9 +35,12 @@ import {
 } from "../../db";
 import { createPage, readLocal, useTree, writeLocal } from "../../store";
 import { MenuDivider, MenuItem, Popover, cx } from "../Popover";
+import { AutomationsMenu } from "./AutomationsMenu";
 import { BoardView } from "./BoardView";
 import { CalendarView, toIso } from "./CalendarView";
+import { ChartView } from "./ChartView";
 import { FilterMenu } from "./FilterMenu";
+import { FormView } from "./FormView";
 import { GalleryView } from "./GalleryView";
 import { ListView } from "./ListView";
 import { TimelineView } from "./TimelineView";
@@ -47,7 +54,10 @@ const VIEW_ICONS = {
   calendar: CalendarDays,
   gallery: LayoutGrid,
   timeline: GanttChart,
+  chart: BarChart3,
+  form: ClipboardList,
 } as const;
+
 const VIEW_LABELS = {
   table: "表格",
   board: "看板",
@@ -55,13 +65,32 @@ const VIEW_LABELS = {
   calendar: "日历",
   gallery: "画廊",
   timeline: "时间轴",
+  chart: "图表",
+  form: "表单",
 } as const;
+
 const VIEW_TYPES = Object.keys(VIEW_LABELS) as ViewDef["type"][];
 
-export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewStorageKey?: string }) {
+interface DatabaseViewProps {
+  page: PageMeta;
+  viewStorageKey?: string;
+  /** 链接数据库可传入专属的视图数组覆盖，从而与原数据库互不干扰地保存各自的筛选/排序/分组 */
+  viewsOverride?: ViewDef[] | null;
+  onChangeViewsOverride?: (views: ViewDef[]) => void;
+}
+
+export function DatabaseView({
+  page,
+  viewStorageKey,
+  viewsOverride,
+  onChangeViewsOverride,
+}: DatabaseViewProps) {
   const storageKey = viewStorageKey ?? `view:${page.id}`;
   const tree = useTree();
-  const db = getDatabase(page);
+  const baseDb = getDatabase(page);
+  const effectiveViews = viewsOverride && viewsOverride.length > 0 ? viewsOverride : baseDb.views;
+  const db: DatabaseDef = useMemo(() => ({ ...baseDb, views: effectiveViews }), [baseDb, effectiveViews]);
+
   const allRows = tree.children.get(page.id) ?? [];
   const [activeId, setActiveId] = useState(() => readLocal<string | null>(storageKey, null));
   const [query, setQuery] = useState("");
@@ -71,8 +100,27 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
   const [sortMenu, setSortMenu] = useState<HTMLElement | null>(null);
   const [filterMenu, setFilterMenu] = useState<HTMLElement | null>(null);
   const [propsMenu, setPropsMenu] = useState<HTMLElement | null>(null);
+  const [autoMenu, setAutoMenu] = useState<HTMLElement | null>(null);
 
   const view = db.views.find((v) => v.id === activeId) ?? db.views[0];
+
+  const mutateViews = (fn: (views: ViewDef[]) => ViewDef[]) => {
+    if (onChangeViewsOverride) {
+      onChangeViewsOverride(fn(effectiveViews));
+    } else {
+      updateDatabase(page, (d) => ({ ...d, views: fn(d.views) }));
+    }
+  };
+
+  const patchCurrentView = (patch: Partial<ViewDef>) => {
+    if (!view) return;
+    if (onChangeViewsOverride) {
+      onChangeViewsOverride(effectiveViews.map((v) => (v.id === view.id ? { ...v, ...patch } : v)));
+    } else {
+      updateView(page, view.id, patch);
+    }
+  };
+
   const rows = useMemo(
     () =>
       sortRows(
@@ -97,7 +145,7 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
     const groupBy = type === "board" ? (db.properties.find((p) => p.type === "select")?.id ?? null) : undefined;
     const dateProp =
       type === "calendar" || type === "timeline" ? (db.properties.find((p) => p.type === "date")?.id ?? null) : undefined;
-    updateDatabase(page, (d) => ({ ...d, views: [...d.views, { id, name, type, groupBy, dateProp }] }));
+    mutateViews((views) => [...views, { id, name, type, groupBy, dateProp }]);
     selectView(id);
     setAddMenu(null);
   };
@@ -115,25 +163,38 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
   }
 
   const rowDefaults = defaultsFromFilters(db, view);
-  const activeFilters = (view.filters ?? []).filter((rule) => isActiveFilter(rule, db)).length;
+  const activeFilters = countActiveFilters(db, view);
   const hiddenSet = new Set(view.hiddenProps ?? []);
   const hiddenCount = db.properties.filter((p) => hiddenSet.has(p.id)).length;
   const shownDefs = visibleProperties(db, view);
+  const activeAutoCount =
+    (db.automations?.filter((a) => a.enabled).length ?? 0) +
+    (db.subItemsEnabled ? 1 : 0) +
+    (db.dependencyProp ? 1 : 0);
 
-  const addRow = async (props: Record<string, PropValue> = {}) => {
+  const addRow = async (props: Record<string, PropValue> = {}, customTitle?: string): Promise<string | null> => {
     if (query) setQuery("");
-    const id = await createPage({ parentId: page.id, props: { ...rowDefaults, ...props } });
-    if (id) setFocusRowId(id);
+    const id = await createPage({
+      parentId: page.id,
+      title: customTitle ?? "",
+      props: { ...rowDefaults, ...props },
+    });
+    if (id) {
+      runRowCreatedAutomations(id, page);
+      if (customTitle === undefined) setFocusRowId(id);
+    }
+    return id;
   };
 
   const togglePropVisibility = (propId: string) => {
     const next = hiddenSet.has(propId)
       ? (view.hiddenProps ?? []).filter((id) => id !== propId)
       : [...(view.hiddenProps ?? []), propId];
-    updateView(page, view.id, { hiddenProps: next });
+    patchCurrentView({ hiddenProps: next });
   };
 
   const selects = db.properties.filter((p) => p.type === "select");
+  const groupableProps = db.properties.filter((p) => p.type !== "button");
   const dates = db.properties.filter((p) => p.type === "date");
   const calendarDate = dates.find((p) => p.id === view.dateProp) ?? dates[0];
   const usesDate = view.type === "calendar" || view.type === "timeline";
@@ -177,15 +238,17 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
         </div>
 
         <div className="db-tools">
-          <label className="db-search">
-            <Search size={14} />
-            <input
-              value={query}
-              placeholder="搜索…"
-              aria-label="搜索行"
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
+          {view.type !== "form" && (
+            <label className="db-search">
+              <Search size={14} />
+              <input
+                value={query}
+                placeholder="搜索…"
+                aria-label="搜索行"
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+          )}
           {db.properties.length > 0 && (
             <button
               type="button"
@@ -195,19 +258,21 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
               <Eye size={14} /> 属性{hiddenCount > 0 ? ` · ${db.properties.length - hiddenCount}/${db.properties.length}` : ""}
             </button>
           )}
-          <button
-            type="button"
-            className={cx("text-btn", activeFilters > 0 && "on")}
-            onClick={(e) => setFilterMenu(filterMenu ? null : e.currentTarget)}
-          >
-            <ListFilter size={14} /> 筛选{activeFilters > 0 ? ` · ${activeFilters}` : ""}
-          </button>
+          {view.type !== "form" && (
+            <button
+              type="button"
+              className={cx("text-btn", activeFilters > 0 && "on")}
+              onClick={(e) => setFilterMenu(filterMenu ? null : e.currentTarget)}
+            >
+              <ListFilter size={14} /> 筛选{activeFilters > 0 ? ` · ${activeFilters}` : ""}
+            </button>
+          )}
           {view.type === "board" && selects.length > 0 && (
             <label className="db-select">
               分组
               <select
                 value={selects.find((p) => p.id === view.groupBy)?.id ?? selects[0].id}
-                onChange={(e) => updateView(page, view.id, { groupBy: e.target.value })}
+                onChange={(e) => patchCurrentView({ groupBy: e.target.value })}
               >
                 {selects.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -217,12 +282,54 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
               </select>
             </label>
           )}
+          {(view.type === "table" || view.type === "list") && groupableProps.length > 0 && (
+            <label className="db-select">
+              分组
+              <select
+                value={groupableProps.some((p) => p.id === view.groupBy) ? (view.groupBy ?? "") : ""}
+                onChange={(e) => patchCurrentView({ groupBy: e.target.value || null, collapsedGroups: [] })}
+              >
+                <option value="">不分组</option>
+                {groupableProps.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {view.type === "gallery" && (
+            <>
+              <label className="db-select">
+                卡片
+                <select
+                  value={view.cardSize ?? "medium"}
+                  onChange={(e) => patchCurrentView({ cardSize: e.target.value as "small" | "medium" | "large" })}
+                >
+                  <option value="small">紧凑</option>
+                  <option value="medium">适中</option>
+                  <option value="large">大图</option>
+                </select>
+              </label>
+              <label className="db-select">
+                预览
+                <select
+                  value={view.cardCover ?? "cover"}
+                  onChange={(e) => patchCurrentView({ cardCover: e.target.value as "cover" | "content" | "none" })}
+                >
+                  <option value="cover">页面封面</option>
+                  <option value="content">属性摘要</option>
+                  <option value="none">无封面</option>
+                </select>
+              </label>
+            </>
+          )}
           {usesDate && dates.length > 0 && (
             <label className="db-select">
               {view.type === "timeline" ? "开始" : "日期"}
               <select
                 value={calendarDate?.id}
-                onChange={(e) => updateView(page, view.id, { dateProp: e.target.value })}
+                onChange={(e) => patchCurrentView({ dateProp: e.target.value })}
               >
                 {dates.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -237,7 +344,7 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
               结束
               <select
                 value={dates.some((p) => p.id === view.endProp) ? (view.endProp ?? "") : ""}
-                onChange={(e) => updateView(page, view.id, { endProp: e.target.value || null })}
+                onChange={(e) => patchCurrentView({ endProp: e.target.value || null })}
               >
                 <option value="">不设（只占一天）</option>
                 {dates
@@ -250,16 +357,28 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
               </select>
             </label>
           )}
+          {view.type !== "form" && view.type !== "chart" && (
+            <button
+              type="button"
+              className={cx("text-btn", view.sort && "on")}
+              onClick={(e) => setSortMenu(sortMenu ? null : e.currentTarget)}
+            >
+              <ArrowUpDown size={14} /> {sortName ? `按${sortName}${view.sort?.dir === "asc" ? "升序" : "降序"}` : "排序"}
+            </button>
+          )}
           <button
             type="button"
-            className={cx("text-btn", view.sort && "on")}
-            onClick={(e) => setSortMenu(sortMenu ? null : e.currentTarget)}
+            className={cx("text-btn", activeAutoCount > 0 && "on")}
+            title="配置子任务层级、时间轴前后置依赖与数据库自动化规则"
+            onClick={(e) => setAutoMenu(autoMenu ? null : e.currentTarget)}
           >
-            <ArrowUpDown size={14} /> {sortName ? `按${sortName}${view.sort?.dir === "asc" ? "升序" : "降序"}` : "排序"}
+            <Zap size={14} /> 自动化{activeAutoCount > 0 ? ` · ${activeAutoCount}` : ""}
           </button>
-          <button type="button" className="primary-btn small" onClick={addFromToolbar}>
-            <Plus size={15} /> 新建
-          </button>
+          {view.type !== "form" && (
+            <button type="button" className="primary-btn small" onClick={addFromToolbar}>
+              <Plus size={15} /> 新建
+            </button>
+          )}
         </div>
       </div>
 
@@ -272,7 +391,8 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
           allRows={allRows}
           focusRowId={focusRowId}
           onEditDone={() => setFocusRowId(null)}
-          onAddRow={() => void addRow()}
+          onPatchView={patchCurrentView}
+          onAddRow={(p) => void addRow(p)}
         />
       ) : view.type === "board" ? (
         <BoardView
@@ -286,11 +406,14 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
         />
       ) : view.type === "list" ? (
         <ListView
+          db={db}
+          view={view}
           rows={rows}
           defs={shownDefs}
           editingId={focusRowId}
           onEditDone={() => setFocusRowId(null)}
-          onCreate={() => void addRow()}
+          onPatchView={patchCurrentView}
+          onCreate={(p) => void addRow(p)}
         />
       ) : view.type === "gallery" ? (
         <GalleryView
@@ -307,7 +430,18 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
           db={db}
           view={view}
           rows={rows}
+          onPatchView={patchCurrentView}
           onCreate={(dateProp, date) => void addRow({ [dateProp]: date })}
+        />
+      ) : view.type === "chart" ? (
+        <ChartView db={db} view={view} rows={rows} onPatchView={patchCurrentView} />
+      ) : view.type === "form" ? (
+        <FormView
+          page={page}
+          db={db}
+          view={view}
+          onPatchView={patchCurrentView}
+          onSubmitRow={(title, props) => addRow(props, title)}
         />
       ) : (
         <CalendarView
@@ -321,8 +455,12 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
         />
       )}
 
-      {rows.length === 0 && allRows.length > 0 && (query || activeFilters > 0) && (
+      {view.type !== "form" && rows.length === 0 && allRows.length > 0 && (query || activeFilters > 0) && (
         <div className="db-no-match">{query ? `没有符合“${query}”的行` : "没有符合筛选条件的行"}</div>
+      )}
+
+      {autoMenu && (
+        <AutomationsMenu anchor={autoMenu} page={page} db={db} onClose={() => setAutoMenu(null)} />
       )}
 
       {propsMenu && (
@@ -344,18 +482,24 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
           <MenuItem
             icon={<Eye size={15} />}
             label="全部显示"
-            onClick={() => updateView(page, view.id, { hiddenProps: [] })}
+            onClick={() => patchCurrentView({ hiddenProps: [] })}
           />
           <MenuItem
             icon={<EyeOff size={15} />}
             label="全部隐藏"
-            onClick={() => updateView(page, view.id, { hiddenProps: db.properties.map((p) => p.id) })}
+            onClick={() => patchCurrentView({ hiddenProps: db.properties.map((p) => p.id) })}
           />
         </Popover>
       )}
 
       {filterMenu && (
-        <FilterMenu anchor={filterMenu} page={page} db={db} view={view} onClose={() => setFilterMenu(null)} />
+        <FilterMenu
+          anchor={filterMenu}
+          db={db}
+          view={view}
+          onPatchView={patchCurrentView}
+          onClose={() => setFilterMenu(null)}
+        />
       )}
 
       {tabMenu && (
@@ -366,7 +510,7 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
             onFocus={(e) => e.target.select()}
             value={view.name}
             aria-label="视图名称"
-            onChange={(e) => updateView(page, view.id, { name: e.target.value })}
+            onChange={(e) => patchCurrentView({ name: e.target.value })}
             onKeyDown={(e) => {
               if (!e.nativeEvent.isComposing && e.key === "Enter") setTabMenu(null);
             }}
@@ -379,7 +523,7 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
             onClick={() => {
               setTabMenu(null);
               if (db.views.length <= 1) return;
-              updateDatabase(page, (d) => ({ ...d, views: d.views.filter((v) => v.id !== view.id) }));
+              mutateViews((views) => views.filter((v) => v.id !== view.id));
             }}
           />
         </Popover>
@@ -402,18 +546,20 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
             <select
               value={view.sort?.propId ?? ""}
               onChange={(e) =>
-                updateView(page, view.id, {
+                patchCurrentView({
                   sort: e.target.value ? { propId: e.target.value, dir: view.sort?.dir ?? "asc" } : null,
                 })
               }
             >
               <option value="">手动顺序</option>
               <option value="title">名称</option>
-              {db.properties.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
+              {db.properties
+                .filter((p) => p.type !== "button")
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
             </select>
           </label>
           {view.sort && (
@@ -422,7 +568,7 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
               <select
                 value={view.sort.dir}
                 onChange={(e) =>
-                  updateView(page, view.id, {
+                  patchCurrentView({
                     sort: { propId: view.sort!.propId, dir: e.target.value as "asc" | "desc" },
                   })
                 }

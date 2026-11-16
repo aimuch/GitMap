@@ -1,130 +1,228 @@
-import { Plus, X } from "lucide-react";
-import type { DatabaseDef, FilterOp, FilterRule, PageMeta, ViewDef } from "../../../shared/types";
-import { filterOps, needsValue, newFilter, updateView } from "../../db";
+import { FolderPlus, Plus, X } from "lucide-react";
+import type { DatabaseDef, FilterGroup, FilterOp, FilterRule, ViewDef } from "../../../shared/types";
+import { filterOps, needsValue, newFilter, shortId } from "../../db";
 import { Popover } from "../Popover";
 
 interface Props {
   anchor: HTMLElement;
-  page: PageMeta;
   db: DatabaseDef;
   view: ViewDef;
+  onPatchView: (patch: Partial<ViewDef>) => void;
   onClose: () => void;
 }
 
-/** 按属性筛选的面板：每行一个条件（属性 + 关系 + 值）。 */
-export function FilterMenu({ anchor, page, db, view, onClose }: Props) {
+/** 支持多层 AND / OR 条件组的筛选面板 */
+export function FilterMenu({ anchor, db, view, onPatchView, onClose }: Props) {
   const rules = view.filters ?? [];
-  const setRules = (filters: FilterRule[]) => updateView(page, view.id, { filters });
-  const patch = (id: string, change: Partial<FilterRule>) =>
+  const groups = view.filterGroups ?? [];
+
+  const setRules = (filters: FilterRule[]) => onPatchView({ filters });
+  const setGroups = (filterGroups: FilterGroup[]) => onPatchView({ filterGroups });
+
+  const patchRule = (id: string, change: Partial<FilterRule>) =>
     setRules(rules.map((r) => (r.id === id ? { ...r, ...change } : r)));
+
+  const patchGroupRule = (groupId: string, ruleId: string, change: Partial<FilterRule>) =>
+    setGroups(
+      groups.map((g) =>
+        g.id === groupId
+          ? { ...g, rules: g.rules.map((r) => (r.id === ruleId ? { ...r, ...change } : r)) }
+          : g,
+      ),
+    );
+
+  const addGroup = () => {
+    setGroups([...groups, { id: shortId(), mode: "or", rules: [newFilter(db)] }]);
+  };
+
+  const totalCount = rules.length + groups.length;
 
   return (
     <Popover anchor={anchor} onClose={onClose} align="end" className="filter-menu">
-      {rules.length === 0 && <div className="filter-empty">还没有筛选条件。添加一个，只显示符合条件的行。</div>}
+      {totalCount === 0 && (
+        <div className="filter-empty">还没有筛选条件。可添加单条条件，或嵌套“且 / 或”条件组。</div>
+      )}
 
-      {rules.length > 1 && (
+      {totalCount > 1 && (
         <label className="db-select filter-mode">
-          显示满足
+          外层关系：满足
           <select
             value={view.filterMode ?? "and"}
-            onChange={(e) => updateView(page, view.id, { filterMode: e.target.value as "and" | "or" })}
+            onChange={(e) => onPatchView({ filterMode: e.target.value as "and" | "or" })}
           >
-            <option value="and">全部条件</option>
-            <option value="or">任一条件</option>
+            <option value="and">全部条件与条件组（AND）</option>
+            <option value="or">任一条件或条件组（OR）</option>
           </select>
-          的行
         </label>
       )}
 
-      {rules.map((rule) => {
-        const def = db.properties.find((p) => p.id === rule.propId);
-        const type = def?.type ?? "title";
-        const ops = filterOps(type);
-        return (
-          <div key={rule.id} className="filter-rule">
+      {rules.map((rule) => (
+        <RuleRow
+          key={rule.id}
+          db={db}
+          rule={rule}
+          onPatch={(change) => patchRule(rule.id, change)}
+          onRemove={() => setRules(rules.filter((r) => r.id !== rule.id))}
+        />
+      ))}
+
+      {groups.map((group) => (
+        <div key={group.id} className="filter-group-box">
+          <div className="filter-group-head">
+            <span>条件组内满足</span>
             <select
-              aria-label="属性"
-              value={def ? def.id : "title"}
-              onChange={(e) => {
-                const next = db.properties.find((p) => p.id === e.target.value);
-                // 换属性后，原来的关系和值多半不适用，重置
-                patch(rule.id, {
-                  propId: e.target.value,
-                  op: filterOps(next?.type ?? "title")[0].op,
-                  value: "",
-                });
-              }}
+              value={group.mode}
+              onChange={(e) =>
+                setGroups(
+                  groups.map((g) => (g.id === group.id ? { ...g, mode: e.target.value as "and" | "or" } : g)),
+                )
+              }
             >
-              <option value="title">名称</option>
-              {db.properties.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
+              <option value="and">全部（且 AND）</option>
+              <option value="or">任一（或 OR）</option>
             </select>
-            <select
-              aria-label="条件"
-              value={rule.op}
-              onChange={(e) => patch(rule.id, { op: e.target.value as FilterOp })}
-            >
-              {ops.map((o) => (
-                <option key={o.op} value={o.op}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            {needsValue(rule.op) ? (
-              type === "select" || type === "multiSelect" ? (
-                <select
-                  aria-label="值"
-                  className="filter-value"
-                  value={rule.value ?? ""}
-                  onChange={(e) => patch(rule.id, { value: e.target.value })}
-                >
-                  <option value="">选择选项…</option>
-                  {def?.options?.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  aria-label="值"
-                  className="filter-value"
-                  type={type === "date" ? "date" : "text"}
-                  inputMode={type === "number" ? "decimal" : undefined}
-                  placeholder={type === "number" ? "数字" : "输入内容…"}
-                  value={rule.value ?? ""}
-                  onChange={(e) => patch(rule.id, { value: e.target.value })}
-                />
-              )
-            ) : (
-              <span className="filter-value" />
-            )}
             <button
               type="button"
-              className="icon-btn small"
-              title="删除这个条件"
-              aria-label="删除这个条件"
-              onClick={() => setRules(rules.filter((r) => r.id !== rule.id))}
+              className="text-btn small danger"
+              onClick={() => setGroups(groups.filter((g) => g.id !== group.id))}
             >
-              <X size={14} />
+              删除组
             </button>
           </div>
-        );
-      })}
+          {group.rules.map((rule) => (
+            <RuleRow
+              key={rule.id}
+              db={db}
+              rule={rule}
+              onPatch={(change) => patchGroupRule(group.id, rule.id, change)}
+              onRemove={() => {
+                const nextRules = group.rules.filter((r) => r.id !== rule.id);
+                if (nextRules.length === 0) setGroups(groups.filter((g) => g.id !== group.id));
+                else setGroups(groups.map((g) => (g.id === group.id ? { ...g, rules: nextRules } : g)));
+              }}
+            />
+          ))}
+          <button
+            type="button"
+            className="text-btn small"
+            onClick={() =>
+              setGroups(
+                groups.map((g) => (g.id === group.id ? { ...g, rules: [...g.rules, newFilter(db)] } : g)),
+              )
+            }
+          >
+            <Plus size={13} /> 组内添加条件
+          </button>
+        </div>
+      ))}
 
       <div className="filter-actions">
         <button type="button" className="text-btn" onClick={() => setRules([...rules, newFilter(db)])}>
-          <Plus size={14} /> 添加筛选条件
+          <Plus size={14} /> 添加条件
         </button>
-        {rules.length > 0 && (
-          <button type="button" className="text-btn danger" onClick={() => setRules([])}>
+        <button type="button" className="text-btn" onClick={addGroup}>
+          <FolderPlus size={14} /> 添加条件组
+        </button>
+        {totalCount > 0 && (
+          <button
+            type="button"
+            className="text-btn danger"
+            onClick={() => onPatchView({ filters: [], filterGroups: [] })}
+          >
             清除全部
           </button>
         )}
       </div>
     </Popover>
+  );
+}
+
+function RuleRow({
+  db,
+  rule,
+  onPatch,
+  onRemove,
+}: {
+  db: DatabaseDef;
+  rule: FilterRule;
+  onPatch: (change: Partial<FilterRule>) => void;
+  onRemove: () => void;
+}) {
+  const def = db.properties.find((p) => p.id === rule.propId);
+  const type = def?.type ?? "title";
+  const ops = filterOps(type);
+  return (
+    <div className="filter-rule">
+      <select
+        aria-label="属性"
+        value={def ? def.id : "title"}
+        onChange={(e) => {
+          const next = db.properties.find((p) => p.id === e.target.value);
+          onPatch({
+            propId: e.target.value,
+            op: filterOps(next?.type ?? "title")[0].op,
+            value: "",
+          });
+        }}
+      >
+        <option value="title">名称</option>
+        {db.properties
+          .filter((p) => p.type !== "button")
+          .map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+      </select>
+      <select
+        aria-label="条件"
+        value={rule.op}
+        onChange={(e) => onPatch({ op: e.target.value as FilterOp })}
+      >
+        {ops.map((o) => (
+          <option key={o.op} value={o.op}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {needsValue(rule.op) ? (
+        type === "select" || type === "multiSelect" ? (
+          <select
+            aria-label="值"
+            className="filter-value"
+            value={rule.value ?? ""}
+            onChange={(e) => onPatch({ value: e.target.value })}
+          >
+            <option value="">选择选项…</option>
+            {def?.options?.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            aria-label="值"
+            className="filter-value"
+            type={type === "date" ? "date" : "text"}
+            inputMode={type === "number" ? "decimal" : undefined}
+            placeholder={type === "number" ? "数字" : "输入内容…"}
+            value={rule.value ?? ""}
+            onChange={(e) => onPatch({ value: e.target.value })}
+          />
+        )
+      ) : (
+        <span className="filter-value" />
+      )}
+      <button
+        type="button"
+        className="icon-btn small"
+        title="删除这个条件"
+        aria-label="删除这个条件"
+        onClick={onRemove}
+      >
+        <X size={14} />
+      </button>
+    </div>
   );
 }

@@ -1,21 +1,34 @@
-import { useEffect, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowDown, ArrowUp, Check, FileText, GripVertical, PanelRightOpen, Plus, Trash2 } from "lucide-react";
-import type { CalcFn, DatabaseDef, PageMeta, PropertyDef, PropType, ViewDef } from "../../../shared/types";
+import { Fragment, useEffect, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ChevronRight,
+  CornerDownRight,
+  FileText,
+  GripVertical,
+  PanelRightOpen,
+  Plus,
+  Trash2,
+} from "lucide-react";
+import type { CalcFn, DatabaseDef, PageMeta, PropertyDef, PropType, PropValue, ViewDef } from "../../../shared/types";
 import {
   PROP_TYPES,
+  SUB_PARENT_KEY,
   addProperty,
+  buildSubItemTree,
   calcOptionsFor,
   calculateColumn,
   changePropertyType,
+  groupRowsByProp,
   removeProperty,
   updateProperty,
-  updateView,
   visibleProperties,
 } from "../../db";
 import { endDragSession, getDraggedRowForDb, startDbRowDrag } from "../../machines";
 import { movePage, navigate, setPeekRowId, trashPage, updatePage } from "../../store";
 import { MenuDivider, MenuItem, Popover, cx } from "../Popover";
-import { PropIcon, PropertyCell, PropertyConfig } from "./cells";
+import { PropIcon, PropertyCell, PropertyConfig, Tag } from "./cells";
 
 interface Props {
   page: PageMeta;
@@ -26,18 +39,21 @@ interface Props {
   allRows: PageMeta[];
   focusRowId: string | null;
   onEditDone: () => void;
-  onAddRow: () => void;
+  onPatchView: (patch: Partial<ViewDef>) => void;
+  onAddRow: (props?: Record<string, PropValue>) => void;
 }
 
 const MIN_WIDTH = 80;
 
-export function TableView({ page, db, view, rows, allRows, focusRowId, onEditDone, onAddRow }: Props) {
+export function TableView({ page, db, view, rows, allRows, focusRowId, onEditDone, onPatchView, onAddRow }: Props) {
   const [menu, setMenu] = useState<{ anchor: HTMLElement; propId: string } | null>(null);
   const [addAnchor, setAddAnchor] = useState<HTMLElement | null>(null);
   const [live, setLive] = useState<Record<string, number>>({});
   const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
+  const [collapsedSubs, setCollapsedSubs] = useState<Set<string>>(() => new Set());
   const shownProps = visibleProperties(db, view);
   const menuDef = menu ? db.properties.find((p) => p.id === menu.propId) : undefined;
+  const collapsedGroups = new Set(view.collapsedGroups ?? []);
 
   const track = (key: string, fallback: string) => {
     const w = live[key] ?? view.widths?.[key];
@@ -66,7 +82,7 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onEditDon
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onUp);
       document.body.classList.remove("resizing");
-      updateView(page, view.id, { widths: { ...view.widths, [key]: width } });
+      onPatchView({ widths: { ...view.widths, [key]: width } });
       setLive((prev) => {
         const { [key]: _done, ...rest } = prev;
         return rest;
@@ -76,7 +92,7 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onEditDon
     handle.addEventListener("pointerup", onUp);
   };
 
-  const canReorder = !view.sort;
+  const canReorder = !view.sort && !view.groupBy;
 
   const onRowDragOver = (row: PageMeta) => (e: DragEvent<HTMLDivElement>) => {
     const draggingRow = getDraggedRowForDb(page.id);
@@ -104,7 +120,81 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onEditDon
     setMenu(menu?.propId === propId ? null : { anchor, propId });
 
   const setCalc = (key: string, fn: CalcFn) => {
-    updateView(page, view.id, { calculations: { ...(view.calculations ?? {}), [key]: fn } });
+    onPatchView({ calculations: { ...(view.calculations ?? {}), [key]: fn } });
+  };
+
+  const toggleGroupCollapse = (groupKey: string) => {
+    const next = collapsedGroups.has(groupKey)
+      ? (view.collapsedGroups ?? []).filter((k) => k !== groupKey)
+      : [...(view.collapsedGroups ?? []), groupKey];
+    onPatchView({ collapsedGroups: next });
+  };
+
+  const toggleSubCollapse = (rowId: string) => {
+    setCollapsedSubs((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  };
+
+  const groups = groupRowsByProp(rows, db, view.groupBy);
+
+  const renderRowList = (list: PageMeta[]) => {
+    const items = db.subItemsEnabled
+      ? buildSubItemTree(list, collapsedSubs)
+      : list.map((row) => ({ row, depth: 0, childCount: 0 }));
+
+    return items.map(({ row, depth, childCount }) => (
+      <div
+        key={row.id}
+        className={cx("db-row", dropAt?.id === row.id && (dropAt.after ? "drop-after" : "drop-before"))}
+        role="row"
+        onDragOver={onRowDragOver(row)}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null);
+        }}
+        onDrop={onRowDrop(row)}
+      >
+        <TitleCell
+          dbId={page.id}
+          row={row}
+          depth={depth}
+          childCount={childCount}
+          subCollapsed={collapsedSubs.has(row.id)}
+          subItemsEnabled={Boolean(db.subItemsEnabled)}
+          onToggleSub={() => toggleSubCollapse(row.id)}
+          onAddSubItem={() => {
+            setCollapsedSubs((prev) => {
+              const next = new Set(prev);
+              next.delete(row.id);
+              return next;
+            });
+            onAddRow({ [SUB_PARENT_KEY]: row.id });
+          }}
+          autoFocus={row.id === focusRowId}
+          canReorder={canReorder}
+          onEditDone={row.id === focusRowId ? onEditDone : undefined}
+        />
+        {shownProps.map((def) => (
+          <div key={def.id} className="db-td" role="cell">
+            <PropertyCell row={row} def={def} dbPage={page} />
+          </div>
+        ))}
+        <div className="db-td db-td-tail">
+          <button
+            type="button"
+            className="icon-btn small"
+            title="移到回收站"
+            aria-label={`把“${row.title || "无标题"}”移到回收站`}
+            onClick={() => void trashPage(row.id)}
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+    ));
   };
 
   return (
@@ -151,42 +241,35 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onEditDon
           </button>
         </div>
 
-        {rows.map((row) => (
-          <div
-            key={row.id}
-            className={cx("db-row", dropAt?.id === row.id && (dropAt.after ? "drop-after" : "drop-before"))}
-            role="row"
-            onDragOver={onRowDragOver(row)}
-            onDragLeave={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null);
-            }}
-            onDrop={onRowDrop(row)}
-          >
-            <TitleCell
-              dbId={page.id}
-              row={row}
-              autoFocus={row.id === focusRowId}
-              canReorder={canReorder}
-              onEditDone={row.id === focusRowId ? onEditDone : undefined}
-            />
-            {shownProps.map((def) => (
-              <div key={def.id} className="db-td" role="cell">
-                <PropertyCell row={row} def={def} dbPage={page} />
-              </div>
-            ))}
-            <div className="db-td db-td-tail">
-              <button
-                type="button"
-                className="icon-btn small"
-                title="移到回收站"
-                aria-label={`把“${row.title || "无标题"}”移到回收站`}
-                onClick={() => void trashPage(row.id)}
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          </div>
-        ))}
+        {groups
+          ? groups.map((g) => {
+              const isCollapsed = collapsedGroups.has(g.key);
+              return (
+                <Fragment key={g.key}>
+                  <div className="db-group-bar">
+                    <button
+                      type="button"
+                      className="db-group-toggle"
+                      onClick={() => toggleGroupCollapse(g.key)}
+                    >
+                      <ChevronRight size={14} className={cx("db-group-chevron", !isCollapsed && "open")} />
+                      {g.option ? <Tag option={g.option} /> : <span className="db-group-name">{g.label}</span>}
+                      <span className="board-count">{g.rows.length}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-btn small"
+                      title={`在“${g.label}”下新建`}
+                      onClick={() => onAddRow(g.defaultProps)}
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                  {!isCollapsed && renderRowList(g.rows)}
+                </Fragment>
+              );
+            })
+          : renderRowList(rows)}
 
         <div className="db-row db-calc-row" role="row">
           <CalcCell
@@ -210,7 +293,7 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onEditDon
         </div>
       </div>
 
-      <button type="button" className="db-add-row" onClick={onAddRow}>
+      <button type="button" className="db-add-row" onClick={() => onAddRow()}>
         <Plus size={15} /> 新建
       </button>
 
@@ -221,6 +304,7 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onEditDon
           def={menuDef}
           view={view}
           allRows={allRows}
+          onPatchView={onPatchView}
           onClose={() => setMenu(null)}
         />
       )}
@@ -257,6 +341,7 @@ function CalcCell({
   fn: CalcFn;
   onChange: (fn: CalcFn) => void;
 }) {
+  if (def?.type === "button") return <div className="db-calc-cell" />;
   const options = calcOptionsFor(def);
   const result = calculateColumn(rows, def, fn);
   return (
@@ -271,11 +356,7 @@ function CalcCell({
           <span className="db-calc-placeholder">计算</span>
         )}
       </span>
-      <select
-        key={colKey}
-        value={fn}
-        onChange={(e) => onChange(e.target.value as CalcFn)}
-      >
+      <select key={colKey} value={fn} onChange={(e) => onChange(e.target.value as CalcFn)}>
         {options.map((o) => (
           <option key={o.fn} value={o.fn}>
             {o.label}
@@ -294,12 +375,24 @@ function SortMark({ view, propId }: { view: ViewDef; propId: string }) {
 function TitleCell({
   dbId,
   row,
+  depth,
+  childCount,
+  subCollapsed,
+  subItemsEnabled,
+  onToggleSub,
+  onAddSubItem,
   autoFocus,
   canReorder,
   onEditDone,
 }: {
   dbId: string;
   row: PageMeta;
+  depth: number;
+  childCount: number;
+  subCollapsed: boolean;
+  subItemsEnabled: boolean;
+  onToggleSub: () => void;
+  onAddSubItem: () => void;
   autoFocus: boolean;
   canReorder: boolean;
   onEditDone?: () => void;
@@ -310,7 +403,7 @@ function TitleCell({
   }, [autoFocus]);
 
   return (
-    <div className="db-td db-td-title" role="cell">
+    <div className="db-td db-td-title" role="cell" style={depth > 0 ? { paddingLeft: 6 + depth * 20 } : undefined}>
       {canReorder && (
         <span
           className="db-grip"
@@ -331,6 +424,17 @@ function TitleCell({
           <GripVertical size={14} />
         </span>
       )}
+      {subItemsEnabled && (
+        <button
+          type="button"
+          className={cx("tree-toggle", !subCollapsed && childCount > 0 && "open", childCount === 0 && "hidden")}
+          disabled={childCount === 0}
+          aria-label={subCollapsed ? "展开子任务" : "收起子任务"}
+          onClick={onToggleSub}
+        >
+          <ChevronRight size={13} />
+        </button>
+      )}
       <span className="tree-icon">{row.icon ?? <FileText size={15} />}</span>
       <input
         ref={ref}
@@ -348,6 +452,16 @@ function TitleCell({
           }
         }}
       />
+      {subItemsEnabled && (
+        <button
+          type="button"
+          className="db-open db-add-sub"
+          title="在此行下新建子项"
+          onClick={onAddSubItem}
+        >
+          <CornerDownRight size={11} /> 子项
+        </button>
+      )}
       <button
         type="button"
         className="db-open"
@@ -369,14 +483,15 @@ interface PropertyMenuProps {
   def: PropertyDef;
   view: ViewDef;
   allRows: PageMeta[];
+  onPatchView: (patch: Partial<ViewDef>) => void;
   onClose: () => void;
 }
 
-function PropertyMenu({ anchor, page, def, view, allRows, onClose }: PropertyMenuProps) {
+function PropertyMenu({ anchor, page, def, view, allRows, onPatchView, onClose }: PropertyMenuProps) {
   const [picking, setPicking] = useState(false);
   const sortBy = (dir: "asc" | "desc") => {
     const same = view.sort?.propId === def.id && view.sort.dir === dir;
-    updateView(page, view.id, { sort: same ? null : { propId: def.id, dir } });
+    onPatchView({ sort: same ? null : { propId: def.id, dir } });
     onClose();
   };
   const setType = (type: PropType) => {

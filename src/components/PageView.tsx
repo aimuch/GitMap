@@ -514,17 +514,90 @@ function TrashBanner({ page }: { page: PageMeta }) {
 
 function Cover({ page, editable }: { page: PageMeta; editable: boolean }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [repositioning, setRepositioning] = useState(false);
+  const [dragY, setDragY] = useState<number>(page.coverY ?? 50);
+
+  const isUploadedImg = Boolean(page.cover?.startsWith("/uploads/"));
+  const activeY = repositioning ? dragY : (page.coverY ?? 50);
+
+  const startDragCover = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!repositioning) return;
+    e.preventDefault();
+    const startClientY = e.clientY;
+    const startVal = dragY;
+    const rectH = e.currentTarget.getBoundingClientRect().height || 200;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent) => {
+      const delta = ((startClientY - ev.clientY) / rectH) * 100;
+      setDragY(Math.max(0, Math.min(100, Math.round(startVal + delta))));
+    };
+    const onUp = () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+  };
+
   return (
-    <div className={cx("cover", anchor && "picking")} style={coverStyle(page.cover!)}>
+    <div
+      className={cx("cover", anchor && "picking", repositioning && "repositioning")}
+      style={coverStyle(page.cover!, activeY)}
+      onPointerDown={startDragCover}
+    >
+      {repositioning && (
+        <div className="cover-reposition-tip">上下拖动图片调整显示焦点</div>
+      )}
       {editable && (
-        <div className="cover-actions">
-          <button type="button" onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}>
-            更换封面
-          </button>
+        <div className={cx("cover-actions", repositioning && "visible")} onPointerDown={(e) => e.stopPropagation()}>
+          {repositioning ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  updatePage(page.id, { coverY: dragY });
+                  setRepositioning(false);
+                }}
+              >
+                保存位置
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDragY(page.coverY ?? 50);
+                  setRepositioning(false);
+                }}
+              >
+                取消
+              </button>
+            </>
+          ) : (
+            <>
+              {isUploadedImg && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDragY(page.coverY ?? 50);
+                    setRepositioning(true);
+                  }}
+                >
+                  调整位置
+                </button>
+              )}
+              <button type="button" onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}>
+                更换封面
+              </button>
+            </>
+          )}
         </div>
       )}
       {anchor && (
-        <CoverPicker anchor={anchor} onPick={(cover) => updatePage(page.id, { cover })} onClose={() => setAnchor(null)} />
+        <CoverPicker
+          anchor={anchor}
+          onPick={(cover) => updatePage(page.id, { cover, coverY: 50 })}
+          onClose={() => setAnchor(null)}
+        />
       )}
     </div>
   );

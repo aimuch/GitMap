@@ -20,14 +20,19 @@ import {
 } from "@blocknote/react";
 import {
   Bookmark,
+  Columns2,
+  Columns3,
   FilePlus2,
   FileText,
   FileX2,
+  GitBranch,
+  Globe,
   Languages,
   Lightbulb,
   Link2,
   ListChecks,
   ListTree,
+  MousePointerClick,
   PanelTop,
   RefreshCw,
   Sigma,
@@ -36,8 +41,18 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { defaultDatabase, shortId } from "../db";
+import { MathRenderer } from "../math";
 import { AiInlineBar } from "./AiInlineBar";
-import { createBookmarkBlock, createCalloutBlock, createEquationBlock, createTocBlock } from "./blocks";
+import {
+  createActionButtonBlock,
+  createBookmarkBlock,
+  createCalloutBlock,
+  createEmbedBlock,
+  createEquationBlock,
+  createMermaidBlock,
+  createTocBlock,
+} from "./blocks";
+import { createColumnsBlock, defaultColumns } from "./ColumnsBlock";
 import { createDatabaseBlock } from "./database/InlineDatabase";
 import { createSyncedBlock, registerNestedEditor } from "./SyncedBlock";
 import "@blocknote/core/fonts/inter.css";
@@ -53,7 +68,7 @@ import {
   useResolvedTheme,
   useStore,
 } from "../store";
-import { cx } from "./Popover";
+import { Popover, cx } from "./Popover";
 
 /** 行内的页面链接（@ 提及）。标题和图标始终取自最新的页面数据。 */
 function PageChip({ pageId }: { pageId: string }) {
@@ -77,6 +92,60 @@ function PageChip({ pageId }: { pageId: string }) {
   );
 }
 
+/** 行内数学公式芯片（如段落内嵌 E = mc^2 或 \frac{a}{b}），点击弹出实时预览公式编辑框 */
+function InlineMathChip({ latex, onChange }: { latex: string; onChange: (next: string) => void }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [draft, setDraft] = useState(latex);
+
+  useEffect(() => {
+    setDraft(latex);
+  }, [latex]);
+
+  const commit = () => {
+    onChange(draft.trim() || "x");
+    setAnchor(null);
+  };
+
+  return (
+    <>
+      <span
+        className="inline-math-chip"
+        role="button"
+        tabIndex={-1}
+        title="点击修改行内公式"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}
+      >
+        <MathRenderer latex={latex || "x"} />
+      </span>
+      {anchor && (
+        <Popover anchor={anchor} onClose={commit} className="inline-math-popover">
+          <div className="inline-math-editor">
+            <Sigma size={14} className="equation-icon" />
+            <input
+              autoFocus
+              value={draft}
+              placeholder="输入行内 LaTeX，如 E = mc^2 或 \frac{\alpha}{\beta}"
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (!e.nativeEvent.isComposing && e.key === "Enter") {
+                  e.preventDefault();
+                  commit();
+                }
+              }}
+            />
+          </div>
+          {draft.trim() && (
+            <div className="inline-math-preview">
+              <MathRenderer latex={draft} display />
+            </div>
+          )}
+        </Popover>
+      )}
+    </>
+  );
+}
+
 const pageMention = createReactInlineContentSpec(
   {
     type: "pageMention",
@@ -92,6 +161,23 @@ const pageMention = createReactInlineContentSpec(
   },
 );
 
+const inlineMath = createReactInlineContentSpec(
+  {
+    type: "inlineMath",
+    propSchema: { latex: { default: "E = mc^2" } },
+    content: "none",
+  },
+  {
+    render: ({ inlineContent, updateInlineContent }) => (
+      <InlineMathChip
+        latex={inlineContent.props.latex}
+        onChange={(latex) => updateInlineContent({ type: "inlineMath", props: { latex } })}
+      />
+    ),
+    toExternalHTML: ({ inlineContent }) => <code>{`$${inlineContent.props.latex}$`}</code>,
+  },
+);
+
 export const schema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
@@ -99,11 +185,15 @@ export const schema = BlockNoteSchema.create({
     callout: createCalloutBlock(),
     toc: createTocBlock(),
     equation: createEquationBlock(),
+    mermaid: createMermaidBlock(),
+    embed: createEmbedBlock(),
+    actionButton: createActionButtonBlock(),
+    columns: createColumnsBlock(),
     bookmark: createBookmarkBlock(),
     database: createDatabaseBlock(),
     synced: createSyncedBlock(),
   },
-  inlineContentSpecs: { ...defaultInlineContentSpecs, pageMention },
+  inlineContentSpecs: { ...defaultInlineContentSpecs, pageMention, inlineMath },
 });
 
 export type NoteEditor = typeof schema.BlockNoteEditor;
@@ -114,18 +204,20 @@ interface Props {
   onReady: (editor: NoteEditor | null) => void;
   /** 内容第一次被修改时调用 */
   onDirty?: () => void;
-  /** 同步块实时广播回调 */
+  /** 同步块或分栏内嵌编辑器的实时内容回调 */
   onContentSync?: (blocks: unknown[]) => void;
   /** 外部（如空白页“AI 帮我写”）触发打开内联 AI 的计数信号 */
   aiTrigger?: number;
-  /** 嵌在别的界面里（同步块、历史预览）：不提供新建子页面、数据库、同步块的命令 */
+  /** 嵌在别的界面里（同步块、分栏、历史预览）：不提供新建子页面、数据库、同步块的命令 */
   nested?: boolean;
 }
 
 export function Editor({ page, editable, onReady, onDirty, onContentSync, aiTrigger, nested }: Props) {
   const theme = useResolvedTheme();
   const pageId = page.id;
-  const pageTitle = useStore((s) => s.pages[pageId]?.title ?? page.title);
+  // 多列分栏内部的虚拟编辑器使用 __col_ 前缀，只通过 onContentSync 写回外层块，不直接请求后端页面接口
+  const isVirtualColumn = pageId.startsWith("__col_");
+  const pageTitle = useStore((s) => (isVirtualColumn ? "" : (s.pages[pageId]?.title ?? page.title)));
   const [aiBar, setAiBar] = useState<{
     selectedText: string;
     actionId?: string | null;
@@ -148,9 +240,9 @@ export function Editor({ page, editable, onReady, onDirty, onContentSync, aiTrig
     onReady(editor);
     return () => {
       onReady(null);
-      void flushPatch(pageId);
+      if (!isVirtualColumn) void flushPatch(pageId);
     };
-  }, [editor, onReady, pageId]);
+  }, [editor, onReady, pageId, isVirtualColumn]);
 
   useEffect(() => {
     if (aiTrigger && aiTrigger > 0 && editable && !nested) {
@@ -175,37 +267,97 @@ export function Editor({ page, editable, onReady, onDirty, onContentSync, aiTrig
         title: "提示框",
         subtext: "带图标和底色的重点提示块",
         aliases: ["callout", "tip", "alert", "note", "tishikuang", "高亮", "提示框"],
-        group: "常用扩展块",
+        group: "排版与扩展块",
         icon: <Lightbulb size={18} />,
         onItemClick: () => {
           insertOrUpdateBlockForSlashMenu(editor, { type: "callout", props: { icon: "💡", tone: "gray" } });
+        },
+      };
+      const cols2Item: DefaultReactSuggestionItem = {
+        title: "双栏布局（2 列）",
+        subtext: "左右两列并排编辑，可自由拖动分界线调整列宽",
+        aliases: ["columns", "2cols", "two", "fenlan", "shuanglan", "分栏", "两栏", "双栏", "多列"],
+        group: "排版与扩展块",
+        icon: <Columns2 size={18} />,
+        onItemClick: () => {
+          insertOrUpdateBlockForSlashMenu(editor, { type: "columns", props: { colsJson: defaultColumns(2) } });
+        },
+      };
+      const cols3Item: DefaultReactSuggestionItem = {
+        title: "三栏布局（3 列）",
+        subtext: "三列并排排版，适合看板卡片或对比说明",
+        aliases: ["columns", "3cols", "three", "sanlan", "分栏", "三栏", "三列"],
+        group: "排版与扩展块",
+        icon: <Columns3 size={18} />,
+        onItemClick: () => {
+          insertOrUpdateBlockForSlashMenu(editor, { type: "columns", props: { colsJson: defaultColumns(3) } });
         },
       };
       const tocItem: DefaultReactSuggestionItem = {
         title: "目录",
         subtext: "自动提取本页各级标题并生成跳转大纲",
         aliases: ["toc", "outline", "contents", "mulu", "dagang", "目录", "大纲"],
-        group: "常用扩展块",
+        group: "排版与扩展块",
         icon: <ListTree size={18} />,
         onItemClick: () => {
           insertOrUpdateBlockForSlashMenu(editor, { type: "toc" });
         },
       };
       const equationItem: DefaultReactSuggestionItem = {
-        title: "数学公式",
-        subtext: "插入独立排版的数学或 LaTeX 公式块",
+        title: "数学公式（独立块）",
+        subtext: "插入支持分式、根号、求和积分与矩阵排版的公式块",
         aliases: ["math", "latex", "equation", "formula", "gongshi", "公式", "数学"],
-        group: "常用扩展块",
+        group: "排版与扩展块",
         icon: <Sigma size={18} />,
         onItemClick: () => {
           insertOrUpdateBlockForSlashMenu(editor, { type: "equation", props: { latex: "" } });
         },
       };
+      const inlineMathItem: DefaultReactSuggestionItem = {
+        title: "行内数学公式",
+        subtext: "在当前段落文字中嵌入可编辑的数学公式（如 E=mc²）",
+        aliases: ["inlinemath", "math", "latex", "hangnei", "行内公式", "内联公式"],
+        group: "排版与扩展块",
+        icon: <Sigma size={18} />,
+        onItemClick: () => {
+          editor.insertInlineContent([{ type: "inlineMath", props: { latex: "E = mc^2" } }, " "]);
+        },
+      };
+      const mermaidItem: DefaultReactSuggestionItem = {
+        title: "Mermaid 流程图 / 时序图",
+        subtext: "用简洁代码实时生成流程图、时序图与饼图",
+        aliases: ["mermaid", "diagram", "flowchart", "sequence", "liuchengtu", "shixutu", "流程图", "时序图", "架构图"],
+        group: "排版与扩展块",
+        icon: <GitBranch size={18} />,
+        onItemClick: () => {
+          insertOrUpdateBlockForSlashMenu(editor, { type: "mermaid", props: { mode: "split" } });
+        },
+      };
+      const embedItem: DefaultReactSuggestionItem = {
+        title: "嵌入 PDF / 视频 / Figma",
+        subtext: "在页面内直接阅读本地/在线 PDF，或嵌入 Bilibili、YouTube、Figma",
+        aliases: ["embed", "pdf", "bilibili", "youtube", "figma", "iframe", "qianru", "嵌入", "内嵌"],
+        group: "排版与扩展块",
+        icon: <Globe size={18} />,
+        onItemClick: () => {
+          insertOrUpdateBlockForSlashMenu(editor, { type: "embed", props: { url: "" } });
+        },
+      };
+      const buttonBlockItem: DefaultReactSuggestionItem = {
+        title: "自定义动作按钮",
+        subtext: "点击一键插入带时间戳的待办记录、新建子页或唤起 AI",
+        aliases: ["button", "action", "anniu", "daka", "按钮", "动作按钮", "打卡"],
+        group: "排版与扩展块",
+        icon: <MousePointerClick size={18} />,
+        onItemClick: () => {
+          insertOrUpdateBlockForSlashMenu(editor, { type: "actionButton" });
+        },
+      };
       const bookmarkItem: DefaultReactSuggestionItem = {
         title: "网页书签",
         subtext: "抓取网页标题与摘要，生成可视书签卡片",
-        aliases: ["bookmark", "embed", "link", "url", "shuqian", "书签", "链接卡片"],
-        group: "常用扩展块",
+        aliases: ["bookmark", "link", "url", "shuqian", "书签", "链接卡片"],
+        group: "排版与扩展块",
         icon: <Bookmark size={18} />,
         onItemClick: () => {
           insertOrUpdateBlockForSlashMenu(editor, { type: "bookmark", props: { url: "" } });
@@ -214,7 +366,14 @@ export function Editor({ page, editable, onReady, onDirty, onContentSync, aiTrig
 
       if (nested) {
         return filterSuggestionItems(
-          [...getDefaultReactSlashMenuItems(editor), calloutItem, equationItem, bookmarkItem],
+          [
+            ...getDefaultReactSlashMenuItems(editor),
+            calloutItem,
+            equationItem,
+            inlineMathItem,
+            mermaidItem,
+            bookmarkItem,
+          ],
           query,
         );
       }
@@ -222,7 +381,7 @@ export function Editor({ page, editable, onReady, onDirty, onContentSync, aiTrig
       const aiItems: DefaultReactSuggestionItem[] = [
         {
           title: "AI 写作助手",
-          subtext: "起草、改写、翻译、头脑风暴（支持国产/国外/自定义模型）",
+          subtext: "起草、改写、翻译、头脑风暴（支持国产/海外/自定义模型）",
           aliases: ["ai", "gpt", "deepseek", "kimi", "qwen", "doubao", "claude", "xiezuo", "助手"],
           group: "AI 助手",
           icon: <Sparkles size={18} />,
@@ -277,10 +436,10 @@ export function Editor({ page, editable, onReady, onDirty, onContentSync, aiTrig
           navigate(id);
         },
       };
-      const dbAliases = ["database", "table", "board", "kanban", "calendar", "list", "shujuku", "biaoge", "rili", "表格", "看板", "日历", "列表"];
+      const dbAliases = ["database", "table", "board", "kanban", "calendar", "list", "chart", "form", "shujuku", "biaoge", "rili", "表格", "看板", "日历", "列表", "图表", "表单"];
       const inlineDatabase: DefaultReactSuggestionItem = {
         title: "数据库（内嵌）",
-        subtext: "在正文里直接放一个表格 / 看板 / 列表 / 日历",
+        subtext: "在正文里直接放一个表格 / 看板 / 图表 / 表单 / 日历",
         aliases: [...dbAliases, "inline", "neiqian", "数据库"],
         group: "页面与数据库",
         icon: <Table2 size={18} />,
@@ -313,7 +472,7 @@ export function Editor({ page, editable, onReady, onDirty, onContentSync, aiTrig
         pages.filter((p) => p.kind === "database" && !p.hidden),
       ).map((p) => ({
         title: `链接数据库：${p.title || "无标题"}`,
-        subtext: "把这个已有的数据库嵌到这里（可独立切换视图）",
+        subtext: "嵌入已有数据库（此处可独立保存专属视图、筛选与排序）",
         aliases: [...dbAliases, "link", "lianjie", "链接", "数据库"],
         group: "页面与数据库",
         icon: <Link2 size={18} />,
@@ -352,9 +511,15 @@ export function Editor({ page, editable, onReady, onDirty, onContentSync, aiTrig
       return filterSuggestionItems(
         [
           ...aiItems,
+          cols2Item,
+          cols3Item,
           calloutItem,
           tocItem,
           equationItem,
+          inlineMathItem,
+          mermaidItem,
+          embedItem,
+          buttonBlockItem,
           bookmarkItem,
           ...getDefaultReactSlashMenuItems(editor),
           subPage,
@@ -405,7 +570,7 @@ export function Editor({ page, editable, onReady, onDirty, onContentSync, aiTrig
       else editor.replaceBlocks(editor.document, parsed);
     }
     onDirty?.();
-    updatePage(pageId, { content: editor.document });
+    if (!isVirtualColumn) updatePage(pageId, { content: editor.document });
     setAiBar(null);
   };
 
@@ -445,7 +610,7 @@ export function Editor({ page, editable, onReady, onDirty, onContentSync, aiTrig
           if (!editable) return;
           onDirty?.();
           onContentSync?.(editor.document);
-          updatePage(pageId, { content: editor.document });
+          if (!isVirtualColumn) updatePage(pageId, { content: editor.document });
         }}
       >
         <SuggestionMenuController triggerCharacter="/" getItems={slashItems} />
@@ -455,5 +620,5 @@ export function Editor({ page, editable, onReady, onDirty, onContentSync, aiTrig
   );
 }
 
-// 同步块里嵌的也是这个编辑器；在这里登记，避免两个文件互相引用
+// 同步块和分栏块里嵌的也是这个编辑器；在这里登记，避免互相引用
 registerNestedEditor(Editor as unknown as Parameters<typeof registerNestedEditor>[0]);

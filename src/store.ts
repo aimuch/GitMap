@@ -110,7 +110,11 @@ const subscribe = (l: () => void) => {
 export const getState = () => state;
 
 export function useStore<T>(selector: (s: State) => T): T {
-  return useSyncExternalStore(subscribe, () => selector(state));
+  return useSyncExternalStore(
+    subscribe,
+    () => selector(state),
+    () => selector(state),
+  );
 }
 
 /* ---------- 请求 ---------- */
@@ -582,6 +586,7 @@ export function useResolvedTheme(): "light" | "dark" {
       return () => systemDark.removeEventListener("change", cb);
     },
     () => systemDark.matches,
+    () => systemDark.matches,
   );
   return theme === "system" ? (systemIsDark ? "dark" : "light") : theme;
 }
@@ -656,6 +661,7 @@ export function useRoute(): string | null {
       window.addEventListener("hashchange", cb);
       return () => window.removeEventListener("hashchange", cb);
     },
+    currentPageId,
     currentPageId,
   );
 }

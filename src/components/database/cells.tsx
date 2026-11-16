@@ -10,6 +10,7 @@ import {
   Hash,
   Link2,
   LoaderCircle,
+  MousePointerClick,
   Search,
   Sigma,
   Sparkles,
@@ -25,6 +26,7 @@ import {
   ROLLUP_FNS,
   cellValue,
   ensureOption,
+  executeRowActions,
   getDatabase,
   isComputed,
   relatedRows,
@@ -36,6 +38,7 @@ import { checkFormula } from "../../formula";
 import { fillRowWithAi } from "../../ai";
 import { navigate, setAiSettingsOpen, useStore, useTree } from "../../store";
 import { Popover, cx } from "../Popover";
+import { ActionStepsEditor } from "./AutomationsMenu";
 
 const TYPE_ICONS: Record<PropType | "title", typeof Type> = {
   title: ALargeSmall,
@@ -46,6 +49,7 @@ const TYPE_ICONS: Record<PropType | "title", typeof Type> = {
   date: Calendar,
   checkbox: SquareCheck,
   url: Link2,
+  button: MousePointerClick,
   relation: ArrowUpRight,
   rollup: Sigma,
   formula: SquareFunction,
@@ -84,6 +88,7 @@ function selectedOptions(value: PropValue | undefined, def: PropertyDef): Select
 
 /** 只读展示一个属性值（看板卡片上用）。空值返回 null。 */
 export function ValueDisplay({ value, def }: { value: PropValue | undefined; def: PropertyDef }) {
+  if (def.type === "button") return null;
   if (def.type === "relation") {
     const rows = relatedRows(value);
     if (rows.length === 0) return null;
@@ -192,6 +197,22 @@ export function PropertyCell({ row, def, dbPage }: CellProps) {
             onChange={(e) => setProp(row, def.id, e.target.checked)}
           />
         </label>
+      );
+    case "button":
+      return (
+        <div className="cell cell-button-wrap">
+          <button
+            type="button"
+            className="db-action-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              void executeRowActions(row, dbPage, def.buttonActions);
+            }}
+          >
+            <MousePointerClick size={12} />
+            <span>{def.buttonLabel || def.name || "执行"}</span>
+          </button>
+        </div>
       );
     case "date":
       return (
@@ -731,6 +752,28 @@ export function PropertyConfig({ dbPage, def, allRows }: { dbPage: PageMeta; def
             用 prop("属性名") 引用本行的属性；可用 if、round、min、max、concat、dateBetween、today 等函数。
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (def.type === "button") {
+    return (
+      <div className="prop-config">
+        <label>
+          按钮文字
+          <input
+            className="config-select"
+            value={def.buttonLabel ?? "执行"}
+            placeholder="例如：标记完成 / 延期一天"
+            onChange={(e) => updateProperty(dbPage, def.id, { buttonLabel: e.target.value })}
+          />
+        </label>
+        <div className="prop-config-note">点击该单元格按钮时依次执行：</div>
+        <ActionStepsEditor
+          db={db}
+          steps={def.buttonActions ?? []}
+          onChange={(buttonActions) => updateProperty(dbPage, def.id, { buttonActions })}
+        />
       </div>
     );
   }

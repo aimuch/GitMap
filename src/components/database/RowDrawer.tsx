@@ -113,7 +113,7 @@ export function RowDrawer({ id }: { id: string }) {
 
         <div className="drawer-scroll">
           {meta.cover && (
-            <div className="cover drawer-cover" style={coverStyle(meta.cover)}>
+            <div className="cover drawer-cover" style={coverStyle(meta.cover, meta.coverY)}>
               {editable && (
                 <div className="cover-actions">
                   <button type="button" onClick={(e) => setCoverAnchor(coverAnchor ? null : e.currentTarget)}>

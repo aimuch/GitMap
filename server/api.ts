@@ -104,7 +104,13 @@ function cleanDatabase(v: unknown): DatabaseDef | null {
   if (!v || typeof v !== "object") return null;
   const d = v as Partial<DatabaseDef>;
   if (!Array.isArray(d.properties) || !Array.isArray(d.views)) return null;
-  return { properties: d.properties, views: d.views };
+  return {
+    properties: d.properties,
+    views: d.views,
+    ...(typeof d.subItemsEnabled === "boolean" ? { subItemsEnabled: d.subItemsEnabled } : {}),
+    ...(d.dependencyProp === null || typeof d.dependencyProp === "string" ? { dependencyProp: d.dependencyProp } : {}),
+    ...(Array.isArray(d.automations) ? { automations: d.automations } : {}),
+  };
 }
 
 function cleanProps(v: unknown): Record<string, PropValue> | null {
@@ -124,7 +130,19 @@ function extractText(node: unknown, out: string[] = []): string[] {
   } else if (node && typeof node === "object") {
     const obj = node as Record<string, unknown>;
     if (typeof obj.text === "string") out.push(obj.text);
-    for (const key of ["content", "children", "rows", "cells"]) {
+    if (obj.props && typeof obj.props === "object") {
+      const p = obj.props as Record<string, unknown>;
+      if (typeof p.latex === "string" && p.latex) out.push(p.latex);
+      if (typeof p.code === "string" && p.code) out.push(p.code);
+      if (typeof p.colsJson === "string" && p.colsJson) {
+        try {
+          extractText(JSON.parse(p.colsJson), out);
+        } catch {
+          /* 忽略不合法的分栏 JSON */
+        }
+      }
+    }
+    for (const key of ["content", "children", "rows", "cells", "blocks"]) {
       const v = obj[key];
       if (typeof v === "string") out.push(v);
       else if (v) extractText(v, out);
@@ -402,6 +420,9 @@ class Store {
     if (typeof patch.title === "string") page.title = patch.title.slice(0, 2000);
     if (patch.icon === null || typeof patch.icon === "string") page.icon = patch.icon;
     if (patch.cover === null || typeof patch.cover === "string") page.cover = patch.cover;
+    if (typeof patch.coverY === "number" && Number.isFinite(patch.coverY)) {
+      page.coverY = Math.max(0, Math.min(100, Math.round(patch.coverY)));
+    }
     if (typeof patch.favorite === "boolean") page.favorite = patch.favorite;
     if (patch.kind === "page" || patch.kind === "database") page.kind = patch.kind;
     const database = cleanDatabase(patch.database);

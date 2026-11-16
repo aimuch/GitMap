@@ -12,7 +12,8 @@ export type PropType =
   | "url"
   | "relation"
   | "rollup"
-  | "formula";
+  | "formula"
+  | "button";
 
 export type RollupFn = "show" | "count" | "sum" | "avg" | "min" | "max";
 
@@ -39,6 +40,29 @@ export interface SelectOption {
   color: string;
 }
 
+export interface ActionStep {
+  id: string;
+  type: "set_prop" | "create_row";
+  /** set_prop 时目标属性 id */
+  propId?: string;
+  /** set_prop 时的目标值（日期属性支持 "$today" 代表当天） */
+  value?: PropValue;
+  /** create_row 时新建行的标题 */
+  title?: string;
+}
+
+export interface DatabaseAutomation {
+  id: string;
+  name: string;
+  enabled: boolean;
+  trigger: {
+    type: "row_created" | "prop_changed";
+    propId?: string;
+    value?: string;
+  };
+  actions: ActionStep[];
+}
+
 export interface PropertyDef {
   id: string;
   name: string;
@@ -52,6 +76,9 @@ export interface PropertyDef {
   formula?: string;
   /** AI 自动填充提示词（用于文本属性一键生成摘要、分类、翻译等） */
   aiPrompt?: string;
+  /** 按钮属性的按钮文字与点击动作 */
+  buttonLabel?: string;
+  buttonActions?: ActionStep[];
 }
 
 export type FilterOp =
@@ -79,18 +106,36 @@ export interface FilterRule {
   value?: string;
 }
 
-export type ViewType = "table" | "board" | "calendar" | "list" | "gallery" | "timeline";
+export interface FilterGroup {
+  id: string;
+  mode: "and" | "or";
+  rules: FilterRule[];
+}
+
+export type ViewType = "table" | "board" | "calendar" | "list" | "gallery" | "timeline" | "chart" | "form";
+export type ChartKind = "bar" | "line" | "donut";
 
 export interface ViewDef {
   id: string;
   name: string;
   type: ViewType;
-  /** 看板按哪个单选属性分组 */
+  /** 看板 / 表格 / 列表按哪个属性分组 */
   groupBy?: string | null;
+  /** 表格 / 列表中已折叠的分组 key */
+  collapsedGroups?: string[];
   /** 日历 / 时间轴按哪个日期属性排布（时间轴里是开始日期） */
   dateProp?: string | null;
   /** 时间轴的结束日期属性；不设则每行只占一天 */
   endProp?: string | null;
+  /** 图表视图配置 */
+  chartType?: ChartKind;
+  chartGroupBy?: string | null;
+  chartMetric?: { fn: "count" | "sum" | "avg" | "max"; propId?: string | null };
+  /** 表单视图的顶部说明文案 */
+  formDesc?: string;
+  /** 画廊卡片尺寸与封面展示来源 */
+  cardSize?: "small" | "medium" | "large";
+  cardCover?: "cover" | "content" | "none";
   /** 表格各列的宽度（像素），key 为属性 id，名称列为 "title" */
   widths?: Record<string, number>;
   /** 当前视图中隐藏的属性 id 列表 */
@@ -100,13 +145,21 @@ export interface ViewDef {
   /** propId 为 "title" 表示按名称排序 */
   sort?: { propId: string; dir: "asc" | "desc" } | null;
   filters?: FilterRule[];
-  /** 多个筛选条件之间的关系，默认 and */
+  /** 多层嵌套的条件组（与 filters 共同生效） */
+  filterGroups?: FilterGroup[];
+  /** 多个筛选条件/组之间的关系，默认 and */
   filterMode?: "and" | "or";
 }
 
 export interface DatabaseDef {
   properties: PropertyDef[];
   views: ViewDef[];
+  /** 是否开启子任务（无限层级子行） */
+  subItemsEnabled?: boolean;
+  /** 时间轴前后置依赖使用的同库关联属性 id */
+  dependencyProp?: string | null;
+  /** 数据库自动化触发器与动作列表 */
+  automations?: DatabaseAutomation[];
 }
 
 export interface PageComment {
@@ -122,6 +175,8 @@ export interface PageMeta {
   icon: string | null;
   /** 预设封面的 key（如 "preset:sunset"）或上传图片的 URL */
   cover: string | null;
+  /** 封面图纵向裁剪焦点百分比（0 ~ 100，默认 50） */
+  coverY?: number;
   parentId: string | null;
   order: number;
   favorite: boolean;
@@ -157,6 +212,7 @@ export type PagePatch = Partial<
     | "title"
     | "icon"
     | "cover"
+    | "coverY"
     | "favorite"
     | "fullWidth"
     | "smallText"
