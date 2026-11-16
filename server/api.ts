@@ -3,7 +3,7 @@
  * 上传的文件保存在 data/uploads/。只用 Node 内置模块。
  */
 import fs from "node:fs/promises";
-import { createReadStream } from "node:fs";
+import { createReadStream, watch as watchFs, type FSWatcher } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -139,6 +139,10 @@ class Store {
   private pages = new Map<string, PageRecord>();
   private text = new Map<string, string>();
   private writes = new Map<string, Promise<void>>();
+  private activeWrites = new Set<string>();
+  private fileMtimes = new Map<string, number>();
+  private watcher: FSWatcher | null = null;
+  private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private ready: Promise<void> | null = null;
   /** 页面 id → 上一次保存历史版本的时间 */
   private lastSnapshot = new Map<string, number>();
@@ -164,10 +168,12 @@ class Store {
     for (const f of files) {
       if (!f.endsWith(".json")) continue;
       try {
-        const raw = await fs.readFile(path.join(this.pagesDir, f), "utf8");
+        const fullPath = path.join(this.pagesDir, f);
+        const [raw, st] = await Promise.all([fs.readFile(fullPath, "utf8"), fs.stat(fullPath)]);
         const page = JSON.parse(raw) as PageRecord;
         if (!ID_RE.test(page.id) || `${page.id}.json` !== f) continue;
         this.pages.set(page.id, normalize(page));
+        this.fileMtimes.set(page.id, st.mtimeMs);
       } catch (err) {
         console.warn(`[storage] 跳过无法读取的文件 ${f}:`, err);
       }
@@ -179,6 +185,76 @@ class Store {
       if (this.pages.size === 0) await this.seed();
       await fs.writeFile(marker, new Date().toISOString());
     }
+    this.startWatcher();
+  }
+
+  private startWatcher() {
+    if (this.watcher) return;
+    try {
+      this.watcher = watchFs(this.pagesDir, (_event, filename) => {
+        if (filename && !String(filename).endsWith(".json")) return;
+        if (this.syncTimer) clearTimeout(this.syncTimer);
+        this.syncTimer = setTimeout(() => {
+          this.syncTimer = null;
+          void this.syncFromDisk();
+        }, 250);
+        (this.syncTimer as unknown as { unref?: () => void }).unref?.();
+      });
+      this.watcher.on("error", () => {});
+      (this.watcher as unknown as { unref?: () => void }).unref?.();
+    } catch {
+      /* 部分网络挂载盘（SMB/NFS）不支持底层文件监听，自动退回按需扫描 mtime */
+    }
+  }
+
+  /** 扫描磁盘变更（用于 iCloud Drive / NAS / Syncthing 同步外部新文件或更新文件） */
+  async syncFromDisk(): Promise<{ changed: boolean; updatedIds: string[]; removedIds: string[] }> {
+    await this.init();
+    const updatedIds: string[] = [];
+    const removedIds: string[] = [];
+    const entries = await fs.readdir(this.pagesDir).catch(() => [] as string[]);
+    const seen = new Set<string>();
+
+    for (const f of entries) {
+      const m = /^([a-f0-9]{16})\.json$/.exec(f);
+      if (!m) continue;
+      const id = m[1];
+      seen.add(id);
+      if (this.activeWrites.has(id)) continue;
+      const fullPath = path.join(this.pagesDir, f);
+      const st = await fs.stat(fullPath).catch(() => null);
+      if (!st) continue;
+      if (this.fileMtimes.get(id) === st.mtimeMs && this.pages.has(id)) continue;
+      try {
+        const raw = await fs.readFile(fullPath, "utf8");
+        const page = JSON.parse(raw) as PageRecord;
+        if (page.id !== id) continue;
+        this.pages.set(id, normalize(page));
+        this.fileMtimes.set(id, st.mtimeMs);
+        if (page.kind === "database") this.text.clear();
+        else this.text.delete(id);
+        updatedIds.push(id);
+      } catch {
+        /* 同步客户端正在写入半截文件时跳过，等下次完整落盘再读 */
+      }
+    }
+
+    for (const id of [...this.pages.keys()]) {
+      if (!seen.has(id) && !this.activeWrites.has(id)) {
+        this.pages.delete(id);
+        this.fileMtimes.delete(id);
+        this.text.delete(id);
+        removedIds.push(id);
+      }
+    }
+
+    return { changed: updatedIds.length > 0 || removedIds.length > 0, updatedIds, removedIds };
+  }
+
+  close() {
+    if (this.syncTimer) clearTimeout(this.syncTimer);
+    this.watcher?.close();
+    this.watcher = null;
   }
 
   private async seed() {
@@ -196,12 +272,18 @@ class Store {
     const file = path.join(this.pagesDir, `${page.id}.json`);
     const data = JSON.stringify(page, null, 2);
     const prev = this.writes.get(page.id) ?? Promise.resolve();
+    this.activeWrites.add(page.id);
     const next = prev
       .catch(() => {})
       .then(async () => {
         const tmp = `${file}.${crypto.randomBytes(4).toString("hex")}.tmp`;
         await fs.writeFile(tmp, data);
         await fs.rename(tmp, file);
+        const st = await fs.stat(file).catch(() => null);
+        if (st) this.fileMtimes.set(page.id, st.mtimeMs);
+      })
+      .finally(() => {
+        if (this.writes.get(page.id) === next) this.activeWrites.delete(page.id);
       });
     this.writes.set(page.id, next);
     next.catch((err) => console.error(`[storage] 写入 ${page.id} 失败:`, err));
@@ -210,9 +292,16 @@ class Store {
 
   private unlink(id: string) {
     this.text.delete(id);
+    this.fileMtimes.delete(id);
     const file = path.join(this.pagesDir, `${id}.json`);
     const prev = this.writes.get(id) ?? Promise.resolve();
-    const next = prev.catch(() => {}).then(() => fs.rm(file, { force: true }));
+    this.activeWrites.add(id);
+    const next = prev
+      .catch(() => {})
+      .then(() => fs.rm(file, { force: true }))
+      .finally(() => {
+        if (this.writes.get(id) === next) this.activeWrites.delete(id);
+      });
     this.writes.set(id, next);
     return next;
   }
@@ -1044,6 +1133,25 @@ export function createApiMiddleware(dataDir: string) {
       }
     }
 
+    if (resource === "storage") {
+      if (!id && method === "GET") {
+        await store.syncFromDisk();
+        return send(res, 200, {
+          storage: {
+            dataDir: path.resolve(dataDir),
+            isDesktop: false,
+            isCustomDir: Boolean(process.env.OPEN_NOTION_DATA),
+          },
+          pages: store.metas(),
+        });
+      }
+      if (id === "sync" && method === "POST") {
+        await readJson(req);
+        const diff = await store.syncFromDisk();
+        return send(res, 200, { ...diff, pages: store.metas() });
+      }
+    }
+
     if (resource === "search" && method === "GET") {
       return send(res, 200, { hits: store.search(url.searchParams.get("q") ?? "") });
     }
@@ -1077,6 +1185,8 @@ export function createApiMiddleware(dataDir: string) {
 
   return Object.assign(middleware, {
     flush: () => store.settled(),
+    sync: () => store.syncFromDisk(),
+    close: () => store.close(),
     importFolder: (dir: string) => store.importFolder(dir),
   });
 }

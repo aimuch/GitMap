@@ -54,10 +54,12 @@ export function summarizeSaveStates(
  * ========================================================= */
 
 export type PrimaryModal = "none" | "search" | "ai";
+export type SettingsTab = "appearance" | "sync" | "ai" | "trash";
 
 export interface OverlayState {
   modal: PrimaryModal;
   aiSettings: boolean;
+  settingsTab?: SettingsTab;
   peekRowId: string | null;
 }
 
@@ -68,6 +70,9 @@ export type OverlayEvent =
   | { type: "OPEN_AI" }
   | { type: "CLOSE_AI" }
   | { type: "TOGGLE_AI" }
+  | { type: "OPEN_SETTINGS"; tab?: SettingsTab }
+  | { type: "CLOSE_SETTINGS" }
+  | { type: "TOGGLE_SETTINGS"; tab?: SettingsTab }
   | { type: "OPEN_AI_SETTINGS" }
   | { type: "CLOSE_AI_SETTINGS" }
   | { type: "OPEN_PEEK"; rowId: string }
@@ -97,8 +102,16 @@ export function transitionOverlay(state: OverlayState, event: OverlayEvent): Ove
       return state.modal === "ai" ? { ...state, modal: "none" } : state;
     case "TOGGLE_AI":
       return state.modal === "ai" ? { ...state, modal: "none" } : { ...state, modal: "ai" };
+    case "OPEN_SETTINGS":
+      return { ...state, aiSettings: true, settingsTab: event.tab ?? state.settingsTab ?? "appearance" };
+    case "CLOSE_SETTINGS":
+      return state.aiSettings ? { ...state, aiSettings: false } : state;
+    case "TOGGLE_SETTINGS":
+      return state.aiSettings
+        ? { ...state, aiSettings: false }
+        : { ...state, aiSettings: true, settingsTab: event.tab ?? "appearance" };
     case "OPEN_AI_SETTINGS":
-      return { ...state, aiSettings: true };
+      return { ...state, aiSettings: true, settingsTab: "ai" };
     case "CLOSE_AI_SETTINGS":
       return state.aiSettings ? { ...state, aiSettings: false } : state;
     case "OPEN_PEEK":

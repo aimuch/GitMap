@@ -1,28 +1,20 @@
-import { useEffect, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { createPortal } from "react-dom";
+import { useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ChevronRight,
   ChevronsLeft,
   Ellipsis,
   FileStack,
   FileText,
-  Import,
   Layers,
-  LoaderCircle,
-  Monitor,
-  Moon,
   Plus,
   Search,
-  Settings2,
+  Settings,
   Sparkles,
   SquarePen,
   Star,
-  Sun,
   Table2,
-  Trash2,
 } from "lucide-react";
-import { endDragSession, getDraggedPageId, startPageDrag, transitionImport, useMachine } from "../machines";
-import { importNotionZip } from "../notionImport";
+import { endDragSession, getDraggedPageId, startPageDrag } from "../machines";
 import { Logo, Wordmark } from "./Logo";
 import type { PageMeta } from "../../shared/types";
 import {
@@ -31,21 +23,18 @@ import {
   isDescendant,
   movePage,
   navigate,
+  openSettings,
   setAiOpen,
-  setAiSettingsOpen,
   setExpanded,
   setSearchOpen,
   setSidebarCollapsed,
   setSidebarWidth,
-  setTheme,
   useStore,
   useTree,
-  type ThemeSetting,
   type Tree,
 } from "../store";
 import { PageMenu } from "./PageMenu";
 import { cx } from "./Popover";
-import { TrashPopover } from "./TrashPopover";
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 export const modKey = isMac ? "⌘" : "Ctrl+";
@@ -61,33 +50,7 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
   const tree = useTree();
   const width = useStore((s) => s.sidebarWidth);
   const collapsed = useStore((s) => s.sidebarCollapsed);
-  const theme = useStore((s) => s.theme);
-  const [trashAnchor, setTrashAnchor] = useState<HTMLElement | null>(null);
   const [rootDrop, setRootDrop] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [importState, sendImport] = useMachine(transitionImport, { status: "idle" });
-
-  useEffect(() => {
-    if (importState.status === "idle") return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        sendImport({ type: "DISMISS" });
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [importState.status, sendImport]);
-
-  const runImport = async (file: File) => {
-    sendImport({ type: "START" });
-    try {
-      const result = await importNotionZip(file, (text) => sendImport({ type: "PROGRESS", text }));
-      sendImport({ type: "SUCCEED", result });
-    } catch (err) {
-      sendImport({ type: "FAIL", message: err instanceof Error ? err.message : String(err) });
-    }
-  };
   const roots = tree.children.get("") ?? [];
 
   const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -106,10 +69,6 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
     handle.addEventListener("pointerup", onUp);
   };
 
-  const nextTheme: Record<ThemeSetting, ThemeSetting> = { system: "light", light: "dark", dark: "system" };
-  const themeLabel: Record<ThemeSetting, string> = { system: "跟随系统", light: "浅色", dark: "深色" };
-  const ThemeIcon = theme === "system" ? Monitor : theme === "light" ? Sun : Moon;
-
   return (
     <aside
       className={cx("sidebar", collapsed && "collapsed")}
@@ -119,7 +78,7 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
     >
       <div className="sidebar-inner" style={{ width }}>
         <div className="sidebar-header">
-          <Logo size={24} />
+          <Logo size={22} />
           <Wordmark className="workspace-name" />
           <button
             type="button"
@@ -128,21 +87,21 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
             aria-label="收起侧边栏"
             onClick={() => setSidebarCollapsed(true)}
           >
-            <ChevronsLeft size={18} />
+            <ChevronsLeft size={17} />
           </button>
           <button type="button" className="icon-btn" title="新建页面" aria-label="新建页面" onClick={() => void newPage()}>
-            <SquarePen size={17} />
+            <SquarePen size={16} />
           </button>
         </div>
 
         <div className="sidebar-nav">
           <button type="button" className="nav-row" onClick={() => setSearchOpen(true)}>
-            <Search size={16} />
+            <Search size={15} />
             <span>搜索</span>
             <kbd>{modKey}K</kbd>
           </button>
           <button type="button" className="nav-row" onClick={() => setAiOpen(true)}>
-            <Sparkles size={16} />
+            <Sparkles size={15} />
             <span>AI 助手</span>
             <kbd>{modKey}J</kbd>
           </button>
@@ -197,111 +156,25 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
               </div>
             )}
             <button type="button" className="nav-row muted add-page" onClick={() => void newPage()}>
-              <Plus size={16} />
-              <span>新页面</span>
+              <Plus size={15} />
+              <span>新建页面</span>
             </button>
           </section>
         </div>
 
-        <div className="sidebar-footer">
+        <div className="sidebar-footer sidebar-footer-compact">
           <button
             type="button"
-            className={cx("nav-row", trashAnchor && "active")}
-            onClick={(e) => setTrashAnchor(trashAnchor ? null : e.currentTarget)}
+            className="icon-btn sidebar-gear-btn"
+            title={`设置（外观、同步、AI 模型、导入、回收站） ${modKey},`}
+            aria-label="设置"
+            onClick={() => openSettings("appearance")}
           >
-            <Trash2 size={16} />
-            <span>回收站</span>
-            {tree.trash.length > 0 && <span className="count">{tree.trash.length}</span>}
-          </button>
-          <button type="button" className="nav-row" onClick={() => fileRef.current?.click()}>
-            <Import size={16} />
-            <span>导入 Notion 导出包</span>
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".zip,application/zip"
-            hidden
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              // 清空选择，这样同一个文件可以再选一次
-              e.target.value = "";
-              if (file) void runImport(file);
-            }}
-          />
-          <button type="button" className="nav-row" onClick={() => setAiSettingsOpen(true)}>
-            <Settings2 size={16} />
-            <span>AI 模型设置</span>
-          </button>
-          <button
-            type="button"
-            className="nav-row"
-            title="切换主题"
-            onClick={() => setTheme(nextTheme[theme])}
-          >
-            <ThemeIcon size={16} />
-            <span>主题：{themeLabel[theme]}</span>
+            <Settings size={16} />
           </button>
         </div>
       </div>
 
-      {trashAnchor && <TrashPopover anchor={trashAnchor} items={tree.trash} onClose={() => setTrashAnchor(null)} />}
-      {importState.status !== "idle" &&
-        createPortal(
-          <div
-            className="modal-backdrop"
-            data-local-modal="import"
-            onMouseDown={(e) => e.target === e.currentTarget && sendImport({ type: "DISMISS" })}
-          >
-            <div
-              className="import-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-label="导入 Notion 导出包"
-              data-import-state={importState.status}
-            >
-              <h2>导入 Notion 导出包</h2>
-              {importState.status === "running" && (
-                <p className="import-progress" aria-live="polite">
-                  <LoaderCircle size={15} className="spin" /> {importState.text}
-                </p>
-              )}
-              {importState.status === "done" && (
-                <>
-                  <p>
-                    导入完成：{importState.result.pages} 个页面，{importState.result.databases} 个数据库（共{" "}
-                    {importState.result.rows} 行），{importState.result.files} 个图片或附件。
-                  </p>
-                  <p className="import-note">内容都放在“Notion 导入”页面下面。数据库的列类型是按内容猜的，拿不准的都当作文本。</p>
-                  <div className="import-actions">
-                    <button
-                      type="button"
-                      className="primary-btn"
-                      onClick={() => {
-                        navigate(importState.result.rootId);
-                        setExpanded(importState.result.rootId, true);
-                        sendImport({ type: "DISMISS" });
-                      }}
-                    >
-                      查看导入的内容
-                    </button>
-                  </div>
-                </>
-              )}
-              {importState.status === "error" && (
-                <>
-                  <p className="value-error">{importState.message}</p>
-                  <div className="import-actions">
-                    <button type="button" className="text-btn" onClick={() => sendImport({ type: "DISMISS" })}>
-                      关闭
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>,
-          document.body,
-        )}
       <div className="sidebar-resizer" onPointerDown={startResize} role="separator" aria-orientation="vertical" />
     </aside>
   );

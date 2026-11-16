@@ -1,18 +1,20 @@
-import { useEffect } from "react";
-import { CircleAlert, PanelLeft, Plus } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { CircleAlert, LoaderCircle, PanelLeft, Plus } from "lucide-react";
 import { AiModal } from "./components/AiModal";
 import { AiSettingsModal } from "./components/AiSettingsModal";
 import { Logo } from "./components/Logo";
 import { RowDrawer } from "./components/database/RowDrawer";
-import { topOverlayName } from "./machines";
+import { topOverlayName, transitionImport, useMachine } from "./machines";
+import { importNotionZip } from "./notionImport";
 import {
+  closeSettings,
   createPage,
   dismissTopOverlay,
   getState,
   loadPages,
   navigate,
   sendOverlay,
-  setAiSettingsOpen,
+  setExpanded,
   setSidebarCollapsed,
   useRoute,
   useStore,
@@ -30,7 +32,7 @@ export function App() {
   const overlay = useStore((s) => s.overlay);
   const searchOpen = overlay.modal === "search";
   const aiOpen = overlay.modal === "ai";
-  const aiSettingsOpen = overlay.aiSettings;
+  const settingsOpen = overlay.aiSettings;
   const peekRowId = overlay.peekRowId;
   const topOverlay = topOverlayName(overlay);
   const revisions = useStore((s) => s.revisions);
@@ -39,6 +41,31 @@ export function App() {
   const route = useRoute();
   const tree = useTree();
   const current = route && pages[route] ? route : null;
+
+  const zipInputRef = useRef<HTMLInputElement>(null);
+  const [importState, sendImport] = useMachine(transitionImport, { status: "idle" });
+
+  const runNotionImport = async (file: File) => {
+    sendImport({ type: "START" });
+    try {
+      const result = await importNotionZip(file, (text) => sendImport({ type: "PROGRESS", text }));
+      sendImport({ type: "SUCCEED", result });
+    } catch (err) {
+      sendImport({ type: "FAIL", message: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  useEffect(() => {
+    if (importState.status === "idle") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        sendImport({ type: "DISMISS" });
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [importState.status, sendImport]);
 
   useEffect(() => {
     void loadPages();
@@ -81,6 +108,10 @@ export function App() {
         e.preventDefault();
         e.stopPropagation();
         sendOverlay({ type: "TOGGLE_AI" });
+      } else if (e.key === ",") {
+        e.preventDefault();
+        e.stopPropagation();
+        sendOverlay({ type: "TOGGLE_SETTINGS" });
       } else if (e.key === "\\") {
         e.preventDefault();
         setSidebarCollapsed(!getState().sidebarCollapsed);
@@ -88,7 +119,6 @@ export function App() {
     };
     const onEscape = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
-      // 局部模态框（如页面历史、导入进度）优先于全局浮层栈
       if (document.querySelector("[data-local-modal]")) return;
       if (dismissTopOverlay()) {
         e.preventDefault();
@@ -139,7 +169,7 @@ export function App() {
             )}
             {loaded && (
               <div className="empty-state">
-                <Logo size={72} className="empty-logo" />
+                <Logo size={68} className="empty-logo" />
                 <h1>这里还没有页面</h1>
                 <p>新建一个页面，开始记录吧。</p>
                 <button
@@ -157,10 +187,80 @@ export function App() {
           </div>
         )}
       </main>
+      <input
+        ref={zipInputRef}
+        type="file"
+        accept=".zip,application/zip"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void runNotionImport(file);
+        }}
+      />
       {peekRowId && <RowDrawer id={peekRowId} />}
       {searchOpen && <SearchModal />}
       {aiOpen && <AiModal currentPageId={current} />}
-      {aiSettingsOpen && <AiSettingsModal onClose={() => setAiSettingsOpen(false)} />}
+      {settingsOpen && (
+        <AiSettingsModal
+          onClose={closeSettings}
+          onImportNotionZip={() => zipInputRef.current?.click()}
+        />
+      )}
+      {importState.status !== "idle" && (
+        <div
+          className="modal-backdrop"
+          data-local-modal="import"
+          onMouseDown={(e) => e.target === e.currentTarget && sendImport({ type: "DISMISS" })}
+        >
+          <div
+            className="import-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="导入 Notion 导出包"
+            data-import-state={importState.status}
+          >
+            <h2>导入 Notion 导出包</h2>
+            {importState.status === "running" && (
+              <p className="import-progress" aria-live="polite">
+                <LoaderCircle size={15} className="spin" /> {importState.text}
+              </p>
+            )}
+            {importState.status === "done" && (
+              <>
+                <p>
+                  导入完成：{importState.result.pages} 个页面，{importState.result.databases} 个数据库（共{" "}
+                  {importState.result.rows} 行），{importState.result.files} 个图片或附件。
+                </p>
+                <p className="import-note">内容都放在“Notion 导入”页面下面。数据库的列类型是按内容推断的，其余默认保留为文本。</p>
+                <div className="import-actions">
+                  <button
+                    type="button"
+                    className="primary-btn small"
+                    onClick={() => {
+                      navigate(importState.result.rootId);
+                      setExpanded(importState.result.rootId, true);
+                      sendImport({ type: "DISMISS" });
+                    }}
+                  >
+                    查看导入的内容
+                  </button>
+                </div>
+              </>
+            )}
+            {importState.status === "error" && (
+              <>
+                <p className="value-error">{importState.message}</p>
+                <div className="import-actions">
+                  <button type="button" className="ghost-btn small" onClick={() => sendImport({ type: "DISMISS" })}>
+                    关闭
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {error && (
         <div className="toast" role="alert">
           <CircleAlert size={16} />

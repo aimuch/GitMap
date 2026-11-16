@@ -270,3 +270,10 @@ export interface AiCitation {
   title: string;
   icon: string | null;
 }
+
+export interface StorageInfo {
+  dataDir: string;
+  defaultDataDir?: string;
+  isDesktop: boolean;
+  isCustomDir: boolean;
+}

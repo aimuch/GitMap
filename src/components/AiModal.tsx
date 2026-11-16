@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { BlockNoteEditor } from "@blocknote/core";
 import {
+  ArrowUp,
   Check,
   Copy,
   Eraser,
   FilePlus2,
   FileText,
+  KeyRound,
+  Layers,
+  ListChecks,
   LoaderCircle,
-  Send,
-  Settings2,
+  PenLine,
+  Settings,
   Sparkles,
   Square,
   X,
@@ -39,10 +43,30 @@ interface Turn {
 }
 
 const STARTERS = [
-  { label: "梳理工作区进展", prompt: "请梳理我工作区里各个页面和数据库的主要内容与待办进展。", scope: "workspace" as const },
-  { label: "查找未完成任务", prompt: "帮我列出工作区数据库和笔记里所有未完成的任务或待办事项。", scope: "workspace" as const },
-  { label: "总结当前页面", prompt: "请提炼并总结当前页面的核心要点和行动项。", scope: "page" as const },
-  { label: "起草方案框架", prompt: "帮我起草一份清晰的产品功能设计文档框架，包含背景、目标、方案对比与里程碑。", scope: "none" as const },
+  {
+    icon: Layers,
+    label: "梳理工作区进展",
+    prompt: "请梳理我工作区里各个页面和数据库的主要内容与待办进展。",
+    scope: "workspace" as const,
+  },
+  {
+    icon: ListChecks,
+    label: "查找未完成任务",
+    prompt: "帮我列出工作区数据库和笔记里所有未完成的任务或待办事项。",
+    scope: "workspace" as const,
+  },
+  {
+    icon: FileText,
+    label: "总结当前页面",
+    prompt: "请提炼并总结当前页面的核心要点和行动项。",
+    scope: "page" as const,
+  },
+  {
+    icon: PenLine,
+    label: "起草方案框架",
+    prompt: "帮我起草一份清晰的产品功能设计文档框架，包含背景、目标、方案对比与里程碑。",
+    scope: "none" as const,
+  },
 ];
 
 export function AiModal({ currentPageId }: { currentPageId: string | null }) {
@@ -70,6 +94,7 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
 
   const activeProvider = cfg?.providers.find((p) => p.id === cfg.activeProviderId) ?? cfg?.providers[0];
   const configured = Boolean(activeProvider && (activeProvider.hasKey || activeProvider.keyOptional));
+  const shortProviderName = activeProvider?.name.replace(/（.+）/, "") ?? "当前模型";
 
   const sendPrompt = async (promptText?: string, forceScope?: "workspace" | "page" | "none") => {
     const text = (promptText ?? input).trim();
@@ -163,7 +188,10 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
       >
         <header className="ai-modal-head">
           <span className="ai-brand">
-            <Sparkles size={16} /> AI 助手
+            <span className="ai-brand-badge">
+              <Sparkles size={14} />
+            </span>
+            <span>AI 助手</span>
           </span>
           <div className="ai-scope-tabs" role="tablist" aria-label="问答范围">
             <button
@@ -171,7 +199,7 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
               className={cx("ai-scope-tab", scope === "workspace" && "active")}
               onClick={() => setScope("workspace")}
             >
-              全工作区问答
+              全工作区
             </button>
             {currentPage && (
               <button
@@ -204,7 +232,7 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
                 {cfg.providers.map((p) => (
                   <optgroup
                     key={p.id}
-                    label={`${p.name}${p.hasKey || p.keyOptional ? "" : "（未配 Key）"}`}
+                    label={`${p.name}${p.hasKey || p.keyOptional ? "" : "（未配置）"}`}
                   >
                     {p.models.map((m) => (
                       <option key={`${p.id}::${m}`} value={`${p.id}::${m}`}>
@@ -217,63 +245,82 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
             )}
             <button
               type="button"
-              className="text-btn small"
-              title="配置国产、国外或自定义大模型"
+              className="icon-btn"
+              title="模型设置"
+              aria-label="模型设置"
               onClick={() => setAiSettingsOpen(true)}
             >
-              <Settings2 size={14} /> 模型设置
+              <Settings size={16} />
             </button>
             {turns.length > 0 && (
-              <button type="button" className="icon-btn small" title="清空对话" aria-label="清空对话" onClick={() => setTurns([])}>
-                <Eraser size={15} />
+              <button
+                type="button"
+                className="icon-btn"
+                title="清空对话"
+                aria-label="清空对话"
+                onClick={() => setTurns([])}
+              >
+                <Eraser size={16} />
               </button>
             )}
-            <button type="button" className="icon-btn small" aria-label="关闭" onClick={() => setAiOpen(false)}>
-              <X size={16} />
+            <button type="button" className="icon-btn" aria-label="关闭" onClick={() => setAiOpen(false)}>
+              <X size={17} />
             </button>
           </div>
         </header>
 
-        {!configured && (
-          <div className="ai-setup-banner">
-            <span>
-              当前选中的 <strong>{activeProvider?.name ?? "模型"}</strong> 还未填写 API Key（支持 DeepSeek、Kimi、豆包、通义千问、Claude、OpenAI、Gemini、Ollama 及任意自定义接口）。
-            </span>
-            <button type="button" className="primary-btn small" onClick={() => setAiSettingsOpen(true)}>
-              去配置模型
-            </button>
-          </div>
-        )}
-
         <div className="ai-messages" ref={scrollRef}>
+          {!configured && (
+            <div className="ai-setup-card">
+              <span className="ai-setup-icon">
+                <KeyRound size={15} />
+              </span>
+              <div className="ai-setup-text">
+                <strong>尚未配置 {shortProviderName} 的密钥</strong>
+                <span>支持接入 DeepSeek、Kimi、豆包、千问、Claude、OpenAI、Gemini、Ollama 及任意自定义接口。</span>
+              </div>
+              <button type="button" className="primary-btn small" onClick={() => setAiSettingsOpen(true)}>
+                配置模型
+              </button>
+            </div>
+          )}
+
           {turns.length === 0 ? (
             <div className="ai-welcome">
-              <div className="ai-welcome-title">有什么可以帮你？</div>
-              <p className="ai-welcome-sub">
-                可检索本地笔记与数据库回答问题，或直接起草、总结、翻译文档。在编辑器里输入 <code>/ai</code> 也能就地续写和改写。
-              </p>
+              <div className="ai-welcome-head">
+                <div className="ai-welcome-title">有什么可以帮你？</div>
+                <p className="ai-welcome-sub">
+                  检索本地笔记与数据库精准作答，或在编辑器中输入 <code>/ai</code> 就地续写、润色与翻译。
+                </p>
+              </div>
               <div className="ai-starter-grid">
-                {STARTERS.filter((s) => s.scope !== "page" || currentPage).map((s) => (
-                  <button
-                    key={s.label}
-                    type="button"
-                    className="ai-starter-card"
-                    onClick={() => void sendPrompt(s.prompt, s.scope)}
-                  >
-                    <strong>{s.label}</strong>
-                    <span>{s.prompt}</span>
-                  </button>
-                ))}
+                {STARTERS.filter((s) => s.scope !== "page" || currentPage).map((s) => {
+                  const Icon = s.icon;
+                  return (
+                    <button
+                      key={s.label}
+                      type="button"
+                      className="ai-starter-card"
+                      onClick={() => void sendPrompt(s.prompt, s.scope)}
+                    >
+                      <span className="ai-starter-head">
+                        <Icon size={14} className="ai-starter-icon" />
+                        <strong>{s.label}</strong>
+                      </span>
+                      <span className="ai-starter-desc">{s.prompt}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ) : (
             turns.map((turn) => (
               <div key={turn.id} className={cx("ai-turn", `ai-turn-${turn.role}`)}>
-                <div className="ai-turn-role">{turn.role === "user" ? "你" : "AI"}</div>
+                <div className="ai-turn-role">{turn.role === "user" ? "我" : <Sparkles size={13} />}</div>
                 <div className="ai-turn-body">
                   {turn.citations && turn.citations.length > 0 && (
                     <div className="ai-citations">
-                      <span>参考页面：</span>
+                      <span>引用来源</span>
                       {turn.citations.map((c) => (
                         <button
                           key={c.id}
@@ -285,7 +332,7 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
                           }}
                         >
                           <span className="row-chip-icon">{c.icon ?? <FileText size={12} />}</span>
-                          <span className="tag-name">{c.title}</span>
+                          <span className="tag-name">{c.title || "无标题"}</span>
                         </button>
                       ))}
                     </div>
@@ -299,7 +346,7 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
                   {turn.error ? (
                     <div className="value-error">
                       {turn.error}{" "}
-                      <button type="button" className="text-btn small" onClick={() => setAiSettingsOpen(true)}>
+                      <button type="button" className="ghost-btn small" onClick={() => setAiSettingsOpen(true)}>
                         打开模型设置
                       </button>
                     </div>
@@ -314,7 +361,7 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
                     <div className="ai-turn-actions">
                       <button
                         type="button"
-                        className="text-btn small"
+                        className="ghost-btn small"
                         onClick={() => {
                           void navigator.clipboard?.writeText(turn.content);
                           setCopiedId(turn.id);
@@ -323,13 +370,13 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
                       >
                         {copiedId === turn.id ? <Check size={13} /> : <Copy size={13} />} 复制
                       </button>
-                      <button type="button" className="text-btn small" onClick={() => void saveAsNewPage(turn.content)}>
+                      <button type="button" className="ghost-btn small" onClick={() => void saveAsNewPage(turn.content)}>
                         <FilePlus2 size={13} /> 存为新页面
                       </button>
                       {canAppendCurrent && (
                         <button
                           type="button"
-                          className="text-btn small"
+                          className="ghost-btn small"
                           onClick={() => void appendToCurrentPage(turn.content)}
                         >
                           插入当前页末尾
@@ -344,41 +391,53 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
         </div>
 
         <form
-          className="ai-input-bar"
+          className="ai-composer-wrap"
           onSubmit={(e) => {
             e.preventDefault();
             void sendPrompt();
           }}
         >
-          <textarea
-            autoFocus
-            rows={2}
-            value={input}
-            placeholder={
-              scope === "workspace"
-                ? "向整个本地工作区提问，或让 AI 帮你整理资料…（Enter 发送，Shift+Enter 换行）"
-                : scope === "page"
-                  ? `围绕《${currentPage?.title || "当前页面"}》提问或生成内容…`
-                  : "输入任何问题或写作要求…"
-            }
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.nativeEvent.isComposing) return;
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void sendPrompt();
+          <div className="ai-composer">
+            <textarea
+              autoFocus
+              rows={2}
+              value={input}
+              placeholder={
+                scope === "workspace"
+                  ? "向整个本地工作区提问，或让 AI 帮你梳理资料…"
+                  : scope === "page"
+                    ? `围绕《${currentPage?.title || "当前页面"}》提问或生成内容…`
+                    : "输入任何问题、提纲或写作要求…"
               }
-            }}
-          />
-          {running ? (
-            <button type="button" className="primary-btn small danger-btn" onClick={stop}>
-              <Square size={13} /> 停止
-            </button>
-          ) : (
-            <button type="submit" className="primary-btn small" disabled={!input.trim()}>
-              <Send size={14} /> 发送
-            </button>
-          )}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void sendPrompt();
+                }
+              }}
+            />
+            <div className="ai-composer-foot">
+              <span className="ai-composer-hint">
+                {scope === "workspace"
+                  ? "检索本地笔记与数据库 · Enter 发送，Shift+Enter 换行"
+                  : scope === "page"
+                    ? `仅参考当前页面《${currentPage?.title || "无标题"}》 · Enter 发送`
+                    : "自由对话 · Enter 发送，Shift+Enter 换行"}
+              </span>
+              {running ? (
+                <button type="button" className="primary-btn small danger-btn" onClick={stop}>
+                  <Square size={12} /> 停止
+                </button>
+              ) : (
+                <button type="submit" className="ai-send-btn" disabled={!input.trim()} aria-label="发送">
+                  <ArrowUp size={15} />
+                  <span>发送</span>
+                </button>
+              )}
+            </div>
+          </div>
         </form>
       </div>
     </div>

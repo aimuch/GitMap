@@ -1,5 +1,14 @@
 import { useMemo, useSyncExternalStore } from "react";
-import type { HistoryEntry, NewPageInput, PageMeta, PagePatch, PageRecord, SearchHit, UnfurlData } from "../shared/types";
+import type {
+  HistoryEntry,
+  NewPageInput,
+  PageMeta,
+  PagePatch,
+  PageRecord,
+  SearchHit,
+  StorageInfo,
+  UnfurlData,
+} from "../shared/types";
 import {
   INITIAL_OVERLAY_STATE,
   getDragSnapshot,
@@ -10,6 +19,7 @@ import {
   type OverlayState,
   type PageSavePhase,
   type SaveSummary,
+  type SettingsTab,
 } from "./machines";
 
 export type ThemeSetting = "light" | "dark" | "system";
@@ -262,6 +272,65 @@ export async function unfurlLink(url: string): Promise<UnfurlData> {
   return data;
 }
 
+/* ---------- 存储目录与外部同步（iCloud Drive / NAS / 共享目录） ---------- */
+
+export async function fetchStorageInfo(): Promise<StorageInfo> {
+  const { storage } = await request<{ storage: StorageInfo }>("/api/storage");
+  return storage;
+}
+
+export async function syncFromDisk(): Promise<{ changed: boolean; updatedIds: string[]; removedIds: string[] }> {
+  const data = await request<{
+    changed: boolean;
+    updatedIds: string[];
+    removedIds: string[];
+    pages: PageMeta[];
+  }>("/api/storage/sync", { method: "POST", json: {} });
+  if (data.changed) {
+    setPages(data.pages);
+    for (const id of data.updatedIds) {
+      if (!pendingPatches.has(id)) {
+        set({ revisions: { ...state.revisions, [id]: (state.revisions[id] ?? 0) + 1 } });
+      }
+    }
+  }
+  return { changed: data.changed, updatedIds: data.updatedIds, removedIds: data.removedIds };
+}
+
+export async function desktopOpenDataDir(): Promise<void> {
+  await request("/api/desktop/open-dir", { method: "POST", json: {} });
+}
+
+export async function desktopPickDataDir(): Promise<{ changed: boolean; storage: StorageInfo }> {
+  const res = await request<{ changed: boolean; storage: StorageInfo }>("/api/desktop/pick-dir", {
+    method: "POST",
+    json: {},
+  });
+  if (res.changed) {
+    await loadPages();
+    const cur = currentPageId();
+    if (cur) reloadPageContent(cur);
+  }
+  return res;
+}
+
+export async function desktopResetDataDir(): Promise<{ changed: boolean; storage: StorageInfo }> {
+  const res = await request<{ changed: boolean; storage: StorageInfo }>("/api/desktop/reset-dir", {
+    method: "POST",
+    json: {},
+  });
+  if (res.changed) {
+    await loadPages();
+    const cur = currentPageId();
+    if (cur) reloadPageContent(cur);
+  }
+  return res;
+}
+
+export async function desktopImportFolder(): Promise<void> {
+  await request("/api/desktop/import-folder", { method: "POST", json: {} });
+}
+
 export async function uploadFile(file: File): Promise<string> {
   const res = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, {
     method: "POST",
@@ -397,6 +466,20 @@ winHooks.__openNotionState = () => ({
   pageCount: Object.keys(state.pages).length,
 });
 
+let lastFocusSync = 0;
+function triggerAutoDiskSync() {
+  if (!state.loaded) return;
+  const now = Date.now();
+  if (now - lastFocusSync < 1500) return;
+  lastFocusSync = now;
+  void syncFromDisk().catch(() => {});
+}
+
+window.addEventListener("focus", triggerAutoDiskSync);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) triggerAutoDiskSync();
+});
+
 window.addEventListener("pagehide", () => void flushAll());
 window.addEventListener("beforeunload", (e) => {
   if (state.saving > 0) {
@@ -451,6 +534,14 @@ export function setSearchOpen(open: boolean) {
 
 export function setAiOpen(open: boolean) {
   sendOverlay({ type: open ? "OPEN_AI" : "CLOSE_AI" });
+}
+
+export function openSettings(tab: SettingsTab = "appearance") {
+  sendOverlay({ type: "OPEN_SETTINGS", tab });
+}
+
+export function closeSettings() {
+  sendOverlay({ type: "CLOSE_SETTINGS" });
 }
 
 export function setAiSettingsOpen(open: boolean) {

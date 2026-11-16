@@ -34,11 +34,69 @@ const MIME: Record<string, string> = {
 // 测试时可以把浏览器配置和数据都指到临时目录，不碰真实数据
 if (process.env.OPEN_NOTION_PROFILE) app.setPath("userData", path.resolve(process.env.OPEN_NOTION_PROFILE));
 
-const dataDir = process.env.OPEN_NOTION_DATA
-  ? path.resolve(process.env.OPEN_NOTION_DATA)
-  : path.join(app.getPath("userData"), "data");
+const defaultDataDir = path.join(app.getPath("userData"), "data");
+const configFile = path.join(app.getPath("userData"), "desktop-config.json");
 const webRoot = path.join(__dirname, "..", "dist");
-const api = createApiMiddleware(dataDir);
+
+let dataDir = process.env.OPEN_NOTION_DATA ? path.resolve(process.env.OPEN_NOTION_DATA) : defaultDataDir;
+let api = createApiMiddleware(dataDir);
+
+async function readSavedDataDir(): Promise<string | null> {
+  if (process.env.OPEN_NOTION_DATA) return path.resolve(process.env.OPEN_NOTION_DATA);
+  try {
+    const raw = await fs.readFile(configFile, "utf8");
+    const parsed = JSON.parse(raw) as { customDataDir?: unknown };
+    if (typeof parsed.customDataDir === "string" && parsed.customDataDir.trim()) {
+      const candidate = path.resolve(parsed.customDataDir);
+      await fs.mkdir(candidate, { recursive: true });
+      return candidate;
+    }
+  } catch {
+    /* 配置文件不存在或外接盘/NAS 暂未挂载时自动退回默认目录 */
+  }
+  return null;
+}
+
+async function saveCustomDataDir(customDataDir: string | null) {
+  await fs.writeFile(configFile, JSON.stringify({ customDataDir }, null, 2));
+}
+
+async function copyWorkspaceIfEmpty(fromDir: string, toDir: string) {
+  if (path.resolve(fromDir) === path.resolve(toDir)) return;
+  const targetPages = path.join(toDir, "pages");
+  const existing = await fs.readdir(targetPages).catch(() => [] as string[]);
+  if (existing.some((f) => f.endsWith(".json"))) return;
+  for (const sub of ["pages", "uploads", "history"]) {
+    const src = path.join(fromDir, sub);
+    const stat = await fs.stat(src).catch(() => null);
+    if (stat?.isDirectory()) {
+      await fs.cp(src, path.join(toDir, sub), { recursive: true, force: false, errorOnExist: false });
+    }
+  }
+  const aiSrc = path.join(fromDir, "ai.json");
+  const aiDst = path.join(toDir, "ai.json");
+  const hasDstAi = await fs.stat(aiDst).catch(() => null);
+  const hasSrcAi = await fs.stat(aiSrc).catch(() => null);
+  if (hasSrcAi && !hasDstAi) {
+    await fs.copyFile(aiSrc, aiDst);
+    await fs.chmod(aiDst, 0o600).catch(() => {});
+  }
+}
+
+async function switchDataDir(nextCustomDir: string | null) {
+  if (mainWindow) await flushPage(mainWindow);
+  await api.flush().catch(() => {});
+  api.close();
+
+  const targetDir = nextCustomDir ? path.resolve(nextCustomDir) : defaultDataDir;
+  await fs.mkdir(targetDir, { recursive: true });
+  if (nextCustomDir) await copyWorkspaceIfEmpty(dataDir, targetDir);
+  await saveCustomDataDir(nextCustomDir ? targetDir : null);
+
+  dataDir = targetDir;
+  api = createApiMiddleware(dataDir);
+  buildMenu();
+}
 
 let mainWindow: BrowserWindow | null = null;
 let origin = "";
@@ -74,6 +132,29 @@ async function serveStatic(req: http.IncomingMessage, res: http.ServerResponse) 
   else createReadStream(file).pipe(res);
 }
 
+function sendJson(res: http.ServerResponse, status: number, body: unknown) {
+  const payload = Buffer.from(JSON.stringify(body));
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": payload.length,
+    "Cache-Control": "no-store",
+  });
+  res.end(payload);
+}
+
+async function chooseSyncFolder(): Promise<boolean> {
+  const win = mainWindow;
+  if (!win) return false;
+  const picked = await dialog.showOpenDialog(win, {
+    title: "选择数据存储与同步目录",
+    message: "可选择 iCloud Drive、NAS 挂载盘、Synology Drive、坚果云或 OneDrive 中的文件夹实现多端同步",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (picked.canceled || !picked.filePaths[0]) return false;
+  await switchDataDir(picked.filePaths[0]);
+  return true;
+}
+
 function startServer(): Promise<number> {
   const server = http.createServer((req, res) => {
     // 只接受以回环地址访问的请求，挡住把外部域名解析到本机的“DNS 重绑定”
@@ -81,6 +162,68 @@ function startServer(): Promise<number> {
       res.writeHead(403).end();
       return;
     }
+    const reqOrigin = req.headers.origin;
+    if (reqOrigin && new URL(reqOrigin).host !== req.headers.host) {
+      res.writeHead(403).end();
+      return;
+    }
+
+    const { pathname } = new URL(req.url ?? "/", "http://localhost");
+    if (pathname === "/api/storage" && req.method === "GET") {
+      void api.sync().then(
+        () =>
+          sendJson(res, 200, {
+            storage: {
+              dataDir,
+              defaultDataDir,
+              isDesktop: true,
+              isCustomDir: path.resolve(dataDir) !== path.resolve(defaultDataDir),
+            },
+          }),
+        (err: Error) => sendJson(res, 500, { error: err.message }),
+      );
+      return;
+    }
+    if (pathname.startsWith("/api/desktop/") && req.method === "POST") {
+      const action = pathname.slice("/api/desktop/".length);
+      void (async () => {
+        if (action === "open-dir") {
+          await shell.openPath(dataDir);
+          return sendJson(res, 200, { ok: true });
+        }
+        if (action === "pick-dir") {
+          const changed = await chooseSyncFolder();
+          return sendJson(res, 200, {
+            changed,
+            storage: {
+              dataDir,
+              defaultDataDir,
+              isDesktop: true,
+              isCustomDir: path.resolve(dataDir) !== path.resolve(defaultDataDir),
+            },
+          });
+        }
+        if (action === "reset-dir") {
+          await switchDataDir(null);
+          return sendJson(res, 200, {
+            changed: true,
+            storage: {
+              dataDir,
+              defaultDataDir,
+              isDesktop: true,
+              isCustomDir: false,
+            },
+          });
+        }
+        if (action === "import-folder") {
+          await importFolder();
+          return sendJson(res, 200, { ok: true });
+        }
+        sendJson(res, 404, { error: "未知桌面指令" });
+      })().catch((err: Error) => sendJson(res, 500, { error: err.message }));
+      return;
+    }
+
     api(req, res, () => {
       serveStatic(req, res).catch((err) => {
         console.error("[static]", err);
@@ -225,6 +368,14 @@ function buildMenu() {
       label: "文件",
       submenu: [
         { label: "打开数据文件夹", click: () => void shell.openPath(dataDir) },
+        {
+          label: "更改数据存储目录（iCloud / NAS 同步）…",
+          click: () => {
+            void chooseSyncFolder().then((changed) => {
+              if (changed) mainWindow?.webContents.reload();
+            });
+          },
+        },
         { label: "从文件夹导入数据…", click: () => void importFolder() },
         { type: "separator" },
         isMac ? { role: "close", label: "关闭窗口" } : { role: "quit", label: "退出" },
@@ -276,6 +427,12 @@ if (!app.requestSingleInstanceLock()) {
   app
     .whenReady()
     .then(async () => {
+      const savedDir = await readSavedDataDir();
+      if (savedDir && savedDir !== dataDir) {
+        api.close();
+        dataDir = savedDir;
+        api = createApiMiddleware(dataDir);
+      }
       await fs.mkdir(dataDir, { recursive: true });
       const port = await startServer();
       origin = `http://127.0.0.1:${port}`;
