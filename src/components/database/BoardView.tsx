@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { FileText, Kanban, Plus } from "lucide-react";
 import type { DatabaseDef, PageMeta, PropertyDef, PropValue, SelectOption, ViewDef } from "../../../shared/types";
-import { addProperty, cellValue, ensureOption, setProp, updateProperty, updateView } from "../../db";
-import { getState, navigate, updatePage } from "../../store";
+import { addProperty, cellValue, ensureOption, setProp, updateProperty, updateView, visibleProperties } from "../../db";
+import { getState, navigate, setPeekRowId, updatePage } from "../../store";
 import { cx } from "../Popover";
 import { Tag, ValueDisplay } from "./cells";
 
@@ -52,8 +52,8 @@ export function BoardView({ page, db, view, rows, editingId, onEditDone, onCreat
     { option: null, rows: rows.filter((r) => !known.has(String(r.props[group.id] ?? ""))) },
     ...options.map((option) => ({ option, rows: rows.filter((r) => r.props[group.id] === option.id) })),
   ];
-  // 卡片上展示除分组属性外的其他属性
-  const cardProps = db.properties.filter((p) => p.id !== group.id);
+  // 卡片上展示除分组属性外的其他未隐藏属性
+  const cardProps = visibleProperties(db, view).filter((p) => p.id !== group.id);
 
   const addCard = (option: SelectOption | null) => onCreate(option ? { [group.id]: option.id } : {});
 
@@ -192,12 +192,15 @@ function BoardCard({ card, cardProps, editing, onEditDone }: CardProps) {
       onMouseDown={() => {
         wasEditing.current = editing;
       }}
-      onClick={() => {
-        if (!editing && !wasEditing.current) navigate(card.id);
+      onClick={(e) => {
+        if (!editing && !wasEditing.current) {
+          if (e.metaKey || e.ctrlKey) navigate(card.id);
+          else setPeekRowId(card.id);
+        }
         wasEditing.current = false;
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && e.target === e.currentTarget) navigate(card.id);
+        if (e.key === "Enter" && e.target === e.currentTarget) setPeekRowId(card.id);
       }}
       onDragStart={(e) => {
         draggingCard = card.id;

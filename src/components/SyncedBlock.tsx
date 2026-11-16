@@ -1,33 +1,74 @@
-import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ComponentType } from "react";
 import { createReactBlockSpec } from "@blocknote/react";
 import { RefreshCw } from "lucide-react";
 import type { PageRecord } from "../../shared/types";
 import { fetchPage, getState, updatePage, useStore } from "../store";
 import { Island } from "./Island";
 
+interface SyncableEditorHandle {
+  document: unknown[];
+  replaceBlocks: (toRemove: unknown[], replacements: unknown[]) => void;
+}
+
 interface NestedEditorProps {
   page: PageRecord;
   editable: boolean;
-  onReady: (editor: null) => void;
+  onReady: (editor: SyncableEditorHandle | null) => void;
+  onContentSync?: (blocks: unknown[]) => void;
   nested?: boolean;
 }
 
-/**
- * 同步块里要再放一个编辑器，而编辑器的定义又要引用同步块，两个文件会互相依赖。
- * 所以由编辑器那边在加载后把自己登记进来。
- */
 let NestedEditor: ComponentType<NestedEditorProps> | null = null;
 
 export function registerNestedEditor(component: ComponentType<NestedEditorProps>) {
   NestedEditor = component;
 }
 
+/** 同一页面内多个相同同步块实例的实时广播总线 */
+const syncPeers = new Map<string, Map<string, (blocks: unknown[]) => void>>();
+
+function broadcastSynced(sourceId: string, fromInstance: string, blocks: unknown[]) {
+  const peers = syncPeers.get(sourceId);
+  if (!peers) return;
+  for (const [id, apply] of peers) {
+    if (id !== fromInstance) apply(blocks);
+  }
+}
+
 /** 同步块的内容存成一个不显示在页面树里的内部页面，所有引用它的块编辑的是同一份。 */
 function SyncedIsland({ sourceId }: { sourceId: string }) {
+  const instanceId = useId();
   const source = useStore((s) => s.pages[sourceId]);
   const [record, setRecord] = useState<PageRecord | null>(null);
   const [failed, setFailed] = useState(false);
-  const noop = useCallback(() => {}, []);
+  const editorRef = useRef<SyncableEditorHandle | null>(null);
+  const applyingRemote = useRef(false);
+
+  const onReady = useCallback((ed: SyncableEditorHandle | null) => {
+    editorRef.current = ed;
+  }, []);
+
+  useEffect(() => {
+    let peers = syncPeers.get(sourceId);
+    if (!peers) {
+      peers = new Map();
+      syncPeers.set(sourceId, peers);
+    }
+    peers.set(instanceId, (blocks) => {
+      const ed = editorRef.current;
+      if (!ed) return;
+      applyingRemote.current = true;
+      try {
+        ed.replaceBlocks(ed.document, blocks);
+      } finally {
+        applyingRemote.current = false;
+      }
+    });
+    return () => {
+      peers?.delete(instanceId);
+      if (peers && peers.size === 0) syncPeers.delete(sourceId);
+    };
+  }, [sourceId, instanceId]);
 
   useEffect(() => {
     let alive = true;
@@ -57,7 +98,15 @@ function SyncedIsland({ sourceId }: { sourceId: string }) {
         <span className="synced-hint">在别处输入 /同步 可插入同一个块</span>
       </div>
       {record && NestedEditor ? (
-        <NestedEditor page={record} editable onReady={noop} nested />
+        <NestedEditor
+          page={record}
+          editable
+          onReady={onReady}
+          nested
+          onContentSync={(blocks) => {
+            if (!applyingRemote.current) broadcastSynced(sourceId, instanceId, blocks);
+          }}
+        />
       ) : (
         <div className="synced-loading">正在加载…</div>
       )}

@@ -1,14 +1,15 @@
 import { useEffect, useRef } from "react";
 import { FileText, Plus } from "lucide-react";
-import type { DatabaseDef, PageMeta, PropertyDef } from "../../../shared/types";
-import { cellValue } from "../../db";
-import { navigate, updatePage } from "../../store";
+import type { DatabaseDef, PageMeta, PropertyDef, ViewDef } from "../../../shared/types";
+import { cellValue, visibleProperties } from "../../db";
+import { navigate, setPeekRowId, updatePage } from "../../store";
 import { coverStyle } from "../pickers";
 import { cx } from "../Popover";
 import { ValueDisplay } from "./cells";
 
 interface Props {
   db: DatabaseDef;
+  view: ViewDef;
   rows: PageMeta[];
   editingId: string | null;
   onEditDone: () => void;
@@ -16,14 +17,15 @@ interface Props {
 }
 
 /** 画廊：每一行是一张带封面的卡片。封面取页面自己的封面。 */
-export function GalleryView({ db, rows, editingId, onEditDone, onCreate }: Props) {
+export function GalleryView({ db, view, rows, editingId, onEditDone, onCreate }: Props) {
+  const shownDefs = visibleProperties(db, view);
   return (
     <div className="gallery">
       {rows.map((row) => (
         <GalleryCard
           key={row.id}
           row={row}
-          defs={db.properties}
+          defs={shownDefs}
           editing={row.id === editingId}
           onEditDone={onEditDone}
         />
@@ -53,11 +55,14 @@ function GalleryCard({ row, defs, editing, onEditDone }: CardProps) {
       className="gallery-card"
       role="button"
       tabIndex={0}
-      onClick={() => {
-        if (!editing) navigate(row.id);
+      onClick={(e) => {
+        if (!editing) {
+          if (e.metaKey || e.ctrlKey) navigate(row.id);
+          else setPeekRowId(row.id);
+        }
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && e.target === e.currentTarget) navigate(row.id);
+        if (e.key === "Enter" && e.target === e.currentTarget) setPeekRowId(row.id);
       }}
     >
       <div className={cx("gallery-cover", !row.cover && "empty")} style={row.cover ? coverStyle(row.cover) : undefined}>

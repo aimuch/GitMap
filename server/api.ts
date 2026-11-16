@@ -8,14 +8,21 @@ import path from "node:path";
 import crypto from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
+  AiChatMessage,
+  AiCitation,
+  AiConfigUpdate,
+  AiProtocol,
   DatabaseDef,
   HistoryEntry,
+  PageComment,
+  PageFont,
   PageKind,
   PageMeta,
   PageRecord,
   PropValue,
   SearchHit,
 } from "../shared/types.ts";
+import { AiService, unfurlUrl } from "./ai.ts";
 import { notesContent, sampleDatabase, sampleRows, welcomeContent } from "./seed.ts";
 
 const ID_RE = /^[a-f0-9]{16}$/;
@@ -48,12 +55,37 @@ const MAX_VERSIONS = 40;
 
 const newId = () => crypto.randomBytes(8).toString("hex");
 
+function cleanFont(v: unknown): PageFont {
+  return v === "serif" || v === "mono" ? v : "sans";
+}
+
+function cleanComments(v: unknown): PageComment[] {
+  if (!Array.isArray(v)) return [];
+  const out: PageComment[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== "object") continue;
+    const c = item as Partial<PageComment>;
+    if (typeof c.id !== "string" || typeof c.text !== "string" || !c.text.trim()) continue;
+    out.push({
+      id: c.id.slice(0, 32),
+      author: typeof c.author === "string" && c.author.trim() ? c.author.trim().slice(0, 40) : "我",
+      text: c.text.slice(0, 4000),
+      createdAt: typeof c.createdAt === "number" ? c.createdAt : Date.now(),
+    });
+  }
+  return out;
+}
+
 /** 把从磁盘读到的页面补全成当前版本的结构（兼容旧文件） */
 function normalize(page: PageRecord): PageRecord {
   page.content = Array.isArray(page.content) ? page.content : [];
   page.kind = page.kind === "database" ? "database" : "page";
   page.database = page.kind === "database" ? (cleanDatabase(page.database) ?? { properties: [], views: [] }) : null;
   page.props = cleanProps(page.props) ?? {};
+  page.smallText = page.smallText === true;
+  page.font = cleanFont(page.font);
+  page.locked = page.locked === true;
+  page.comments = cleanComments(page.comments);
   page.template = page.template === true;
   page.hidden = page.hidden === true;
   return page;
@@ -249,6 +281,10 @@ class Store {
       order: sibs.length ? sibs[sibs.length - 1].order + 1 : 0,
       favorite: false,
       fullWidth: false,
+      smallText: false,
+      font: "sans",
+      locked: false,
+      comments: [],
       trashed: false,
       trashedAt: null,
       createdAt: now,
@@ -286,6 +322,10 @@ class Store {
     const props = cleanProps(patch.props);
     if (props) page.props = props;
     if (typeof patch.fullWidth === "boolean") page.fullWidth = patch.fullWidth;
+    if (typeof patch.smallText === "boolean") page.smallText = patch.smallText;
+    if (patch.font === "sans" || patch.font === "serif" || patch.font === "mono") page.font = patch.font;
+    if (typeof patch.locked === "boolean") page.locked = patch.locked;
+    if (Array.isArray(patch.comments)) page.comments = cleanComments(patch.comments);
     if (Array.isArray(patch.content)) page.content = patch.content;
     page.updatedAt = Date.now();
     void this.persist(page);
@@ -378,6 +418,8 @@ class Store {
       props: structuredClone(from.props),
     });
     copy.fullWidth = from.fullWidth;
+    copy.smallText = from.smallText;
+    copy.font = from.font;
     copies.set(from.id, copy);
     for (const child of children) this.copySubtree(child, copy.id, child.title, copies);
     return copy;
@@ -426,6 +468,8 @@ class Store {
     target.icon = target.icon ?? template.icon;
     target.cover = target.cover ?? template.cover;
     target.fullWidth = template.fullWidth;
+    target.smallText = template.smallText;
+    target.font = template.font;
     target.kind = template.kind;
     target.database = structuredClone(template.database);
     if (!target.title) target.title = template.title;
@@ -610,6 +654,154 @@ class Store {
     hits.sort((a, b) => b.score - a.score || b.updatedAt - a.updatedAt);
     return hits.slice(0, 30).map(({ score: _s, updatedAt: _u, ...hit }) => hit);
   }
+
+  /** 查找所有引用了指定页面的其他页面（@提及、内部链接、链接数据库、数据库关联列） */
+  backlinks(targetId: string): SearchHit[] {
+    this.get(targetId);
+    const results: (SearchHit & { updatedAt: number })[] = [];
+    for (const p of this.pages.values()) {
+      if (p.id === targetId || p.trashed || p.hidden) continue;
+      const inRelation = Object.values(p.props ?? {}).some((v) => Array.isArray(v) && v.includes(targetId));
+      const rawContent = JSON.stringify(p.content);
+      const inContent = rawContent.includes(targetId);
+      if (!inRelation && !inContent) continue;
+      const body = [...extractText(p.content), ...this.propsText(p)].join(" ").replace(/\s+/g, " ");
+      results.push({
+        id: p.id,
+        title: p.title,
+        icon: p.icon,
+        snippet: inRelation && !inContent ? "通过数据库关联属性引用" : body.slice(0, 90),
+        updatedAt: p.updatedAt,
+      });
+    }
+    results.sort((a, b) => b.updatedAt - a.updatedAt);
+    return results.map(({ updatedAt: _u, ...rest }) => rest);
+  }
+
+  /** 清理没有任何页面引用的孤立同步块内部页面 */
+  cleanOrphanSynced(): number {
+    const referenced = new Set<string>();
+    const collect = (node: unknown) => {
+      if (Array.isArray(node)) {
+        for (const item of node) collect(item);
+      } else if (node && typeof node === "object") {
+        const obj = node as Record<string, unknown>;
+        if (obj.type === "synced" && obj.props && typeof (obj.props as { sourceId?: string }).sourceId === "string") {
+          referenced.add((obj.props as { sourceId: string }).sourceId);
+        }
+        if (obj.children) collect(obj.children);
+        if (obj.content) collect(obj.content);
+      }
+    };
+    for (const p of this.pages.values()) {
+      if (!p.hidden) collect(p.content);
+    }
+    let removed = 0;
+    for (const p of [...this.pages.values()]) {
+      if (p.hidden && !referenced.has(p.id)) {
+        this.remove(p.id);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  /** 将一个页面（或数据库及其行）整理为供大模型阅读的结构化上下文 */
+  private formatPageContext(p: PageRecord, maxBody = 3500): string {
+    const lines: string[] = [`# ${p.title || "无标题"}`];
+    if (p.parentId) {
+      const parent = this.pages.get(p.parentId);
+      if (parent?.kind === "database" && parent.database) {
+        const propPairs = parent.database.properties
+          .map((def) => {
+            const val = p.props[def.id];
+            if (val === null || val === undefined || val === "") return "";
+            if (def.type === "select" || def.type === "multiSelect") {
+              const ids = Array.isArray(val) ? val : [String(val)];
+              const names = ids.map((id) => def.options?.find((o) => o.id === id)?.name ?? id).filter(Boolean);
+              return names.length ? `${def.name}: ${names.join("、")}` : "";
+            }
+            if (def.type === "relation" && Array.isArray(val)) {
+              const names = val.map((id) => this.pages.get(id)?.title || "无标题");
+              return names.length ? `${def.name}: ${names.join("、")}` : "";
+            }
+            return `${def.name}: ${typeof val === "boolean" ? (val ? "是" : "否") : String(val)}`;
+          })
+          .filter(Boolean);
+        if (propPairs.length > 0) lines.push(propPairs.join(" | "));
+      }
+    }
+    if (p.kind === "database" && p.database) {
+      const rows = this.siblings(p.id);
+      lines.push(`数据库（共 ${rows.length} 行），列：${p.database.properties.map((d) => d.name).join("、")}`);
+      for (const row of rows.slice(0, 60)) {
+        const vals = p.database.properties
+          .map((def) => {
+            const val = row.props[def.id];
+            if (val === null || val === undefined || val === "") return "";
+            if (def.type === "select" || def.type === "multiSelect") {
+              const ids = Array.isArray(val) ? val : [String(val)];
+              return `${def.name}=${ids.map((id) => def.options?.find((o) => o.id === id)?.name ?? id).join("/")}`;
+            }
+            return `${def.name}=${String(val)}`;
+          })
+          .filter(Boolean)
+          .join(", ");
+        lines.push(`- ${row.title || "无标题"}${vals ? ` (${vals})` : ""}`);
+      }
+    } else {
+      const body = extractText(p.content).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+      if (body) lines.push(body.slice(0, maxBody));
+    }
+    return lines.join("\n");
+  }
+
+  /** 为 AI 助手组装当前页或全工作区检索（RAG）上下文 */
+  buildAiContext(scope: string, query: string, pageId?: string): { context: string; citations: AiCitation[] } {
+    if (scope === "page" && pageId && this.pages.has(pageId)) {
+      const p = this.pages.get(pageId)!;
+      return {
+        context: `以下是用户当前正在查看的页面内容：\n\n${this.formatPageContext(p, 8000)}`,
+        citations: [{ id: p.id, title: p.title || "无标题", icon: p.icon }],
+      };
+    }
+    if (scope !== "workspace") return { context: "", citations: [] };
+
+    const q = query.trim().toLowerCase();
+    // 兼顾英文空格分词与中文双字切分检索
+    const terms = new Set<string>();
+    for (const part of q.split(/[\s,，。？！、；：/]+/).filter(Boolean)) {
+      if (part.length >= 2) terms.add(part);
+      for (let i = 0; i + 1 < part.length; i++) {
+        const bi = part.slice(i, i + 2);
+        if (/[\u4e00-\u9fff]/.test(bi)) terms.add(bi);
+      }
+    }
+
+    const candidates = [...this.pages.values()]
+      .filter((p) => !p.trashed && !p.hidden)
+      .map((p) => {
+        const title = p.title.toLowerCase();
+        const body = ([...extractText(p.content), ...this.propsText(p)].join(" ")).toLowerCase();
+        let score = p.id === pageId ? 3 : 0;
+        for (const t of terms) {
+          if (title.includes(t)) score += 4;
+          if (body.includes(t)) score += 1;
+        }
+        return { p, score };
+      })
+      .sort((a, b) => b.score - a.score || b.p.updatedAt - a.p.updatedAt);
+
+    const picked = (candidates.some((c) => c.score > 0) ? candidates.filter((c) => c.score > 0) : candidates).slice(0, 8);
+    if (picked.length === 0) return { context: "", citations: [] };
+
+    const sections = picked.map(({ p }, i) => `【资料 ${i + 1}】\n${this.formatPageContext(p, 1800)}`);
+    const citations: AiCitation[] = picked.map(({ p }) => ({ id: p.id, title: p.title || "无标题", icon: p.icon }));
+    return {
+      context: `以下是从用户本地 OpenNotion 工作区检索到的相关页面与数据库内容，请优先依据这些内容回答问题；如果工作区中没有相关信息，请如实说明：\n\n${sections.join("\n\n---\n\n")}`,
+      citations,
+    };
+  }
 }
 
 function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
@@ -658,6 +850,7 @@ type Next = (err?: unknown) => void;
 
 export function createApiMiddleware(dataDir: string) {
   const store = new Store(dataDir);
+  const ai = new AiService(dataDir);
 
   async function serveUpload(name: string, res: ServerResponse) {
     if (!UPLOAD_RE.test(name)) throw new HttpError(404, "文件不存在");
@@ -729,6 +922,8 @@ export function createApiMiddleware(dataDir: string) {
           store.remove(id);
           return all();
         }
+      } else if (action === "backlinks" && method === "GET") {
+        return send(res, 200, { backlinks: store.backlinks(id) });
       } else if (action === "history") {
         if (method === "GET" && !sub) return send(res, 200, { versions: await store.history(id) });
         if (method === "GET" && sub && !verb) return send(res, 200, { version: await store.version(id, sub) });
@@ -767,6 +962,86 @@ export function createApiMiddleware(dataDir: string) {
     if (resource === "trash" && method === "DELETE") {
       store.emptyTrash();
       return all();
+    }
+
+    if (resource === "synced" && id === "cleanup" && method === "POST") {
+      await readJson(req);
+      const removed = store.cleanOrphanSynced();
+      return send(res, 200, { removed, pages: store.metas() });
+    }
+
+    if (resource === "unfurl" && method === "GET") {
+      const target = url.searchParams.get("url") ?? "";
+      if (!target) throw new HttpError(400, "缺少网址");
+      try {
+        return send(res, 200, { data: await unfurlUrl(target) });
+      } catch (err) {
+        throw new HttpError(400, err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    if (resource === "ai") {
+      try {
+        if (id === "config") {
+          if (method === "GET") return send(res, 200, { config: await ai.getPublicConfig() });
+          if (method === "PUT") {
+            const body = (await readJson(req)) as unknown as AiConfigUpdate;
+            return send(res, 200, { config: await ai.updateConfig(body) });
+          }
+        }
+        if (id === "models" && method === "POST") {
+          const body = await readJson(req);
+          const models = await ai.fetchModels({
+            providerId: typeof body.providerId === "string" ? body.providerId : undefined,
+            protocol: body.protocol === "anthropic" || body.protocol === "gemini" ? (body.protocol as AiProtocol) : body.protocol === "openai" ? "openai" : undefined,
+            baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
+            apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
+            headers: body.headers && typeof body.headers === "object" ? (body.headers as Record<string, string>) : undefined,
+          });
+          return send(res, 200, { models });
+        }
+        if (id === "test" && method === "POST") {
+          const body = await readJson(req);
+          const result = await ai.testConnection({
+            providerId: typeof body.providerId === "string" ? body.providerId : undefined,
+            model: typeof body.model === "string" ? body.model : undefined,
+            protocol: body.protocol === "anthropic" || body.protocol === "gemini" ? (body.protocol as AiProtocol) : body.protocol === "openai" ? "openai" : undefined,
+            baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
+            apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
+            headers: body.headers && typeof body.headers === "object" ? (body.headers as Record<string, string>) : undefined,
+          });
+          return send(res, 200, result);
+        }
+        if (id === "chat" && method === "POST") {
+          const body = await readJson(req);
+          const rawMessages = Array.isArray(body.messages) ? (body.messages as AiChatMessage[]) : [];
+          const scope = typeof body.scope === "string" ? body.scope : "none";
+          const pageId = typeof body.pageId === "string" ? body.pageId : undefined;
+          const lastUser = [...rawMessages].reverse().find((m) => m?.role === "user")?.content ?? "";
+          const { context, citations } = store.buildAiContext(scope, lastUser, pageId);
+          const system = [typeof body.system === "string" ? body.system : "", context].filter(Boolean).join("\n\n");
+          const abort = new AbortController();
+          res.on("close", () => {
+            if (!res.writableEnded) abort.abort();
+          });
+          await ai.streamChat(
+            {
+              providerId: typeof body.providerId === "string" ? body.providerId : undefined,
+              model: typeof body.model === "string" ? body.model : undefined,
+              messages: rawMessages,
+              system,
+              temperature: typeof body.temperature === "number" ? body.temperature : undefined,
+              citations,
+            },
+            res,
+            abort.signal,
+          );
+          return;
+        }
+      } catch (err) {
+        if (err instanceof HttpError) throw err;
+        throw new HttpError(400, err instanceof Error ? err.message : String(err));
+      }
     }
 
     if (resource === "search" && method === "GET") {

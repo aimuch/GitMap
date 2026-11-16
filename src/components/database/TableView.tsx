@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowDown, ArrowUp, Check, FileText, GripVertical, Maximize2, Plus, Trash2 } from "lucide-react";
-import type { DatabaseDef, PageMeta, PropertyDef, PropType, ViewDef } from "../../../shared/types";
+import { ArrowDown, ArrowUp, Check, FileText, GripVertical, PanelRightOpen, Plus, Trash2 } from "lucide-react";
+import type { CalcFn, DatabaseDef, PageMeta, PropertyDef, PropType, ViewDef } from "../../../shared/types";
 import {
   PROP_TYPES,
   addProperty,
+  calcOptionsFor,
+  calculateColumn,
   changePropertyType,
   removeProperty,
   updateProperty,
   updateView,
+  visibleProperties,
 } from "../../db";
-import { movePage, navigate, trashPage, updatePage } from "../../store";
+import { movePage, navigate, setPeekRowId, trashPage, updatePage } from "../../store";
 import { MenuDivider, MenuItem, Popover, cx } from "../Popover";
 import { PropIcon, PropertyCell, PropertyConfig } from "./cells";
 
@@ -32,9 +35,9 @@ let draggingRow: string | null = null;
 export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow }: Props) {
   const [menu, setMenu] = useState<{ anchor: HTMLElement; propId: string } | null>(null);
   const [addAnchor, setAddAnchor] = useState<HTMLElement | null>(null);
-  // 拖动列边界时的临时宽度，松手后才写回视图
   const [live, setLive] = useState<Record<string, number>>({});
   const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
+  const shownProps = visibleProperties(db, view);
   const menuDef = menu ? db.properties.find((p) => p.id === menu.propId) : undefined;
 
   const track = (key: string, fallback: string) => {
@@ -43,7 +46,7 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
   };
   const columns = [
     track("title", "var(--db-title-col, minmax(260px, 2fr))"),
-    ...db.properties.map((p) => track(p.id, "minmax(150px, 1fr)")),
+    ...shownProps.map((p) => track(p.id, "minmax(150px, 1fr)")),
     "44px",
   ].join(" ");
 
@@ -74,7 +77,6 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
     handle.addEventListener("pointerup", onUp);
   };
 
-  // 只有“手动顺序”下才能拖动排序；有排序规则时顺序由规则决定
   const canReorder = !view.sort;
 
   const onRowDragOver = (row: PageMeta) => (e: DragEvent<HTMLDivElement>) => {
@@ -92,7 +94,6 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
     const id = draggingRow;
     if (!canReorder || !id || !target || id === row.id) return;
     e.preventDefault();
-    // 位置按“全部行”来算：筛选后看不到的行仍然占着它们的位置
     const others = allRows.filter((r) => r.id !== id);
     const at = others.findIndex((r) => r.id === row.id);
     void movePage(id, page.id, target.after ? at + 1 : at);
@@ -100,6 +101,10 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
 
   const toggleMenu = (propId: string, anchor: HTMLElement) =>
     setMenu(menu?.propId === propId ? null : { anchor, propId });
+
+  const setCalc = (key: string, fn: CalcFn) => {
+    updateView(page, view.id, { calculations: { ...(view.calculations ?? {}), [key]: fn } });
+  };
 
   return (
     <div className="db-table-scroll">
@@ -111,7 +116,7 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
             <SortMark view={view} propId="title" />
             <span className="db-resize" onPointerDown={startResize("title")} />
           </div>
-          {db.properties.map((def) => (
+          {shownProps.map((def) => (
             <div
               key={def.id}
               role="columnheader"
@@ -157,7 +162,7 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
             onDrop={onRowDrop(row)}
           >
             <TitleCell row={row} autoFocus={row.id === focusRowId} canReorder={canReorder} />
-            {db.properties.map((def) => (
+            {shownProps.map((def) => (
               <div key={def.id} className="db-td" role="cell">
                 <PropertyCell row={row} def={def} dbPage={page} />
               </div>
@@ -175,12 +180,32 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
             </div>
           </div>
         ))}
+
+        <div className="db-row db-calc-row" role="row">
+          <CalcCell
+            colKey="title"
+            def={null}
+            rows={rows}
+            fn={view.calculations?.title ?? "count"}
+            onChange={(fn) => setCalc("title", fn)}
+          />
+          {shownProps.map((def) => (
+            <CalcCell
+              key={def.id}
+              colKey={def.id}
+              def={def}
+              rows={rows}
+              fn={view.calculations?.[def.id] ?? "none"}
+              onChange={(fn) => setCalc(def.id, fn)}
+            />
+          ))}
+          <div className="db-calc-cell" />
+        </div>
       </div>
 
       <button type="button" className="db-add-row" onClick={onAddRow}>
         <Plus size={15} /> 新建
       </button>
-      <div className="db-count">共 {rows.length} 条</div>
 
       {menu && menuDef && (
         <PropertyMenu
@@ -209,6 +234,48 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
         </Popover>
       )}
     </div>
+  );
+}
+
+function CalcCell({
+  colKey,
+  def,
+  rows,
+  fn,
+  onChange,
+}: {
+  colKey: string;
+  def: PropertyDef | null;
+  rows: PageMeta[];
+  fn: CalcFn;
+  onChange: (fn: CalcFn) => void;
+}) {
+  const options = calcOptionsFor(def);
+  const result = calculateColumn(rows, def, fn);
+  return (
+    <label className={cx("db-calc-cell", result && "active")} aria-label={`${def?.name ?? "名称"}列汇总`}>
+      <span className="db-calc-display">
+        {result ? (
+          <>
+            <span className="db-calc-label">{result.label}</span>
+            <strong>{result.value}</strong>
+          </>
+        ) : (
+          <span className="db-calc-placeholder">计算</span>
+        )}
+      </span>
+      <select
+        key={colKey}
+        value={fn}
+        onChange={(e) => onChange(e.target.value as CalcFn)}
+      >
+        {options.map((o) => (
+          <option key={o.fn} value={o.fn}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -257,8 +324,16 @@ function TitleCell({ row, autoFocus, canReorder }: { row: PageMeta; autoFocus: b
           if (!e.nativeEvent.isComposing && e.key === "Enter") e.currentTarget.blur();
         }}
       />
-      <button type="button" className="db-open" title="作为页面打开" onClick={() => navigate(row.id)}>
-        <Maximize2 size={12} /> 打开
+      <button
+        type="button"
+        className="db-open"
+        title="在侧边抽屉打开（按住 ⌘/Ctrl 点击整页打开）"
+        onClick={(e) => {
+          if (e.metaKey || e.ctrlKey) navigate(row.id);
+          else setPeekRowId(row.id);
+        }}
+      >
+        <PanelRightOpen size={12} /> 打开
       </button>
     </div>
   );
@@ -320,7 +395,7 @@ function PropertyMenu({ anchor, page, def, view, allRows, onClose }: PropertyMen
             hint="更改"
             onClick={() => setPicking(true)}
           />
-          <PropertyConfig dbPage={page} def={def} />
+          <PropertyConfig dbPage={page} def={def} allRows={allRows} />
           <MenuDivider />
           <MenuItem
             icon={view.sort?.propId === def.id && view.sort.dir === "asc" ? <Check size={16} /> : <ArrowUp size={16} />}

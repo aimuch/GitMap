@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, FileText, Plus } from "lucide-react";
 import type { DatabaseDef, PageMeta, PropertyDef, ViewDef } from "../../../shared/types";
 import { addProperty, setProp, updateView } from "../../db";
-import { getState, navigate, updatePage } from "../../store";
+import { getState, navigate, setPeekRowId, updatePage } from "../../store";
 import { cx } from "../Popover";
 import { ValueDisplay } from "./cells";
 
@@ -223,11 +223,14 @@ function CalendarCard({ row, statusDef, editing, onEditDone }: CardProps) {
       role="button"
       tabIndex={0}
       draggable={!editing}
-      onClick={() => {
-        if (!editing) navigate(row.id);
+      onClick={(e) => {
+        if (!editing) {
+          if (e.metaKey || e.ctrlKey) navigate(row.id);
+          else setPeekRowId(row.id);
+        }
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && e.target === e.currentTarget) navigate(row.id);
+        if (e.key === "Enter" && e.target === e.currentTarget) setPeekRowId(row.id);
       }}
       onDragStart={(e) => {
         draggingRow = row.id;

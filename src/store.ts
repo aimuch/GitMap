@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from "react";
-import type { HistoryEntry, NewPageInput, PageMeta, PagePatch, PageRecord, SearchHit } from "../shared/types";
+import type { HistoryEntry, NewPageInput, PageMeta, PagePatch, PageRecord, SearchHit, UnfurlData } from "../shared/types";
 
 export type ThemeSetting = "light" | "dark" | "system";
 
@@ -16,6 +16,10 @@ interface State {
   sidebarWidth: number;
   theme: ThemeSetting;
   searchOpen: boolean;
+  aiOpen: boolean;
+  aiSettingsOpen: boolean;
+  /** 数据库右侧抽屉（Side Peek）打开的行 id */
+  peekRowId: string | null;
 }
 
 export function readLocal<T>(key: string, fallback: T): T {
@@ -59,6 +63,9 @@ let state: State = {
   sidebarWidth: readLocal("sidebarWidth", 260),
   theme: readTheme(),
   searchOpen: false,
+  aiOpen: false,
+  aiSettingsOpen: false,
+  peekRowId: null,
 };
 
 const listeners = new Set<() => void>();
@@ -222,6 +229,22 @@ export async function searchPages(q: string): Promise<SearchHit[]> {
   return hits;
 }
 
+export async function fetchBacklinks(id: string): Promise<SearchHit[]> {
+  const { backlinks } = await request<{ backlinks: SearchHit[] }>(`/api/pages/${id}/backlinks`);
+  return backlinks;
+}
+
+export async function cleanOrphanSynced(): Promise<number> {
+  const data = await request<{ removed: number; pages: PageMeta[] }>("/api/synced/cleanup", { method: "POST", json: {} });
+  setPages(data.pages);
+  return data.removed;
+}
+
+export async function unfurlLink(url: string): Promise<UnfurlData> {
+  const { data } = await request<{ data: UnfurlData }>(`/api/unfurl?url=${encodeURIComponent(url)}`);
+  return data;
+}
+
 export async function uploadFile(file: File): Promise<string> {
   const res = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, {
     method: "POST",
@@ -338,6 +361,18 @@ export function setSearchOpen(open: boolean) {
   set({ searchOpen: open });
 }
 
+export function setAiOpen(open: boolean) {
+  set({ aiOpen: open });
+}
+
+export function setAiSettingsOpen(open: boolean) {
+  set({ aiSettingsOpen: open });
+}
+
+export function setPeekRowId(id: string | null) {
+  set({ peekRowId: id });
+}
+
 const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 
 export function resolveTheme(theme: ThemeSetting): "light" | "dark" {
@@ -449,6 +484,7 @@ export function useRoute(): string | null {
 export function navigate(id: string | null, replace = false) {
   // 手机上选中页面后自动收起侧边栏浮层
   if (isNarrow() && !replace && !state.sidebarCollapsed) set({ sidebarCollapsed: true });
+  if (state.peekRowId) set({ peekRowId: null });
   const hash = id ? `#/${id}` : "#/";
   if (replace) {
     window.history.replaceState(null, "", hash);

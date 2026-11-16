@@ -1,11 +1,16 @@
 import { useEffect } from "react";
 import { CircleAlert, PanelLeft, Plus } from "lucide-react";
+import { AiModal } from "./components/AiModal";
+import { AiSettingsModal } from "./components/AiSettingsModal";
 import { Logo } from "./components/Logo";
+import { RowDrawer } from "./components/database/RowDrawer";
 import {
   createPage,
   getState,
   loadPages,
   navigate,
+  setAiOpen,
+  setAiSettingsOpen,
   setSearchOpen,
   setSidebarCollapsed,
   useRoute,
@@ -22,6 +27,9 @@ export function App() {
   const loaded = useStore((s) => s.loaded);
   const pages = useStore((s) => s.pages);
   const searchOpen = useStore((s) => s.searchOpen);
+  const aiOpen = useStore((s) => s.aiOpen);
+  const aiSettingsOpen = useStore((s) => s.aiSettingsOpen);
+  const peekRowId = useStore((s) => s.peekRowId);
   const revisions = useStore((s) => s.revisions);
   const collapsed = useStore((s) => s.sidebarCollapsed);
   const error = useStore((s) => s.error);
@@ -33,14 +41,13 @@ export function App() {
     void loadPages();
   }, []);
 
-  // 没有选中有效页面时，回到上次打开的页面或第一个页面
   useEffect(() => {
     if (!loaded || current) return;
-    let last: string | null = null;
+    let last: string | null;
     try {
       last = localStorage.getItem(LAST_PAGE_KEY);
     } catch {
-      /* 忽略 */
+      last = null;
     }
     const fallback = last && pages[last] && !pages[last].trashed ? last : (tree.children.get("")?.[0]?.id ?? null);
     if (fallback) navigate(fallback, true);
@@ -61,13 +68,16 @@ export function App() {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       const key = e.key.toLowerCase();
       if (key === "k" || key === "p") {
-        // 在编辑器里选中了文字时，⌘K 留给“添加链接”
         const sel = window.getSelection();
         const inEditor = (e.target as HTMLElement | null)?.closest?.(".bn-editor");
         if (key === "k" && inEditor && sel && !sel.isCollapsed) return;
         e.preventDefault();
         e.stopPropagation();
         setSearchOpen(!getState().searchOpen);
+      } else if (key === "j") {
+        e.preventDefault();
+        e.stopPropagation();
+        setAiOpen(!getState().aiOpen);
       } else if (e.key === "\\") {
         e.preventDefault();
         setSidebarCollapsed(!getState().sidebarCollapsed);
@@ -78,7 +88,19 @@ export function App() {
   }, []);
 
   return (
-    <div className="app">
+    <div
+      className="app"
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        const link = (e.target as HTMLElement | null)?.closest?.("a");
+        if (!link || link.closest(".bn-editor[contenteditable='true']")) return;
+        const m = /^#\/([a-f0-9]{16})$/.exec(link.getAttribute("href") ?? "");
+        if (m) {
+          e.preventDefault();
+          navigate(m[1]);
+        }
+      }}
+    >
       <Sidebar currentId={current} />
       {!collapsed && <div className="sidebar-backdrop" onClick={() => setSidebarCollapsed(true)} />}
       <main className="main">
@@ -118,7 +140,10 @@ export function App() {
           </div>
         )}
       </main>
+      {peekRowId && <RowDrawer id={peekRowId} />}
       {searchOpen && <SearchModal />}
+      {aiOpen && <AiModal currentPageId={current} />}
+      {aiSettingsOpen && <AiSettingsModal onClose={() => setAiSettingsOpen(false)} />}
       {error && (
         <div className="toast" role="alert">
           <CircleAlert size={16} />

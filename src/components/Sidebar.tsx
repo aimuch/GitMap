@@ -13,6 +13,8 @@ import {
   Moon,
   Plus,
   Search,
+  Settings2,
+  Sparkles,
   SquarePen,
   Star,
   Sun,
@@ -28,6 +30,8 @@ import {
   isDescendant,
   movePage,
   navigate,
+  setAiOpen,
+  setAiSettingsOpen,
   setExpanded,
   setSearchOpen,
   setSidebarCollapsed,
@@ -129,6 +133,11 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
             <span>搜索</span>
             <kbd>{modKey}K</kbd>
           </button>
+          <button type="button" className="nav-row" onClick={() => setAiOpen(true)}>
+            <Sparkles size={16} />
+            <span>AI 助手</span>
+            <kbd>{modKey}J</kbd>
+          </button>
         </div>
 
         <div className="sidebar-scroll">
@@ -209,6 +218,10 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
               if (file) void runImport(file);
             }}
           />
+          <button type="button" className="nav-row" onClick={() => setAiSettingsOpen(true)}>
+            <Settings2 size={16} />
+            <span>AI 模型设置</span>
+          </button>
           <button
             type="button"
             className="nav-row"

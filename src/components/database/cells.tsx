@@ -9,8 +9,10 @@ import {
   FileText,
   Hash,
   Link2,
+  LoaderCircle,
   Search,
   Sigma,
+  Sparkles,
   SquareCheck,
   SquareFunction,
   Tags,
@@ -31,7 +33,8 @@ import {
   valueText,
 } from "../../db";
 import { checkFormula } from "../../formula";
-import { navigate, useStore, useTree } from "../../store";
+import { fillRowWithAi } from "../../ai";
+import { navigate, setAiSettingsOpen, useStore, useTree } from "../../store";
 import { Popover, cx } from "../Popover";
 
 const TYPE_ICONS: Record<PropType | "title", typeof Type> = {
@@ -209,14 +212,15 @@ export function PropertyCell({ row, def, dbPage }: CellProps) {
     case "formula":
       return <ComputedCell row={row} def={def} />;
     default:
-      return <TextCell row={row} def={def} />;
+      return <TextCell row={row} def={def} dbPage={dbPage} />;
   }
 }
 
-function TextCell({ row, def }: { row: PageMeta; def: PropertyDef }) {
+function TextCell({ row, def, dbPage }: CellProps) {
   const value = row.props[def.id];
   const text = value === null || value === undefined ? "" : String(value);
   const [draft, setDraft] = useState(text);
+  const [aiBusy, setAiBusy] = useState(false);
   const focused = useRef(false);
 
   // 外部修改（例如撤销、另一处编辑）时同步进来，但不打断正在输入的内容
@@ -257,6 +261,29 @@ function TextCell({ row, def }: { row: PageMeta; def: PropertyDef }) {
           }
         }}
       />
+      {def.type === "text" && def.aiPrompt && (
+        <button
+          type="button"
+          className="cell-ai-btn"
+          title={`AI 自动生成（${def.aiPrompt}）`}
+          aria-label="AI 自动生成"
+          disabled={aiBusy}
+          onClick={async () => {
+            setAiBusy(true);
+            try {
+              await fillRowWithAi(row, dbPage, def);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (msg.includes("API Key")) setAiSettingsOpen(true);
+              else window.alert(msg);
+            } finally {
+              setAiBusy(false);
+            }
+          }}
+        >
+          {aiBusy ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />}
+        </button>
+      )}
       {def.type === "url" && text && (
         <a
           className="cell-link"
@@ -572,10 +599,51 @@ function DatabaseSelect({ dbPage, def }: { dbPage: PageMeta; def: PropertyDef })
   );
 }
 
-/** 属性菜单里，关联 / 汇总 / 公式各自的设置项。其他类型不需要设置，返回 null。 */
-export function PropertyConfig({ dbPage, def }: { dbPage: PageMeta; def: PropertyDef }) {
+/** 属性菜单里，文本 AI 自动填充 / 关联 / 汇总 / 公式各自的设置项。 */
+export function PropertyConfig({ dbPage, def, allRows }: { dbPage: PageMeta; def: PropertyDef; allRows?: PageMeta[] }) {
   const pages = useStore((s) => s.pages);
   const db = getDatabase(dbPage);
+  const [batchBusy, setBatchBusy] = useState(false);
+
+  if (def.type === "text") {
+    return (
+      <div className="prop-config">
+        <label>
+          <span>
+            <Sparkles size={12} /> AI 自动填充指令（可选）
+          </span>
+          <textarea
+            className="config-formula"
+            rows={2}
+            value={def.aiPrompt ?? ""}
+            placeholder="例如：用一句话概括本行要点 / 判断所属模块（前端、后端、设计）"
+            onChange={(e) => updateProperty(dbPage, def.id, { aiPrompt: e.target.value || undefined })}
+          />
+        </label>
+        {def.aiPrompt && allRows && allRows.length > 0 && (
+          <button
+            type="button"
+            className="text-btn small"
+            disabled={batchBusy}
+            onClick={async () => {
+              setBatchBusy(true);
+              try {
+                for (const row of allRows) await fillRowWithAi(row, dbPage, def);
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                if (msg.includes("API Key")) setAiSettingsOpen(true);
+                else window.alert(msg);
+              } finally {
+                setBatchBusy(false);
+              }
+            }}
+          >
+            {batchBusy ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />} 为全部 {allRows.length} 行自动生成
+          </button>
+        )}
+      </div>
+    );
+  }
 
   if (def.type === "relation") {
     return (

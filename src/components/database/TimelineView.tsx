@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, FileText, GanttChart, Plus } from "lucide-react";
 import type { DatabaseDef, PageMeta, ViewDef } from "../../../shared/types";
 import { addProperty, updateView } from "../../db";
-import { navigate } from "../../store";
+import { navigate, setPeekRowId } from "../../store";
 import { cx } from "../Popover";
 import { toIso } from "./CalendarView";
 
@@ -131,7 +131,11 @@ export function TimelineView({ page, db, view, rows, onCreate }: Props) {
             const b = Math.min(SPAN - 1, dayIndex(to));
             return (
               <div key={row.id} className="timeline-row">
-                <button type="button" className="timeline-name" onClick={() => navigate(row.id)}>
+                <button
+                  type="button"
+                  className="timeline-name"
+                  onClick={(e) => (e.metaKey || e.ctrlKey ? navigate(row.id) : setPeekRowId(row.id))}
+                >
                   <span className="tree-icon">{row.icon ?? <FileText size={15} />}</span>
                   <span className="timeline-title">{row.title || "无标题"}</span>
                 </button>
@@ -151,7 +155,7 @@ export function TimelineView({ page, db, view, rows, onCreate }: Props) {
                       className={cx("timeline-bar", from < first && "cut-left", to > last && "cut-right")}
                       style={{ left: a * DAY_WIDTH + 2, width: (b - a + 1) * DAY_WIDTH - 4 }}
                       title={`${toIso(new Date(from))}${to > from ? ` → ${toIso(new Date(to))}` : ""}`}
-                      onClick={() => navigate(row.id)}
+                      onClick={(e) => (e.metaKey || e.ctrlKey ? navigate(row.id) : setPeekRowId(row.id))}
                     >
                       {row.title || "无标题"}
                     </button>
@@ -187,7 +191,12 @@ export function TimelineView({ page, db, view, rows, onCreate }: Props) {
           </div>
           <div className="timeline-unscheduled">
             {unscheduled.map((row) => (
-              <button key={row.id} type="button" className="row-chip row-chip-button" onClick={() => navigate(row.id)}>
+              <button
+                key={row.id}
+                type="button"
+                className="row-chip row-chip-button"
+                onClick={(e) => (e.metaKey || e.ctrlKey ? navigate(row.id) : setPeekRowId(row.id))}
+              >
                 <span className="row-chip-icon">{row.icon ?? <FileText size={13} />}</span>
                 <span className="tag-name">{row.title || "无标题"}</span>
               </button>

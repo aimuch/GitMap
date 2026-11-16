@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Eraser, FileText, Search, SearchX, Trash, Trash2, Undo2 } from "lucide-react";
+import { Eraser, FileText, RefreshCw, Search, SearchX, Trash, Trash2, Undo2 } from "lucide-react";
 import type { PageMeta } from "../../shared/types";
-import { deletePage, emptyTrash, navigate, restorePage } from "../store";
+import { cleanOrphanSynced, deletePage, emptyTrash, navigate, restorePage, useStore } from "../store";
 import { Popover } from "./Popover";
 
 interface Props {
@@ -12,6 +12,8 @@ interface Props {
 
 export function TrashPopover({ anchor, items, onClose }: Props) {
   const [query, setQuery] = useState("");
+  const [cleanedMsg, setCleanedMsg] = useState<string | null>(null);
+  const hasHiddenSynced = useStore((s) => Object.values(s.pages).some((p) => p.hidden));
   const q = query.trim().toLowerCase();
   const shown = q ? items.filter((p) => (p.title || "无标题").toLowerCase().includes(q)) : items;
 
@@ -82,19 +84,35 @@ export function TrashPopover({ anchor, items, onClose }: Props) {
           </div>
         )}
       </div>
-      {items.length > 0 && (
+      {(items.length > 0 || hasHiddenSynced || cleanedMsg) && (
         <div className="trash-footer">
-          <button
-            type="button"
-            className="text-btn danger"
-            onClick={() => {
-              if (window.confirm(`永久删除回收站中的全部 ${items.length} 个页面？此操作无法撤销。`)) {
-                void emptyTrash();
-              }
-            }}
-          >
-            <Eraser size={14} /> 清空回收站
-          </button>
+          {items.length > 0 && (
+            <button
+              type="button"
+              className="text-btn danger"
+              onClick={() => {
+                if (window.confirm(`永久删除回收站中的全部 ${items.length} 个页面？此操作无法撤销。`)) {
+                  void emptyTrash();
+                }
+              }}
+            >
+              <Eraser size={14} /> 清空回收站
+            </button>
+          )}
+          {hasHiddenSynced && (
+            <button
+              type="button"
+              className="text-btn"
+              title="删除没有被任何页面引用的闲置同步块内容"
+              onClick={async () => {
+                const n = await cleanOrphanSynced();
+                setCleanedMsg(n > 0 ? `已清理 ${n} 个闲置同步块` : "没有未引用的同步块");
+              }}
+            >
+              <RefreshCw size={13} /> 清理闲置同步块
+            </button>
+          )}
+          {cleanedMsg && <span className="trash-clean-note">{cleanedMsg}</span>}
         </div>
       )}
     </Popover>

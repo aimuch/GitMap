@@ -1,5 +1,7 @@
 export type PageKind = "page" | "database";
 
+export type PageFont = "sans" | "serif" | "mono";
+
 export type PropType =
   | "text"
   | "number"
@@ -13,6 +15,20 @@ export type PropType =
   | "formula";
 
 export type RollupFn = "show" | "count" | "sum" | "avg" | "min" | "max";
+
+export type CalcFn =
+  | "none"
+  | "count"
+  | "filled"
+  | "empty"
+  | "percentFilled"
+  | "checked"
+  | "unchecked"
+  | "percentChecked"
+  | "sum"
+  | "avg"
+  | "min"
+  | "max";
 
 /** 属性值：文本/网址/日期/单选为字符串，多选为选项 id 数组，关联为行（页面）id 数组 */
 export type PropValue = string | number | boolean | string[] | null;
@@ -34,6 +50,8 @@ export interface PropertyDef {
   rollup?: { relationProp: string; targetProp: string; fn: RollupFn };
   /** 公式属性的表达式 */
   formula?: string;
+  /** AI 自动填充提示词（用于文本属性一键生成摘要、分类、翻译等） */
+  aiPrompt?: string;
 }
 
 export type FilterOp =
@@ -61,10 +79,12 @@ export interface FilterRule {
   value?: string;
 }
 
+export type ViewType = "table" | "board" | "calendar" | "list" | "gallery" | "timeline";
+
 export interface ViewDef {
   id: string;
   name: string;
-  type: "table" | "board" | "calendar" | "gallery" | "timeline";
+  type: ViewType;
   /** 看板按哪个单选属性分组 */
   groupBy?: string | null;
   /** 日历 / 时间轴按哪个日期属性排布（时间轴里是开始日期） */
@@ -73,6 +93,10 @@ export interface ViewDef {
   endProp?: string | null;
   /** 表格各列的宽度（像素），key 为属性 id，名称列为 "title" */
   widths?: Record<string, number>;
+  /** 当前视图中隐藏的属性 id 列表 */
+  hiddenProps?: string[];
+  /** 表格底部各列的汇总计算方式，key 为属性 id 或 "title" */
+  calculations?: Record<string, CalcFn>;
   /** propId 为 "title" 表示按名称排序 */
   sort?: { propId: string; dir: "asc" | "desc" } | null;
   filters?: FilterRule[];
@@ -85,6 +109,13 @@ export interface DatabaseDef {
   views: ViewDef[];
 }
 
+export interface PageComment {
+  id: string;
+  author: string;
+  text: string;
+  createdAt: number;
+}
+
 export interface PageMeta {
   id: string;
   title: string;
@@ -95,6 +126,10 @@ export interface PageMeta {
   order: number;
   favorite: boolean;
   fullWidth: boolean;
+  smallText: boolean;
+  font: PageFont;
+  locked: boolean;
+  comments: PageComment[];
   trashed: boolean;
   trashedAt: number | null;
   createdAt: number;
@@ -119,7 +154,20 @@ export interface PageRecord extends PageMeta {
 export type PagePatch = Partial<
   Pick<
     PageRecord,
-    "title" | "icon" | "cover" | "favorite" | "fullWidth" | "content" | "kind" | "database" | "props" | "template"
+    | "title"
+    | "icon"
+    | "cover"
+    | "favorite"
+    | "fullWidth"
+    | "smallText"
+    | "font"
+    | "locked"
+    | "comments"
+    | "content"
+    | "kind"
+    | "database"
+    | "props"
+    | "template"
   >
 >;
 
@@ -148,4 +196,77 @@ export interface SearchHit {
   title: string;
   icon: string | null;
   snippet: string;
+}
+
+export interface UnfurlData {
+  url: string;
+  title: string;
+  description: string;
+  siteName: string;
+}
+
+/* ---------- AI 模型配置与对话 ---------- */
+
+export type AiProtocol = "openai" | "anthropic" | "gemini";
+export type AiRegion = "domestic" | "foreign" | "custom";
+
+export interface AiProviderPublic {
+  id: string;
+  name: string;
+  region: AiRegion;
+  builtin: boolean;
+  protocol: AiProtocol;
+  baseUrl: string;
+  defaultBaseUrl?: string;
+  models: string[];
+  /** 是否无需填写 API Key（例如本地 Ollama） */
+  keyOptional?: boolean;
+  /** 模型填写提示（如火山方舟的 Endpoint ID 说明） */
+  modelHint?: string;
+  /** 获取 Key 的控制台链接说明 */
+  keyPlaceholder?: string;
+  hasKey: boolean;
+  keyHint: string;
+  headers?: Record<string, string>;
+}
+
+export interface AiProviderUpdate {
+  id: string;
+  name: string;
+  region: AiRegion;
+  builtin?: boolean;
+  protocol: AiProtocol;
+  baseUrl: string;
+  models: string[];
+  keyOptional?: boolean;
+  /** 留空或不传表示保持原已保存的 Key；传 "__CLEAR__" 表示清空 Key */
+  apiKey?: string;
+  headers?: Record<string, string>;
+}
+
+export interface AiConfigPublic {
+  providers: AiProviderPublic[];
+  activeProviderId: string;
+  activeModel: string;
+  temperature: number;
+  customSystemPrompt: string;
+}
+
+export interface AiConfigUpdate {
+  providers?: AiProviderUpdate[];
+  activeProviderId?: string;
+  activeModel?: string;
+  temperature?: number;
+  customSystemPrompt?: string;
+}
+
+export interface AiChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+export interface AiCitation {
+  id: string;
+  title: string;
+  icon: string | null;
 }

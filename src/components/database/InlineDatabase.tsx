@@ -1,11 +1,11 @@
 import { createReactBlockSpec } from "@blocknote/react";
-import { Maximize2, Table2, Trash2, Undo2 } from "lucide-react";
+import { Link2, Maximize2, Table2, Trash2, Undo2 } from "lucide-react";
 import { getState, navigate, restorePage, updatePage, useStore } from "../../store";
 import { Island } from "../Island";
 import { DatabaseView } from "./DatabaseView";
 
-/** 内嵌在正文里的数据库本体。它的数据就是一个普通的数据库子页面。 */
-function DatabaseIsland({ pageId }: { pageId: string }) {
+/** 内嵌在正文里的数据库本体。链接数据库可各自记住当前选中的视图标签。 */
+function DatabaseIsland({ pageId, blockKey, linked }: { pageId: string; blockKey: string; linked: boolean }) {
   const page = useStore((s) => s.pages[pageId]);
 
   if (!page || page.kind !== "database") {
@@ -41,11 +41,16 @@ function DatabaseIsland({ pageId }: { pageId: string }) {
             if (!e.nativeEvent.isComposing && e.key === "Enter") e.currentTarget.blur();
           }}
         />
+        {linked && (
+          <span className="tree-badge" title="与原数据库共享同一份数据">
+            <Link2 size={11} /> 链接
+          </span>
+        )}
         <button type="button" className="db-open" title="作为整页打开" onClick={() => navigate(pageId)}>
           <Maximize2 size={12} /> 打开
         </button>
       </div>
-      <DatabaseView page={page} />
+      <DatabaseView page={page} viewStorageKey={blockKey ? `view:${pageId}:${blockKey}` : `view:${pageId}`} />
     </div>
   );
 }
@@ -53,19 +58,28 @@ function DatabaseIsland({ pageId }: { pageId: string }) {
 export const createDatabaseBlock = createReactBlockSpec(
   {
     type: "database",
-    propSchema: { pageId: { default: "" } },
+    propSchema: {
+      pageId: { default: "" },
+      blockKey: { default: "" },
+      linked: { default: "false" },
+    },
     content: "none",
   },
   {
     render: ({ block, editor }) => (
       <Island
-        id={block.props.pageId}
+        id={`${block.props.pageId}:${block.props.blockKey}`}
         className="inline-db-host"
         interactive={editor.isEditable}
-        render={() => <DatabaseIsland pageId={block.props.pageId} />}
+        render={() => (
+          <DatabaseIsland
+            pageId={block.props.pageId}
+            blockKey={block.props.blockKey}
+            linked={block.props.linked === "true"}
+          />
+        )}
       />
     ),
-    // 导出 Markdown 等外部格式时，退化成一个指向数据库页面的链接
     toExternalHTML: ({ block }) => {
       const page = getState().pages[block.props.pageId];
       return (

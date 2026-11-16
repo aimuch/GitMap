@@ -2,9 +2,12 @@ import { useMemo, useState } from "react";
 import {
   ArrowUpDown,
   CalendarDays,
+  Eye,
+  EyeOff,
   GanttChart,
   Kanban,
   LayoutGrid,
+  List,
   ListFilter,
   Plus,
   Search,
@@ -24,6 +27,7 @@ import {
   sortRows,
   updateDatabase,
   updateView,
+  visibleProperties,
 } from "../../db";
 import { createPage, readLocal, useTree, writeLocal } from "../../store";
 import { MenuDivider, MenuItem, Popover, cx } from "../Popover";
@@ -31,6 +35,7 @@ import { BoardView } from "./BoardView";
 import { CalendarView, toIso } from "./CalendarView";
 import { FilterMenu } from "./FilterMenu";
 import { GalleryView } from "./GalleryView";
+import { ListView } from "./ListView";
 import { TimelineView } from "./TimelineView";
 import { PropIcon, PropertyCell } from "./cells";
 import { TableView } from "./TableView";
@@ -38,24 +43,34 @@ import { TableView } from "./TableView";
 const VIEW_ICONS = {
   table: Table2,
   board: Kanban,
+  list: List,
   calendar: CalendarDays,
   gallery: LayoutGrid,
   timeline: GanttChart,
 } as const;
-const VIEW_LABELS = { table: "表格", board: "看板", calendar: "日历", gallery: "画廊", timeline: "时间轴" } as const;
+const VIEW_LABELS = {
+  table: "表格",
+  board: "看板",
+  list: "列表",
+  calendar: "日历",
+  gallery: "画廊",
+  timeline: "时间轴",
+} as const;
 const VIEW_TYPES = Object.keys(VIEW_LABELS) as ViewDef["type"][];
 
-export function DatabaseView({ page }: { page: PageMeta }) {
+export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewStorageKey?: string }) {
+  const storageKey = viewStorageKey ?? `view:${page.id}`;
   const tree = useTree();
   const db = getDatabase(page);
   const allRows = tree.children.get(page.id) ?? [];
-  const [activeId, setActiveId] = useState(() => readLocal<string | null>(`view:${page.id}`, null));
+  const [activeId, setActiveId] = useState(() => readLocal<string | null>(storageKey, null));
   const [query, setQuery] = useState("");
   const [focusRowId, setFocusRowId] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<HTMLElement | null>(null);
   const [addMenu, setAddMenu] = useState<HTMLElement | null>(null);
   const [sortMenu, setSortMenu] = useState<HTMLElement | null>(null);
   const [filterMenu, setFilterMenu] = useState<HTMLElement | null>(null);
+  const [propsMenu, setPropsMenu] = useState<HTMLElement | null>(null);
 
   const view = db.views.find((v) => v.id === activeId) ?? db.views[0];
   const rows = useMemo(
@@ -70,7 +85,7 @@ export function DatabaseView({ page }: { page: PageMeta }) {
 
   const selectView = (id: string) => {
     setActiveId(id);
-    writeLocal(`view:${page.id}`, id);
+    writeLocal(storageKey, id);
   };
 
   const addView = (type: ViewDef["type"]) => {
@@ -86,7 +101,6 @@ export function DatabaseView({ page }: { page: PageMeta }) {
     setAddMenu(null);
   };
 
-  // 没有任何视图的数据库（例如手动改坏了数据文件）：给一个入口重新建
   if (!view) {
     return (
       <div className="db-empty">
@@ -101,19 +115,27 @@ export function DatabaseView({ page }: { page: PageMeta }) {
 
   const rowDefaults = defaultsFromFilters(db, view);
   const activeFilters = (view.filters ?? []).filter((rule) => isActiveFilter(rule, db)).length;
+  const hiddenSet = new Set(view.hiddenProps ?? []);
+  const hiddenCount = db.properties.filter((p) => hiddenSet.has(p.id)).length;
+  const shownDefs = visibleProperties(db, view);
 
   const addRow = async (props: Record<string, PropValue> = {}) => {
     if (query) setQuery("");
-    // 先填上能通过当前筛选条件的默认值，调用方指定的值优先
     const id = await createPage({ parentId: page.id, props: { ...rowDefaults, ...props } });
     if (id) setFocusRowId(id);
+  };
+
+  const togglePropVisibility = (propId: string) => {
+    const next = hiddenSet.has(propId)
+      ? (view.hiddenProps ?? []).filter((id) => id !== propId)
+      : [...(view.hiddenProps ?? []), propId];
+    updateView(page, view.id, { hiddenProps: next });
   };
 
   const selects = db.properties.filter((p) => p.type === "select");
   const dates = db.properties.filter((p) => p.type === "date");
   const calendarDate = dates.find((p) => p.id === view.dateProp) ?? dates[0];
   const usesDate = view.type === "calendar" || view.type === "timeline";
-  // 日历和时间轴里点“新建”默认排在今天
   const addFromToolbar = () => void addRow(usesDate && calendarDate ? { [calendarDate.id]: toIso(new Date()) } : {});
   const sortName =
     view.sort?.propId === "title" ? "名称" : db.properties.find((p) => p.id === view.sort?.propId)?.name;
@@ -163,6 +185,15 @@ export function DatabaseView({ page }: { page: PageMeta }) {
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
+          {db.properties.length > 0 && (
+            <button
+              type="button"
+              className={cx("text-btn", hiddenCount > 0 && "on")}
+              onClick={(e) => setPropsMenu(propsMenu ? null : e.currentTarget)}
+            >
+              <Eye size={14} /> 属性{hiddenCount > 0 ? ` · ${db.properties.length - hiddenCount}/${db.properties.length}` : ""}
+            </button>
+          )}
           <button
             type="button"
             className={cx("text-btn", activeFilters > 0 && "on")}
@@ -251,9 +282,18 @@ export function DatabaseView({ page }: { page: PageMeta }) {
           onEditDone={() => setFocusRowId(null)}
           onCreate={(props) => void addRow(props)}
         />
+      ) : view.type === "list" ? (
+        <ListView
+          rows={rows}
+          defs={shownDefs}
+          editingId={focusRowId}
+          onEditDone={() => setFocusRowId(null)}
+          onCreate={() => void addRow()}
+        />
       ) : view.type === "gallery" ? (
         <GalleryView
           db={db}
+          view={view}
           rows={rows}
           editingId={focusRowId}
           onEditDone={() => setFocusRowId(null)}
@@ -281,6 +321,35 @@ export function DatabaseView({ page }: { page: PageMeta }) {
 
       {rows.length === 0 && allRows.length > 0 && (query || activeFilters > 0) && (
         <div className="db-no-match">{query ? `没有符合“${query}”的行` : "没有符合筛选条件的行"}</div>
+      )}
+
+      {propsMenu && (
+        <Popover anchor={propsMenu} onClose={() => setPropsMenu(null)} align="end" className="menu prop-menu">
+          <div className="menu-title">在当前视图显示的属性</div>
+          {db.properties.map((p) => {
+            const shown = !hiddenSet.has(p.id);
+            return (
+              <MenuItem
+                key={p.id}
+                icon={<PropIcon type={p.type} size={15} />}
+                label={p.name}
+                hint={shown ? "显示" : "已隐藏"}
+                onClick={() => togglePropVisibility(p.id)}
+              />
+            );
+          })}
+          <MenuDivider />
+          <MenuItem
+            icon={<Eye size={15} />}
+            label="全部显示"
+            onClick={() => updateView(page, view.id, { hiddenProps: [] })}
+          />
+          <MenuItem
+            icon={<EyeOff size={15} />}
+            label="全部隐藏"
+            onClick={() => updateView(page, view.id, { hiddenProps: db.properties.map((p) => p.id) })}
+          />
+        </Popover>
       )}
 
       {filterMenu && (
@@ -367,7 +436,7 @@ export function DatabaseView({ page }: { page: PageMeta }) {
   );
 }
 
-/** 数据库里的一行作为页面打开时，标题下方的属性面板。 */
+/** 数据库里的一行作为页面或抽屉打开时，标题下方的属性面板。 */
 export function RowProperties({ row, dbPage }: { row: PageMeta; dbPage: PageMeta }) {
   const db = getDatabase(dbPage);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);

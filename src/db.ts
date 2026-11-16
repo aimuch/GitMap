@@ -1,5 +1,6 @@
 /** 数据库（表格 / 看板）相关的纯逻辑：默认结构、读写属性、排序、筛选、类型转换、导出。 */
 import type {
+  CalcFn,
   DatabaseDef,
   FilterOp,
   FilterRule,
@@ -85,6 +86,77 @@ const EMPTY: DatabaseDef = { properties: [], views: [] };
 
 export function getDatabase(page: PageMeta): DatabaseDef {
   return page.database ?? EMPTY;
+}
+
+export function visibleProperties(db: DatabaseDef, view: ViewDef | undefined): PropertyDef[] {
+  const hidden = new Set(view?.hiddenProps ?? []);
+  return db.properties.filter((p) => !hidden.has(p.id));
+}
+
+export function calcOptionsFor(def: PropertyDef | null): { fn: CalcFn; label: string }[] {
+  const common: { fn: CalcFn; label: string }[] = [
+    { fn: "none", label: "不计算" },
+    { fn: "count", label: "总行数" },
+    { fn: "filled", label: "已填写" },
+    { fn: "empty", label: "未填写" },
+    { fn: "percentFilled", label: "已填写占比" },
+  ];
+  if (!def) return common;
+  if (def.type === "checkbox") {
+    return [
+      { fn: "none", label: "不计算" },
+      { fn: "checked", label: "已勾选" },
+      { fn: "unchecked", label: "未勾选" },
+      { fn: "percentChecked", label: "已完成占比" },
+    ];
+  }
+  if (def.type === "number" || def.type === "rollup" || def.type === "formula") {
+    return [
+      ...common,
+      { fn: "sum", label: "求和" },
+      { fn: "avg", label: "平均值" },
+      { fn: "min", label: "最小值" },
+      { fn: "max", label: "最大值" },
+    ];
+  }
+  return common;
+}
+
+export function calculateColumn(rows: PageMeta[], def: PropertyDef | null, fn: CalcFn): { label: string; value: string } | null {
+  if (!fn || fn === "none") return null;
+  const total = rows.length;
+  if (fn === "count") return { label: "总数", value: String(total) };
+
+  if (def?.type === "checkbox" && (fn === "checked" || fn === "unchecked" || fn === "percentChecked")) {
+    const checked = rows.filter((r) => cellValue(r, def) === true).length;
+    if (fn === "checked") return { label: "已勾选", value: String(checked) };
+    if (fn === "unchecked") return { label: "未勾选", value: String(total - checked) };
+    const pct = total === 0 ? 0 : Math.round((checked / total) * 100);
+    return { label: "完成率", value: `${pct}%` };
+  }
+
+  const filledCount = rows.filter((r) => (def ? !isEmptyValue(cellValue(r, def)) : Boolean(r.title.trim()))).length;
+  if (fn === "filled") return { label: "已填", value: String(filledCount) };
+  if (fn === "empty") return { label: "未填", value: String(total - filledCount) };
+  if (fn === "percentFilled") {
+    const pct = total === 0 ? 0 : Math.round((filledCount / total) * 100);
+    return { label: "已填", value: `${pct}%` };
+  }
+
+  if (!def) return null;
+  const nums = rows
+    .map((r) => {
+      const v = cellValue(r, def);
+      return typeof v === "number" ? v : typeof v === "string" ? parseFloat(v) : NaN;
+    })
+    .filter((n) => Number.isFinite(n));
+  if (nums.length === 0) return { label: fn === "sum" ? "求和" : fn === "avg" ? "均值" : fn === "min" ? "最小" : "最大", value: "0" };
+  const sum = nums.reduce((a, b) => a + b, 0);
+  if (fn === "sum") return { label: "求和", value: String(Number(sum.toPrecision(12))) };
+  if (fn === "avg") return { label: "均值", value: String(Number((sum / nums.length).toPrecision(6))) };
+  if (fn === "min") return { label: "最小", value: String(Math.min(...nums)) };
+  if (fn === "max") return { label: "最大", value: String(Math.max(...nums)) };
+  return null;
 }
 
 export function updateDatabase(page: PageMeta, change: (db: DatabaseDef) => DatabaseDef) {
