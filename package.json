@@ -16,11 +16,12 @@
     "desktop:main": "esbuild electron/main.ts --bundle --platform=node --format=cjs --target=node20 --external:electron --outfile=dist-electron/main.cjs",
     "desktop:build": "npm run build && npm run desktop:main",
     "desktop": "npm run desktop:build && electron .",
-    "dist:mac": "npm run desktop:build && electron-builder --mac",
-    "dist:win": "npm run desktop:build && electron-builder --win --x64",
-    "dist:linux": "npm run desktop:build && electron-builder --linux --x64",
-    "dist:win:zip": "npm run desktop:build && electron-builder --win zip --x64",
-    "dist:linux:tar": "npm run desktop:build && electron-builder --linux tar.gz --x64"
+    "dist:mac": "npm run desktop:build && electron-builder --mac --publish never",
+    "dist:mac:all": "npm run desktop:build && electron-builder --mac --arm64 --x64 --publish never",
+    "dist:win": "npm run desktop:build && electron-builder --win --x64 --publish never",
+    "dist:linux": "npm run desktop:build && electron-builder --linux --x64 --publish never",
+    "dist:win:zip": "npm run desktop:build && electron-builder --win zip --x64 --publish never",
+    "dist:linux:tar": "npm run desktop:build && electron-builder --linux tar.gz --x64 --publish never"
   },
   "build": {
     "appId": "local.opennotion.desktop",
@@ -36,6 +37,7 @@
     ],
     "mac": {
       "target": "dmg",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "identity": "-",
       "hardenedRuntime": false,
       "icon": "build/icon-mac.png",
@@ -46,9 +48,11 @@
         "nsis",
         "zip"
       ],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}",
       "icon": "build/icon.png"
     },
     "nsis": {
+      "artifactName": "${productName}-${version}-win-${arch}-setup.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },
@@ -57,6 +61,7 @@
         "AppImage",
         "tar.gz"
       ],
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "icon": "build/icon.png",
       "category": "Office",
       "syncDesktopName": true

@@ -29,13 +29,14 @@ npm run desktop
 
 | 命令 | 产物（在 `release/` 目录） | 在哪里能构建 |
 | --- | --- | --- |
-| `npm run dist:mac` | `.dmg` 安装镜像 | macOS |
-| `npm run dist:win` | 安装程序 `.exe` + 免安装 `.zip` | Windows，或 Intel 芯片 / 装了 Rosetta 的 Mac |
+| `npm run dist:mac` | `OpenNotion-<版本>-mac-<arch>.dmg` | macOS |
+| `npm run dist:mac:all` | Apple Silicon `arm64` + Intel `x64` 双架构 `.dmg` | macOS |
+| `npm run dist:win` | 安装程序 `-setup.exe` + 免安装 `.zip` | Windows，或 Intel 芯片 / 装了 Rosetta 的 Mac |
 | `npm run dist:win:zip` | 免安装 `.zip`，解压后运行 `OpenNotion.exe` | 任何系统 |
 | `npm run dist:linux` | `.AppImage` + `.tar.gz` | Linux，或 Intel 芯片 / 装了 Rosetta 的 Mac |
 | `npm run dist:linux:tar` | `.tar.gz`，解压后运行 `open-notion` | 任何系统 |
 
-要一次得到三个平台的正式安装包，最省事的是用 `.github/workflows/desktop.yml`：把项目推到 GitHub 后在 Actions 里手动运行，它会分别在三种系统上构建并提供下载。
+- **GitHub CI 自动编译并发布到 Releases**：项目内置 `.github/workflows/desktop.yml`。推送代码到 `main` 分支、推送 `v*` 标签（如 `git tag v0.1.0 && git push origin v0.1.0`），或在 GitHub Actions 页面点击 **Run workflow**，CI 都会在原生 macOS / Windows / Linux 环境中并行打包全部 6 个安装包（`mac-arm64.dmg`、`mac-x64.dmg`、`win-x64-setup.exe`、`win-x64.zip`、`linux-x64.AppImage`、`linux-x64.tar.gz`）及 `SHA256SUMS.txt` 校验文件，并自动发布到仓库的 **Releases** 页面下。
 
 - **多设备同步与数据导入**：所有笔记都是独立的 JSON 文件。在桌面版左下角点齿轮“设置 → 数据与多端同步”（或菜单“文件 → 更改数据存储目录”），把数据目录指向 **iCloud Drive、群晖 Synology Drive、SMB/NAS 挂载目录、OneDrive 或坚果云** 中的同一个文件夹，即可在多台电脑之间同步工作区；切换回窗口时会自动增量读取磁盘更新。要把另一份工作区的笔记并进来，点“合并其他文件夹数据…”即可（已存在的页面不会覆盖）。
 - **没有签名证书**：安装包没有经过 Apple / 微软的开发者签名。拿到别的电脑上第一次打开时，macOS 会提示“无法验证开发者”（到“系统设置 → 隐私与安全性”里点“仍要打开”），Windows 会弹出 SmartScreen 提示（点“更多信息 → 仍要运行”）。要去掉这些提示，需要购买开发者证书并在打包时配置。

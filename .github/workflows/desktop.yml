@@ -1,42 +1,79 @@
-# 在各自的系统上构建三个平台的桌面安装包。
-# 把项目推到 GitHub 后，在 Actions 页面手动运行，或推送 v 开头的标签（如 v0.1.0）触发。
-name: Desktop installers
+# 在 macOS / Windows / Linux 原生环境并行编译桌面安装包，并自动汇总发布到 GitHub Releases。
+# 触发方式：
+#   1. 推送代码到 main 分支（自动按 package.json 版本号如 v0.1.0 创建或更新 Release）
+#   2. 推送 v 开头的版本标签（如 git tag v0.1.0 && git push origin v0.1.0）
+#   3. 在 GitHub Actions 页面点击 "Run workflow" 手动触发
+name: Release Desktop Installers
 
 on:
-  workflow_dispatch:
   push:
-    tags: ["v*"]
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release 标签名（留空则自动读取 package.json 版本，如 v0.1.0）"
+        required: false
+        default: ""
+        type: string
+      prerelease:
+        description: "标记为预发布版本（Pre-release）"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:
+    name: Build (${{ matrix.label }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: macos-latest
-            script: dist:mac
+            label: macOS arm64 & x64
+            script: dist:mac:all
           - os: windows-latest
+            label: Windows x64
             script: dist:win
           - os: ubuntu-latest
+            label: Linux x64
             script: dist:linux
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm run ${{ matrix.script }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build & package desktop installers
+        run: npm run ${{ matrix.script }}
         env:
-          # 没有配置签名证书：只打包，不签名、不发布
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      - uses: actions/upload-artifact@v4
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: OpenNotion-${{ matrix.os }}
+          name: installers-${{ matrix.os }}
           path: |
             release/*.dmg
             release/*.exe
@@ -44,3 +81,57 @@ jobs:
             release/*.AppImage
             release/*.tar.gz
           if-no-files-found: error
+
+  release:
+    name: Publish to GitHub Releases
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: desktop-gh-release
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            PKG_VER=$(node -p "require('./package.json').version")
+            TAG="v${PKG_VER}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: ${TAG}"
+
+      - name: Download all platform installers
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-release
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd dist-release
+          ls -lh
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish installers to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: OpenNotion ${{ steps.meta.outputs.tag }}
+          prerelease: ${{ inputs.prerelease || false }}
+          draft: false
+          make_latest: ${{ inputs.prerelease && 'false' || 'true' }}
+          generate_release_notes: true
+          files: dist-release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
