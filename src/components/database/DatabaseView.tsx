@@ -1,5 +1,16 @@
 import { useMemo, useState } from "react";
-import { ArrowUpDown, CalendarDays, Kanban, ListFilter, Plus, Search, Table2, Trash2 } from "lucide-react";
+import {
+  ArrowUpDown,
+  CalendarDays,
+  GanttChart,
+  Kanban,
+  LayoutGrid,
+  ListFilter,
+  Plus,
+  Search,
+  Table2,
+  Trash2,
+} from "lucide-react";
 import type { PageMeta, PropValue, ViewDef } from "../../../shared/types";
 import {
   PROP_TYPES,
@@ -19,11 +30,20 @@ import { MenuDivider, MenuItem, Popover, cx } from "../Popover";
 import { BoardView } from "./BoardView";
 import { CalendarView, toIso } from "./CalendarView";
 import { FilterMenu } from "./FilterMenu";
+import { GalleryView } from "./GalleryView";
+import { TimelineView } from "./TimelineView";
 import { PropIcon, PropertyCell } from "./cells";
 import { TableView } from "./TableView";
 
-const VIEW_ICONS = { table: Table2, board: Kanban, calendar: CalendarDays } as const;
-const VIEW_LABELS = { table: "表格", board: "看板", calendar: "日历" } as const;
+const VIEW_ICONS = {
+  table: Table2,
+  board: Kanban,
+  calendar: CalendarDays,
+  gallery: LayoutGrid,
+  timeline: GanttChart,
+} as const;
+const VIEW_LABELS = { table: "表格", board: "看板", calendar: "日历", gallery: "画廊", timeline: "时间轴" } as const;
+const VIEW_TYPES = Object.keys(VIEW_LABELS) as ViewDef["type"][];
 
 export function DatabaseView({ page }: { page: PageMeta }) {
   const tree = useTree();
@@ -59,7 +79,8 @@ export function DatabaseView({ page }: { page: PageMeta }) {
     let name: string = VIEW_LABELS[type];
     for (let i = 2; taken.has(name); i++) name = `${VIEW_LABELS[type]} ${i}`;
     const groupBy = type === "board" ? (db.properties.find((p) => p.type === "select")?.id ?? null) : undefined;
-    const dateProp = type === "calendar" ? (db.properties.find((p) => p.type === "date")?.id ?? null) : undefined;
+    const dateProp =
+      type === "calendar" || type === "timeline" ? (db.properties.find((p) => p.type === "date")?.id ?? null) : undefined;
     updateDatabase(page, (d) => ({ ...d, views: [...d.views, { id, name, type, groupBy, dateProp }] }));
     selectView(id);
     setAddMenu(null);
@@ -82,6 +103,7 @@ export function DatabaseView({ page }: { page: PageMeta }) {
   const activeFilters = (view.filters ?? []).filter((rule) => isActiveFilter(rule, db)).length;
 
   const addRow = async (props: Record<string, PropValue> = {}) => {
+    if (query) setQuery("");
     // 先填上能通过当前筛选条件的默认值，调用方指定的值优先
     const id = await createPage({ parentId: page.id, props: { ...rowDefaults, ...props } });
     if (id) setFocusRowId(id);
@@ -90,9 +112,9 @@ export function DatabaseView({ page }: { page: PageMeta }) {
   const selects = db.properties.filter((p) => p.type === "select");
   const dates = db.properties.filter((p) => p.type === "date");
   const calendarDate = dates.find((p) => p.id === view.dateProp) ?? dates[0];
-  // 日历里点“新建”默认排在今天
-  const addFromToolbar = () =>
-    void addRow(view.type === "calendar" && calendarDate ? { [calendarDate.id]: toIso(new Date()) } : {});
+  const usesDate = view.type === "calendar" || view.type === "timeline";
+  // 日历和时间轴里点“新建”默认排在今天
+  const addFromToolbar = () => void addRow(usesDate && calendarDate ? { [calendarDate.id]: toIso(new Date()) } : {});
   const sortName =
     view.sort?.propId === "title" ? "名称" : db.properties.find((p) => p.id === view.sort?.propId)?.name;
 
@@ -163,9 +185,9 @@ export function DatabaseView({ page }: { page: PageMeta }) {
               </select>
             </label>
           )}
-          {view.type === "calendar" && dates.length > 0 && (
+          {usesDate && dates.length > 0 && (
             <label className="db-select">
-              日期
+              {view.type === "timeline" ? "开始" : "日期"}
               <select
                 value={calendarDate?.id}
                 onChange={(e) => updateView(page, view.id, { dateProp: e.target.value })}
@@ -175,6 +197,24 @@ export function DatabaseView({ page }: { page: PageMeta }) {
                     {p.name}
                   </option>
                 ))}
+              </select>
+            </label>
+          )}
+          {view.type === "timeline" && dates.length > 1 && (
+            <label className="db-select">
+              结束
+              <select
+                value={dates.some((p) => p.id === view.endProp) ? (view.endProp ?? "") : ""}
+                onChange={(e) => updateView(page, view.id, { endProp: e.target.value || null })}
+              >
+                <option value="">不设（只占一天）</option>
+                {dates
+                  .filter((p) => p.id !== calendarDate?.id)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
               </select>
             </label>
           )}
@@ -202,7 +242,31 @@ export function DatabaseView({ page }: { page: PageMeta }) {
           onAddRow={() => void addRow()}
         />
       ) : view.type === "board" ? (
-        <BoardView page={page} db={db} view={view} rows={rows} rowDefaults={rowDefaults} />
+        <BoardView
+          page={page}
+          db={db}
+          view={view}
+          rows={rows}
+          editingId={focusRowId}
+          onEditDone={() => setFocusRowId(null)}
+          onCreate={(props) => void addRow(props)}
+        />
+      ) : view.type === "gallery" ? (
+        <GalleryView
+          db={db}
+          rows={rows}
+          editingId={focusRowId}
+          onEditDone={() => setFocusRowId(null)}
+          onCreate={() => void addRow()}
+        />
+      ) : view.type === "timeline" ? (
+        <TimelineView
+          page={page}
+          db={db}
+          view={view}
+          rows={rows}
+          onCreate={(dateProp, date) => void addRow({ [dateProp]: date })}
+        />
       ) : (
         <CalendarView
           page={page}
@@ -253,9 +317,10 @@ export function DatabaseView({ page }: { page: PageMeta }) {
       {addMenu && (
         <Popover anchor={addMenu} onClose={() => setAddMenu(null)} className="menu">
           <div className="menu-title">新视图</div>
-          <MenuItem icon={<Table2 size={16} />} label="表格" onClick={() => addView("table")} />
-          <MenuItem icon={<Kanban size={16} />} label="看板" onClick={() => addView("board")} />
-          <MenuItem icon={<CalendarDays size={16} />} label="日历" onClick={() => addView("calendar")} />
+          {VIEW_TYPES.map((type) => {
+            const Icon = VIEW_ICONS[type];
+            return <MenuItem key={type} icon={<Icon size={16} />} label={VIEW_LABELS[type]} onClick={() => addView(type)} />;
+          })}
         </Popover>
       )}
 

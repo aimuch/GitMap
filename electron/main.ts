@@ -190,6 +190,33 @@ function createWindow() {
   }
 }
 
+/** 把另一份数据（比如网页版项目里的 data/ 目录）并进来 */
+async function importFolder() {
+  const win = mainWindow;
+  if (!win) return;
+  const picked = await dialog.showOpenDialog(win, {
+    title: "选择要导入的数据文件夹",
+    message: "选择网页版项目里的 data 文件夹（里面有 pages 目录）",
+    properties: ["openDirectory"],
+  });
+  if (picked.canceled || !picked.filePaths[0]) return;
+  try {
+    // 先让页面把没保存的内容写下去，免得刷新时丢失
+    await flushPage(win);
+    const result = await api.importFolder(picked.filePaths[0]);
+    await dialog.showMessageBox(win, {
+      type: "info",
+      message: "导入完成",
+      detail: `新增 ${result.pages} 个页面、${result.files} 个附件。${
+        result.skipped > 0 ? `\n有 ${result.skipped} 个页面已经存在或无法读取，已跳过，没有覆盖现有内容。` : ""
+      }`,
+    });
+    win.webContents.reload();
+  } catch (err) {
+    dialog.showErrorBox("导入失败", err instanceof Error ? err.message : String(err));
+  }
+}
+
 function buildMenu() {
   const isMac = process.platform === "darwin";
   const template: MenuItemConstructorOptions[] = [
@@ -198,6 +225,7 @@ function buildMenu() {
       label: "文件",
       submenu: [
         { label: "打开数据文件夹", click: () => void shell.openPath(dataDir) },
+        { label: "从文件夹导入数据…", click: () => void importFolder() },
         { type: "separator" },
         isMac ? { role: "close", label: "关闭窗口" } : { role: "quit", label: "退出" },
       ],

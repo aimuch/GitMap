@@ -1,10 +1,12 @@
 import { useMemo, useSyncExternalStore } from "react";
-import type { NewPageInput, PageMeta, PagePatch, PageRecord, SearchHit } from "../shared/types";
+import type { HistoryEntry, NewPageInput, PageMeta, PagePatch, PageRecord, SearchHit } from "../shared/types";
 
 export type ThemeSetting = "light" | "dark" | "system";
 
 interface State {
   pages: Record<string, PageMeta>;
+  /** 页面正文被整体替换（恢复历史、套用模板）的次数；变了就要重新加载编辑器 */
+  revisions: Record<string, number>;
   loaded: boolean;
   /** 正在进行或排队中的保存请求数 */
   saving: number;
@@ -48,6 +50,7 @@ export const isNarrow = () => narrowQuery.matches;
 
 let state: State = {
   pages: {},
+  revisions: {},
   loaded: false,
   saving: 0,
   error: null,
@@ -127,14 +130,16 @@ export async function fetchPage(id: string): Promise<PageRecord> {
   return page;
 }
 
-export async function createPage(input: NewPageInput = {}): Promise<string | null> {
+export async function createPage(input: NewPageInput & { quiet?: boolean } = {}): Promise<string | null> {
   try {
+    const { quiet, ...body } = input;
     const { id, pages } = await request<{ id: string; pages: PageMeta[] }>("/api/pages", {
       method: "POST",
-      json: { ...input, parentId: input.parentId ?? null },
+      json: { ...body, parentId: input.parentId ?? null },
     });
     setPages(pages);
-    if (input.parentId) setExpanded(input.parentId, true);
+    // 批量导入时不逐个展开侧边栏
+    if (input.parentId && !quiet) setExpanded(input.parentId, true);
     return id;
   } catch (err) {
     reportError(err);
@@ -176,6 +181,40 @@ export async function duplicatePage(id: string): Promise<string | null> {
 export function movePage(id: string, parentId: string | null, index: number) {
   if (parentId) setExpanded(parentId, true);
   return mutate(`/api/pages/${id}/move`, "POST", { parentId, index });
+}
+
+/** 正文在服务器上被整体换掉之后调用：丢掉本地还没发出的修改，并让编辑器重新加载 */
+function reloadContent(id: string) {
+  dropPatch(id);
+  set({ revisions: { ...state.revisions, [id]: (state.revisions[id] ?? 0) + 1 } });
+}
+
+export async function fetchHistory(id: string): Promise<HistoryEntry[]> {
+  await flushPatch(id);
+  const { versions } = await request<{ versions: HistoryEntry[] }>(`/api/pages/${id}/history`);
+  return versions;
+}
+
+export async function fetchVersion(id: string, ts: number): Promise<PageRecord> {
+  const { version } = await request<{ version: { title: string; icon: string | null; content: unknown[] } }>(
+    `/api/pages/${id}/history/${ts}`,
+  );
+  // 套上页面当前的其余信息，拼成一个可以交给编辑器预览的记录
+  return { ...state.pages[id], ...version, id };
+}
+
+export async function restoreVersion(id: string, ts: number): Promise<boolean> {
+  await flushPatch(id);
+  const done = await mutate(`/api/pages/${id}/history/${ts}/restore`, "POST");
+  if (done) reloadContent(id);
+  return !!done;
+}
+
+export async function applyTemplate(targetId: string, templateId: string): Promise<boolean> {
+  await flushPatch(targetId);
+  const done = await mutate(`/api/pages/${targetId}/apply-template`, "POST", { templateId });
+  if (done) reloadContent(targetId);
+  return !!done;
 }
 
 export async function searchPages(q: string): Promise<SearchHit[]> {
@@ -348,6 +387,8 @@ export function buildTree(pages: Record<string, PageMeta>): Tree {
   const favorites: PageMeta[] = [];
   const trash: PageMeta[] = [];
   for (const p of Object.values(pages)) {
+    // 内部页面（同步块的内容）不出现在页面树、收藏和回收站里
+    if (p.hidden) continue;
     if (p.trashed) {
       const parent = p.parentId ? pages[p.parentId] : undefined;
       if (!parent || !parent.trashed || parent.trashedAt !== p.trashedAt) trash.push(p);

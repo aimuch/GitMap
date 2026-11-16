@@ -1,11 +1,14 @@
 import { useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronRight,
   ChevronsLeft,
   Ellipsis,
   FileStack,
   FileText,
+  Import,
   Layers,
+  LoaderCircle,
   Monitor,
   Moon,
   Plus,
@@ -16,6 +19,7 @@ import {
   Table2,
   Trash2,
 } from "lucide-react";
+import { importNotionZip, type ImportResult } from "../notionImport";
 import { Logo, Wordmark } from "./Logo";
 import type { PageMeta } from "../../shared/types";
 import {
@@ -58,6 +62,20 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
   const theme = useStore((s) => s.theme);
   const [trashAnchor, setTrashAnchor] = useState<HTMLElement | null>(null);
   const [rootDrop, setRootDrop] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState<
+    { status: "running"; text: string } | { status: "done"; result: ImportResult } | { status: "error"; message: string } | null
+  >(null);
+
+  const runImport = async (file: File) => {
+    setImporting({ status: "running", text: "正在读取压缩包…" });
+    try {
+      const result = await importNotionZip(file, (text) => setImporting({ status: "running", text }));
+      setImporting({ status: "done", result });
+    } catch (err) {
+      setImporting({ status: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  };
   const roots = tree.children.get("") ?? [];
 
   const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -175,6 +193,22 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
             <span>回收站</span>
             {tree.trash.length > 0 && <span className="count">{tree.trash.length}</span>}
           </button>
+          <button type="button" className="nav-row" onClick={() => fileRef.current?.click()}>
+            <Import size={16} />
+            <span>导入 Notion 导出包</span>
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".zip,application/zip"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              // 清空选择，这样同一个文件可以再选一次
+              e.target.value = "";
+              if (file) void runImport(file);
+            }}
+          />
           <button
             type="button"
             className="nav-row"
@@ -188,6 +222,52 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
       </div>
 
       {trashAnchor && <TrashPopover anchor={trashAnchor} items={tree.trash} onClose={() => setTrashAnchor(null)} />}
+      {importing &&
+        createPortal(
+          <div className="modal-backdrop">
+            <div className="import-modal" role="dialog" aria-modal="true" aria-label="导入 Notion 导出包">
+              <h2>导入 Notion 导出包</h2>
+              {importing.status === "running" && (
+                <p className="import-progress" aria-live="polite">
+                  <LoaderCircle size={15} className="spin" /> {importing.text}
+                </p>
+              )}
+              {importing.status === "done" && (
+                <>
+                  <p>
+                    导入完成：{importing.result.pages} 个页面，{importing.result.databases} 个数据库（共{" "}
+                    {importing.result.rows} 行），{importing.result.files} 个图片或附件。
+                  </p>
+                  <p className="import-note">内容都放在“Notion 导入”页面下面。数据库的列类型是按内容猜的，拿不准的都当作文本。</p>
+                  <div className="import-actions">
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      onClick={() => {
+                        navigate(importing.result.rootId);
+                        setExpanded(importing.result.rootId, true);
+                        setImporting(null);
+                      }}
+                    >
+                      查看导入的内容
+                    </button>
+                  </div>
+                </>
+              )}
+              {importing.status === "error" && (
+                <>
+                  <p className="value-error">{importing.message}</p>
+                  <div className="import-actions">
+                    <button type="button" className="text-btn" onClick={() => setImporting(null)}>
+                      关闭
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
       <div className="sidebar-resizer" onPointerDown={startResize} role="separator" aria-orientation="vertical" />
     </aside>
   );
@@ -284,6 +364,7 @@ function TreeNode({ page, depth, tree, currentId, draggable }: TreeNodeProps) {
         </button>
         <span className="tree-icon">{page.icon ?? (isDatabase ? <Table2 size={16} /> : <FileText size={16} />)}</span>
         <span className={cx("tree-title", !page.title && "untitled")}>{page.title || "无标题"}</span>
+        {page.template && <span className="tree-badge">模板</span>}
         <span className="tree-actions">
           <button
             type="button"

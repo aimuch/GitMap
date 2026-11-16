@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Check, FileText, Maximize2, Plus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { ArrowDown, ArrowUp, Check, FileText, GripVertical, Maximize2, Plus, Trash2 } from "lucide-react";
 import type { DatabaseDef, PageMeta, PropertyDef, PropType, ViewDef } from "../../../shared/types";
 import {
   PROP_TYPES,
@@ -9,26 +9,97 @@ import {
   updateProperty,
   updateView,
 } from "../../db";
-import { navigate, trashPage, updatePage } from "../../store";
+import { movePage, navigate, trashPage, updatePage } from "../../store";
 import { MenuDivider, MenuItem, Popover, cx } from "../Popover";
-import { PropIcon, PropertyCell } from "./cells";
+import { PropIcon, PropertyCell, PropertyConfig } from "./cells";
 
 interface Props {
   page: PageMeta;
   db: DatabaseDef;
   view: ViewDef;
   rows: PageMeta[];
-  /** 所有行（不受筛选影响），修改属性类型时要转换全部的值 */
+  /** 所有行（不受筛选影响），修改属性类型和手动排序时要用 */
   allRows: PageMeta[];
   focusRowId: string | null;
   onAddRow: () => void;
 }
 
+const MIN_WIDTH = 80;
+
+/** 当前正在拖动的行 id */
+let draggingRow: string | null = null;
+
 export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow }: Props) {
   const [menu, setMenu] = useState<{ anchor: HTMLElement; propId: string } | null>(null);
   const [addAnchor, setAddAnchor] = useState<HTMLElement | null>(null);
-  const columns = `var(--db-title-col, minmax(260px, 2fr)) ${db.properties.map(() => "minmax(150px, 1fr)").join(" ")} 44px`;
+  // 拖动列边界时的临时宽度，松手后才写回视图
+  const [live, setLive] = useState<Record<string, number>>({});
+  const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
   const menuDef = menu ? db.properties.find((p) => p.id === menu.propId) : undefined;
+
+  const track = (key: string, fallback: string) => {
+    const w = live[key] ?? view.widths?.[key];
+    return w ? `${w}px` : fallback;
+  };
+  const columns = [
+    track("title", "var(--db-title-col, minmax(260px, 2fr))"),
+    ...db.properties.map((p) => track(p.id, "minmax(150px, 1fr)")),
+    "44px",
+  ].join(" ");
+
+  const startResize = (key: string) => (e: ReactPointerEvent<HTMLSpanElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const handle = e.currentTarget;
+    const startX = e.clientX;
+    const startWidth = (handle.parentElement as HTMLElement).getBoundingClientRect().width;
+    let width = Math.round(startWidth);
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing");
+    const onMove = (ev: PointerEvent) => {
+      width = Math.max(MIN_WIDTH, Math.round(startWidth + ev.clientX - startX));
+      setLive((prev) => ({ ...prev, [key]: width }));
+    };
+    const onUp = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      document.body.classList.remove("resizing");
+      updateView(page, view.id, { widths: { ...view.widths, [key]: width } });
+      setLive((prev) => {
+        const { [key]: _done, ...rest } = prev;
+        return rest;
+      });
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+  };
+
+  // 只有“手动顺序”下才能拖动排序；有排序规则时顺序由规则决定
+  const canReorder = !view.sort;
+
+  const onRowDragOver = (row: PageMeta) => (e: DragEvent<HTMLDivElement>) => {
+    if (!canReorder || !draggingRow || draggingRow === row.id) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const rect = e.currentTarget.getBoundingClientRect();
+    const after = e.clientY > rect.top + rect.height / 2;
+    if (dropAt?.id !== row.id || dropAt.after !== after) setDropAt({ id: row.id, after });
+  };
+
+  const onRowDrop = (row: PageMeta) => (e: DragEvent<HTMLDivElement>) => {
+    const target = dropAt;
+    setDropAt(null);
+    const id = draggingRow;
+    if (!canReorder || !id || !target || id === row.id) return;
+    e.preventDefault();
+    // 位置按“全部行”来算：筛选后看不到的行仍然占着它们的位置
+    const others = allRows.filter((r) => r.id !== id);
+    const at = others.findIndex((r) => r.id === row.id);
+    void movePage(id, page.id, target.after ? at + 1 : at);
+  };
+
+  const toggleMenu = (propId: string, anchor: HTMLElement) =>
+    setMenu(menu?.propId === propId ? null : { anchor, propId });
 
   return (
     <div className="db-table-scroll">
@@ -38,19 +109,30 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
             <PropIcon type="title" />
             <span className="db-th-name">名称</span>
             <SortMark view={view} propId="title" />
+            <span className="db-resize" onPointerDown={startResize("title")} />
           </div>
           {db.properties.map((def) => (
-            <button
+            <div
               key={def.id}
-              type="button"
               role="columnheader"
-              className={cx("db-th", menu?.propId === def.id && "open")}
-              onClick={(e) => setMenu(menu?.propId === def.id ? null : { anchor: e.currentTarget, propId: def.id })}
+              tabIndex={0}
+              className={cx("db-th db-th-button", menu?.propId === def.id && "open")}
+              onClick={(e) => toggleMenu(def.id, e.currentTarget)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                toggleMenu(def.id, e.currentTarget);
+              }}
             >
               <PropIcon type={def.type} />
               <span className="db-th-name">{def.name}</span>
               <SortMark view={view} propId={def.id} />
-            </button>
+              <span
+                className="db-resize"
+                onPointerDown={startResize(def.id)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
           ))}
           <button
             type="button"
@@ -64,8 +146,17 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
         </div>
 
         {rows.map((row) => (
-          <div key={row.id} className="db-row" role="row">
-            <TitleCell row={row} autoFocus={row.id === focusRowId} />
+          <div
+            key={row.id}
+            className={cx("db-row", dropAt?.id === row.id && (dropAt.after ? "drop-after" : "drop-before"))}
+            role="row"
+            onDragOver={onRowDragOver(row)}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null);
+            }}
+            onDrop={onRowDrop(row)}
+          >
+            <TitleCell row={row} autoFocus={row.id === focusRowId} canReorder={canReorder} />
             {db.properties.map((def) => (
               <div key={def.id} className="db-td" role="cell">
                 <PropertyCell row={row} def={def} dbPage={page} />
@@ -126,7 +217,7 @@ function SortMark({ view, propId }: { view: ViewDef; propId: string }) {
   return view.sort.dir === "asc" ? <ArrowUp size={13} className="db-sort-mark" /> : <ArrowDown size={13} className="db-sort-mark" />;
 }
 
-function TitleCell({ row, autoFocus }: { row: PageMeta; autoFocus: boolean }) {
+function TitleCell({ row, autoFocus, canReorder }: { row: PageMeta; autoFocus: boolean; canReorder: boolean }) {
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (autoFocus) ref.current?.focus();
@@ -134,6 +225,26 @@ function TitleCell({ row, autoFocus }: { row: PageMeta; autoFocus: boolean }) {
 
   return (
     <div className="db-td db-td-title" role="cell">
+      {canReorder && (
+        <span
+          className="db-grip"
+          draggable
+          title="拖动调整顺序"
+          aria-label="拖动调整顺序"
+          onDragStart={(e) => {
+            draggingRow = row.id;
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("application/x-opennotion-row", row.id);
+            const rowEl = e.currentTarget.closest(".db-row");
+            if (rowEl) e.dataTransfer.setDragImage(rowEl, 12, 16);
+          }}
+          onDragEnd={() => {
+            draggingRow = null;
+          }}
+        >
+          <GripVertical size={14} />
+        </span>
+      )}
       <span className="tree-icon">{row.icon ?? <FileText size={15} />}</span>
       <input
         ref={ref}
@@ -163,19 +274,24 @@ interface PropertyMenuProps {
 }
 
 function PropertyMenu({ anchor, page, def, view, allRows, onClose }: PropertyMenuProps) {
+  const [picking, setPicking] = useState(false);
   const sortBy = (dir: "asc" | "desc") => {
     const same = view.sort?.propId === def.id && view.sort.dir === dir;
     updateView(page, view.id, { sort: same ? null : { propId: def.id, dir } });
     onClose();
   };
-  const setType = (type: PropType) => changePropertyType(page, allRows, def.id, type);
+  const setType = (type: PropType) => {
+    changePropertyType(page, allRows, def.id, type);
+    setPicking(false);
+  };
+  const typeLabel = PROP_TYPES.find((t) => t.type === def.type)?.label ?? def.type;
 
   return (
     <Popover anchor={anchor} onClose={onClose} className="menu prop-menu">
       <input
         className="menu-input"
         autoFocus
-            onFocus={(e) => e.target.select()}
+        onFocus={(e) => e.target.select()}
         value={def.name}
         aria-label="属性名称"
         onChange={(e) => updateProperty(page, def.id, { name: e.target.value })}
@@ -183,37 +299,51 @@ function PropertyMenu({ anchor, page, def, view, allRows, onClose }: PropertyMen
           if (!e.nativeEvent.isComposing && e.key === "Enter") onClose();
         }}
       />
-      <div className="menu-title">类型</div>
-      {PROP_TYPES.map((t) => (
-        <MenuItem
-          key={t.type}
-          icon={<PropIcon type={t.type} size={16} />}
-          label={t.label}
-          hint={def.type === t.type ? "当前" : undefined}
-          onClick={() => setType(t.type)}
-        />
-      ))}
-      <MenuDivider />
-      <MenuItem
-        icon={view.sort?.propId === def.id && view.sort.dir === "asc" ? <Check size={16} /> : <ArrowUp size={16} />}
-        label="升序排列"
-        onClick={() => sortBy("asc")}
-      />
-      <MenuItem
-        icon={view.sort?.propId === def.id && view.sort.dir === "desc" ? <Check size={16} /> : <ArrowDown size={16} />}
-        label="降序排列"
-        onClick={() => sortBy("desc")}
-      />
-      <MenuDivider />
-      <MenuItem
-        icon={<Trash2 size={16} />}
-        label="删除属性"
-        danger
-        onClick={() => {
-          onClose();
-          if (window.confirm(`删除属性“${def.name}”？所有行里这一列的内容都会被丢弃。`)) removeProperty(page, def.id);
-        }}
-      />
+      {picking ? (
+        <>
+          <div className="menu-title">选择类型</div>
+          {PROP_TYPES.map((t) => (
+            <MenuItem
+              key={t.type}
+              icon={<PropIcon type={t.type} size={16} />}
+              label={t.label}
+              hint={def.type === t.type ? "当前" : undefined}
+              onClick={() => setType(t.type)}
+            />
+          ))}
+        </>
+      ) : (
+        <>
+          <MenuItem
+            icon={<PropIcon type={def.type} size={16} />}
+            label={`类型：${typeLabel}`}
+            hint="更改"
+            onClick={() => setPicking(true)}
+          />
+          <PropertyConfig dbPage={page} def={def} />
+          <MenuDivider />
+          <MenuItem
+            icon={view.sort?.propId === def.id && view.sort.dir === "asc" ? <Check size={16} /> : <ArrowUp size={16} />}
+            label="升序排列"
+            onClick={() => sortBy("asc")}
+          />
+          <MenuItem
+            icon={view.sort?.propId === def.id && view.sort.dir === "desc" ? <Check size={16} /> : <ArrowDown size={16} />}
+            label="降序排列"
+            onClick={() => sortBy("desc")}
+          />
+          <MenuDivider />
+          <MenuItem
+            icon={<Trash2 size={16} />}
+            label="删除属性"
+            danger
+            onClick={() => {
+              onClose();
+              if (window.confirm(`删除属性“${def.name}”？所有行里这一列的内容都会被丢弃。`)) removeProperty(page, def.id);
+            }}
+          />
+        </>
+      )}
     </Popover>
   );
 }

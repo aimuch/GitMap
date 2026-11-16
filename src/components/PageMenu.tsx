@@ -4,6 +4,8 @@ import {
   Copy,
   Download,
   FileText,
+  History,
+  LayoutTemplate,
   Link2,
   PencilLine,
   Star,
@@ -44,9 +46,11 @@ interface Props {
   onExport?: () => void;
   exportLabel?: string;
   showLayout?: boolean;
+  /** 打开页面历史（只有正文页面才有） */
+  onHistory?: () => void;
 }
 
-export function PageMenu({ page, anchor, currentId, onClose, align, onExport, exportLabel, showLayout }: Props) {
+export function PageMenu({ page, anchor, currentId, onClose, align, onExport, exportLabel, showLayout, onHistory }: Props) {
   const [renaming, setRenaming] = useState(false);
   const run = (fn: () => void) => () => {
     onClose();
@@ -92,6 +96,13 @@ export function PageMenu({ page, anchor, currentId, onClose, align, onExport, ex
           onClick={run(() => updatePage(page.id, { fullWidth: !page.fullWidth }))}
         />
       )}
+      <MenuItem
+        icon={<LayoutTemplate size={16} />}
+        label={page.template ? "取消模板" : "设为模板"}
+        hint={page.template ? undefined : "可在新页面套用"}
+        onClick={run(() => updatePage(page.id, { template: !page.template }))}
+      />
+      {onHistory && <MenuItem icon={<History size={16} />} label="页面历史" onClick={run(onHistory)} />}
       {onExport && <MenuItem icon={<Download size={16} />} label={exportLabel ?? "导出为 Markdown"} onClick={run(onExport)} />}
       <MenuDivider />
       <MenuItem

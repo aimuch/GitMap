@@ -16,7 +16,7 @@ export function SearchModal() {
   const recent = useMemo<SearchHit[]>(
     () =>
       Object.values(pages)
-        .filter((p) => !p.trashed)
+        .filter((p) => !p.trashed && !p.hidden)
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, 8)
         .map((p) => ({ id: p.id, title: p.title, icon: p.icon, snippet: "" })),

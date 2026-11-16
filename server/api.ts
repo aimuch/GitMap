@@ -7,7 +7,15 @@ import { createReadStream } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { DatabaseDef, PageKind, PageMeta, PageRecord, PropValue, SearchHit } from "../shared/types.ts";
+import type {
+  DatabaseDef,
+  HistoryEntry,
+  PageKind,
+  PageMeta,
+  PageRecord,
+  PropValue,
+  SearchHit,
+} from "../shared/types.ts";
 import { notesContent, sampleDatabase, sampleRows, welcomeContent } from "./seed.ts";
 
 const ID_RE = /^[a-f0-9]{16}$/;
@@ -33,7 +41,23 @@ const MIME: Record<string, string> = {
   pdf: "application/pdf",
 };
 
+/** 同一页面两个历史版本之间至少隔多久 */
+const SNAPSHOT_INTERVAL = 10 * 60 * 1000;
+/** 每个页面最多保留多少个历史版本 */
+const MAX_VERSIONS = 40;
+
 const newId = () => crypto.randomBytes(8).toString("hex");
+
+/** 把从磁盘读到的页面补全成当前版本的结构（兼容旧文件） */
+function normalize(page: PageRecord): PageRecord {
+  page.content = Array.isArray(page.content) ? page.content : [];
+  page.kind = page.kind === "database" ? "database" : "page";
+  page.database = page.kind === "database" ? (cleanDatabase(page.database) ?? { properties: [], views: [] }) : null;
+  page.props = cleanProps(page.props) ?? {};
+  page.template = page.template === true;
+  page.hidden = page.hidden === true;
+  return page;
+}
 
 class HttpError extends Error {
   constructor(
@@ -84,12 +108,16 @@ class Store {
   private text = new Map<string, string>();
   private writes = new Map<string, Promise<void>>();
   private ready: Promise<void> | null = null;
+  /** 页面 id → 上一次保存历史版本的时间 */
+  private lastSnapshot = new Map<string, number>();
   readonly pagesDir: string;
   readonly uploadsDir: string;
+  readonly historyDir: string;
 
   constructor(dir: string) {
     this.pagesDir = path.join(dir, "pages");
     this.uploadsDir = path.join(dir, "uploads");
+    this.historyDir = path.join(dir, "history");
   }
 
   init(): Promise<void> {
@@ -107,12 +135,7 @@ class Store {
         const raw = await fs.readFile(path.join(this.pagesDir, f), "utf8");
         const page = JSON.parse(raw) as PageRecord;
         if (!ID_RE.test(page.id) || `${page.id}.json` !== f) continue;
-        page.content = Array.isArray(page.content) ? page.content : [];
-        // 兼容没有数据库字段的旧文件
-        page.kind = page.kind === "database" ? "database" : "page";
-        page.database = page.kind === "database" ? (cleanDatabase(page.database) ?? { properties: [], views: [] }) : null;
-        page.props = cleanProps(page.props) ?? {};
-        this.pages.set(page.id, page);
+        this.pages.set(page.id, normalize(page));
       } catch (err) {
         console.warn(`[storage] 跳过无法读取的文件 ${f}:`, err);
       }
@@ -207,6 +230,7 @@ class Store {
     kind?: PageKind;
     database?: DatabaseDef | null;
     props?: Record<string, PropValue>;
+    hidden?: boolean;
   }): PageRecord {
     const kind: PageKind = input.kind === "database" ? "database" : "page";
     const parentId = input.parentId ?? null;
@@ -232,6 +256,8 @@ class Store {
       kind,
       database: kind === "database" ? (cleanDatabase(input.database) ?? { properties: [], views: [] }) : null,
       props: cleanProps(input.props) ?? {},
+      template: false,
+      hidden: input.hidden === true,
       content: Array.isArray(input.content) ? input.content : [],
     };
     this.pages.set(page.id, page);
@@ -241,6 +267,13 @@ class Store {
 
   update(id: string, patch: Record<string, unknown>): PageRecord {
     const page = this.get(id);
+    // 正文或标题要变了：先把改之前的样子留一个历史版本（首次填入正文除外，免得留下一版空白记录）
+    const titleChanged = typeof patch.title === "string" && patch.title !== page.title;
+    const contentChanged = Array.isArray(patch.content) && page.content.length > 0;
+    if (titleChanged || contentChanged) {
+      this.snapshot(page);
+    }
+    if (typeof patch.template === "boolean") page.template = patch.template;
     if (typeof patch.title === "string") page.title = patch.title.slice(0, 2000);
     if (patch.icon === null || typeof patch.icon === "string") page.icon = patch.icon;
     if (patch.cover === null || typeof patch.cover === "string") page.cover = patch.cover;
@@ -313,7 +346,9 @@ class Store {
     const page = this.get(id);
     for (const p of [page, ...this.descendants(id)]) {
       this.pages.delete(p.id);
+      this.lastSnapshot.delete(p.id);
       void this.unlink(p.id);
+      void fs.rm(path.join(this.historyDir, p.id), { recursive: true, force: true }).catch(() => {});
     }
   }
 
@@ -323,50 +358,208 @@ class Store {
     }
   }
 
+  /** 复制一个页面和它的全部子页面；copies 记录“原页面 id → 副本” */
+  private copySubtree(
+    from: PageRecord,
+    parentId: string | null,
+    title: string,
+    copies: Map<string, PageRecord>,
+  ): PageRecord {
+    // 先取子页面列表，免得把刚建出来的副本也算进去
+    const children = this.siblings(from.id);
+    const copy = this.create({
+      parentId,
+      title,
+      icon: from.icon,
+      cover: from.cover,
+      content: structuredClone(from.content),
+      kind: from.kind,
+      database: structuredClone(from.database),
+      props: structuredClone(from.props),
+    });
+    copy.fullWidth = from.fullWidth;
+    copies.set(from.id, copy);
+    for (const child of children) this.copySubtree(child, copy.id, child.title, copies);
+    return copy;
+  }
+
+  /**
+   * 副本里指向“被一起复制的页面”的引用（子页面链接、内嵌数据库、关联）改指向对应的副本，
+   * 否则副本里的内嵌数据库仍然是原来那一个，改一处两边都变。
+   */
+  private remapCopies(copies: Map<string, PageRecord>) {
+    for (const page of copies.values()) {
+      const before = JSON.stringify([page.content, page.props, page.database]);
+      let json = before;
+      for (const [oldId, fresh] of copies) {
+        if (json.includes(oldId)) json = json.replaceAll(oldId, fresh.id);
+      }
+      if (json === before) continue;
+      const [content, props, database] = JSON.parse(json);
+      page.content = content;
+      page.props = props;
+      page.database = database;
+      void this.persist(page);
+    }
+  }
+
   duplicate(id: string): PageRecord {
     const src = this.get(id);
-    /** 原页面 id → 它的副本 */
     const copies = new Map<string, PageRecord>();
-    const copyTree = (from: PageRecord, parentId: string | null, title: string): PageRecord => {
-      // 先取子页面列表，免得把刚建出来的副本也算进去
-      const children = this.siblings(from.id);
-      const copy = this.create({
-        parentId,
-        title,
-        icon: from.icon,
-        cover: from.cover,
-        content: structuredClone(from.content),
-        kind: from.kind,
-        database: structuredClone(from.database),
-        props: structuredClone(from.props),
-      });
-      copy.fullWidth = from.fullWidth;
-      copies.set(from.id, copy);
-      for (const child of children) copyTree(child, copy.id, child.title);
-      return copy;
-    };
-    const copy = copyTree(src, src.parentId, `${src.title || "无标题"}（副本）`);
-
-    // 副本正文里指向“被一起复制的页面”的引用（子页面链接、内嵌数据库）改指向对应的副本，
-    // 否则副本里的内嵌数据库仍然是原来那一个，改一处两边都变
-    for (const page of copies.values()) {
-      let json = JSON.stringify(page.content);
-      let changed = false;
-      for (const [oldId, fresh] of copies) {
-        if (!json.includes(oldId)) continue;
-        json = json.replaceAll(oldId, fresh.id);
-        changed = true;
-      }
-      if (changed) {
-        page.content = JSON.parse(json);
-        void this.persist(page);
-      }
-    }
-
+    const copy = this.copySubtree(src, src.parentId, `${src.title || "无标题"}（副本）`, copies);
+    this.remapCopies(copies);
     // 放到原页面的正后方
     const sibs = this.siblings(src.parentId, copy.id);
     this.move(copy.id, src.parentId, sibs.findIndex((p) => p.id === src.id) + 1);
     return copy;
+  }
+
+  /** 把模板的内容套到一个已有页面上：正文、图标、封面和子页面都复制过来 */
+  applyTemplate(targetId: string, templateId: string) {
+    const target = this.get(targetId);
+    const template = this.get(templateId);
+    if (target.id === template.id) throw new HttpError(400, "不能把页面套用到它自己身上");
+    this.snapshot(target, true);
+    const copies = new Map<string, PageRecord>([[template.id, target]]);
+    for (const child of this.siblings(template.id)) this.copySubtree(child, target.id, child.title, copies);
+    target.content = structuredClone(template.content);
+    target.icon = target.icon ?? template.icon;
+    target.cover = target.cover ?? template.cover;
+    target.fullWidth = template.fullWidth;
+    target.kind = template.kind;
+    target.database = structuredClone(template.database);
+    if (!target.title) target.title = template.title;
+    target.updatedAt = Date.now();
+    void this.persist(target);
+    this.remapCopies(copies);
+  }
+
+  /* ---------- 页面历史 ---------- */
+
+  /** 给页面当前的样子存一个历史版本。默认同一页面每 10 分钟最多存一次。 */
+  private snapshot(page: PageRecord, force = false) {
+    if (page.kind !== "page") return;
+    if (page.content.length === 0 && !page.title) return;
+    const now = Date.now();
+    if (!force && now - (this.lastSnapshot.get(page.id) ?? 0) < SNAPSHOT_INTERVAL) return;
+    this.lastSnapshot.set(page.id, now);
+    const dir = path.join(this.historyDir, page.id);
+    const data = JSON.stringify({ ts: now, title: page.title, icon: page.icon, content: page.content });
+    void fs
+      .mkdir(dir, { recursive: true })
+      .then(() => fs.writeFile(path.join(dir, `${now}.json`), data))
+      .then(() => this.pruneHistory(dir))
+      .catch((err) => console.error(`[history] 保存 ${page.id} 的历史版本失败:`, err));
+  }
+
+  private async pruneHistory(dir: string) {
+    const files = (await fs.readdir(dir)).filter((f) => /^\d+\.json$/.test(f)).sort();
+    for (const f of files.slice(0, Math.max(0, files.length - MAX_VERSIONS))) {
+      await fs.rm(path.join(dir, f), { force: true });
+    }
+  }
+
+  async history(id: string): Promise<HistoryEntry[]> {
+    this.get(id);
+    const dir = path.join(this.historyDir, id);
+    const files = await fs.readdir(dir).catch(() => [] as string[]);
+    const out: HistoryEntry[] = [];
+    for (const f of files) {
+      if (!/^\d+\.json$/.test(f)) continue;
+      try {
+        const v = JSON.parse(await fs.readFile(path.join(dir, f), "utf8"));
+        out.push({ ts: Number(v.ts), title: String(v.title ?? ""), chars: extractText(v.content).join("").length });
+      } catch {
+        /* 读不出来的版本直接跳过 */
+      }
+    }
+    return out.sort((a, b) => b.ts - a.ts);
+  }
+
+  async version(id: string, ts: string): Promise<{ ts: number; title: string; icon: string | null; content: unknown[] }> {
+    this.get(id);
+    if (!/^\d{10,16}$/.test(ts)) throw new HttpError(404, "版本不存在");
+    try {
+      const v = JSON.parse(await fs.readFile(path.join(this.historyDir, id, `${ts}.json`), "utf8"));
+      return { ts: Number(v.ts), title: String(v.title ?? ""), icon: v.icon ?? null, content: Array.isArray(v.content) ? v.content : [] };
+    } catch {
+      throw new HttpError(404, "版本不存在");
+    }
+  }
+
+  async restoreVersion(id: string, ts: string) {
+    const page = this.get(id);
+    const v = await this.version(id, ts);
+    // 恢复前把现在的样子也存一版，恢复错了还能回来
+    this.snapshot(page, true);
+    page.title = v.title;
+    page.icon = v.icon;
+    page.content = v.content;
+    page.updatedAt = Date.now();
+    void this.persist(page);
+  }
+
+  /* ---------- 从另一个数据文件夹导入 ---------- */
+
+  /** 把另一份数据（例如网页版的 data/ 目录）并进来。已经存在的页面和文件不覆盖。 */
+  async importFolder(dir: string): Promise<{ pages: number; skipped: number; files: number }> {
+    await this.init();
+    let root = dir;
+    // 既可以选 data/ 目录本身，也可以选它的上一级或里面的 pages 目录
+    if (!(await fs.stat(path.join(root, "pages")).catch(() => null))?.isDirectory()) {
+      root = path.basename(dir) === "pages" ? path.dirname(dir) : path.join(dir, "data");
+    }
+    const srcPages = path.join(root, "pages");
+    if (!(await fs.stat(srcPages).catch(() => null))?.isDirectory()) {
+      throw new HttpError(400, "这个文件夹里没有找到 pages 目录");
+    }
+    if (path.resolve(srcPages) === path.resolve(this.pagesDir)) {
+      throw new HttpError(400, "选中的就是当前正在使用的数据文件夹");
+    }
+    let pages = 0;
+    let skipped = 0;
+    const importedIds: string[] = [];
+    for (const f of await fs.readdir(srcPages)) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        const page = JSON.parse(await fs.readFile(path.join(srcPages, f), "utf8")) as PageRecord;
+        if (!ID_RE.test(page.id) || `${page.id}.json` !== f) continue;
+        if (this.pages.has(page.id)) {
+          skipped++;
+          continue;
+        }
+        this.pages.set(page.id, normalize(page));
+        void this.persist(page);
+        importedIds.push(page.id);
+        pages++;
+      } catch {
+        skipped++;
+      }
+    }
+    let files = 0;
+    const srcUploads = path.join(root, "uploads");
+    for (const f of await fs.readdir(srcUploads).catch(() => [] as string[])) {
+      if (!UPLOAD_RE.test(f)) continue;
+      const dest = path.join(this.uploadsDir, f);
+      if (await fs.stat(dest).catch(() => null)) continue;
+      await fs.copyFile(path.join(srcUploads, f), dest);
+      files++;
+    }
+    const srcHistory = path.join(root, "history");
+    for (const id of importedIds) {
+      const entries = await fs.readdir(path.join(srcHistory, id)).catch(() => [] as string[]);
+      const valid = entries.filter((f) => /^\d{10,16}\.json$/.test(f));
+      if (valid.length === 0) continue;
+      const destDir = path.join(this.historyDir, id);
+      await fs.mkdir(destDir, { recursive: true });
+      for (const f of valid) {
+        const dest = path.join(destDir, f);
+        if (await fs.stat(dest).catch(() => null)) continue;
+        await fs.copyFile(path.join(srcHistory, id, f), dest).catch(() => {});
+      }
+    }
+    await this.settled();
+    return { pages, skipped, files };
   }
 
   /** 行的属性值也参与搜索：文本原样，单选/多选换成选项名 */
@@ -388,7 +581,7 @@ class Store {
     if (!q) return [];
     const hits: (SearchHit & { score: number; updatedAt: number })[] = [];
     for (const p of this.pages.values()) {
-      if (p.trashed) continue;
+      if (p.trashed || p.hidden) continue;
       let body = this.text.get(p.id);
       if (body === undefined) {
         body = [...extractText(p.content), ...this.propsText(p)].join(" ").replace(/\s+/g, " ");
@@ -502,7 +695,7 @@ export function createApiMiddleware(dataDir: string) {
     }
     await store.init();
 
-    const [, resource, id, action] = parts;
+    const [, resource, id, action, sub, verb] = parts;
     const all = () => send(res, 200, { pages: store.metas() });
 
     if (resource === "pages" && !id) {
@@ -517,6 +710,8 @@ export function createApiMiddleware(dataDir: string) {
           kind: body.kind === "database" ? "database" : "page",
           database: cleanDatabase(body.database),
           props: cleanProps(body.props) ?? {},
+          content: Array.isArray(body.content) ? body.content : [],
+          hidden: body.hidden === true,
         });
         return send(res, 201, { id: page.id, pages: store.metas() });
       }
@@ -534,8 +729,21 @@ export function createApiMiddleware(dataDir: string) {
           store.remove(id);
           return all();
         }
+      } else if (action === "history") {
+        if (method === "GET" && !sub) return send(res, 200, { versions: await store.history(id) });
+        if (method === "GET" && sub && !verb) return send(res, 200, { version: await store.version(id, sub) });
+        if (method === "POST" && sub && verb === "restore") {
+          await readJson(req);
+          await store.restoreVersion(id, sub);
+          return all();
+        }
       } else if (method === "POST") {
         const body = await readJson(req);
+        if (action === "apply-template") {
+          if (typeof body.templateId !== "string" || !ID_RE.test(body.templateId)) throw new HttpError(400, "缺少模板");
+          store.applyTemplate(id, body.templateId);
+          return all();
+        }
         if (action === "trash") {
           store.trash(id);
           return all();
@@ -592,5 +800,8 @@ export function createApiMiddleware(dataDir: string) {
     });
   };
 
-  return Object.assign(middleware, { flush: () => store.settled() });
+  return Object.assign(middleware, {
+    flush: () => store.settled(),
+    importFolder: (dir: string) => store.importFolder(dir),
+  });
 }

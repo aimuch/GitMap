@@ -7,9 +7,11 @@ import type {
   PropertyDef,
   PropType,
   PropValue,
+  RollupFn,
   SelectOption,
   ViewDef,
 } from "../shared/types";
+import { runFormula, type FormulaValue } from "./formula";
 import { getState, updatePage } from "./store";
 
 export const TAG_COLORS = ["gray", "brown", "orange", "yellow", "green", "blue", "purple", "pink", "red"] as const;
@@ -22,7 +24,22 @@ export const PROP_TYPES: { type: PropType; label: string }[] = [
   { type: "date", label: "日期" },
   { type: "checkbox", label: "复选框" },
   { type: "url", label: "网址" },
+  { type: "relation", label: "关联" },
+  { type: "rollup", label: "汇总" },
+  { type: "formula", label: "公式" },
 ];
+
+export const ROLLUP_FNS: { fn: RollupFn; label: string }[] = [
+  { fn: "show", label: "显示原值" },
+  { fn: "count", label: "计数" },
+  { fn: "sum", label: "求和" },
+  { fn: "avg", label: "平均值" },
+  { fn: "min", label: "最小值" },
+  { fn: "max", label: "最大值" },
+];
+
+/** 由其他数据算出来、不能直接编辑的属性 */
+export const isComputed = (type: PropType) => type === "rollup" || type === "formula";
 
 export const shortId = () => Math.random().toString(36).slice(2, 10);
 
@@ -98,9 +115,27 @@ export function addProperty(page: PageMeta, type: PropType): string {
   for (let i = 2; taken.has(name); i++) name = `${label} ${i}`;
   updateDatabase(page, (db) => ({
     ...db,
-    properties: [...db.properties, { id, name, type, ...(isSelect(type) ? { options: [] } : {}) }],
+    properties: [...db.properties, { id, name, type, ...defaultConfig(page, type) }],
   }));
   return id;
+}
+
+/** 新建或换成某种类型时，这种类型需要的初始配置 */
+function defaultConfig(page: PageMeta, type: PropType): Partial<PropertyDef> {
+  if (isSelect(type)) return { options: [] };
+  if (type === "relation") {
+    // 默认关联到另一个数据库；只有这一个数据库时就关联自己（比如“子任务”）
+    const other = Object.values(getState().pages).find(
+      (p) => p.kind === "database" && !p.trashed && !p.hidden && p.id !== page.id,
+    );
+    return { relationDb: other?.id ?? page.id };
+  }
+  if (type === "rollup") {
+    const relation = getDatabase(getState().pages[page.id] ?? page).properties.find((p) => p.type === "relation");
+    return { rollup: { relationProp: relation?.id ?? "", targetProp: "title", fn: "show" } };
+  }
+  if (type === "formula") return { formula: "" };
+  return {};
 }
 
 export function removeProperty(page: PageMeta, propId: string) {
@@ -110,6 +145,7 @@ export function removeProperty(page: PageMeta, propId: string) {
       ...v,
       groupBy: v.groupBy === propId ? null : v.groupBy,
       dateProp: v.dateProp === propId ? null : v.dateProp,
+      endProp: v.endProp === propId ? null : v.endProp,
       sort: v.sort?.propId === propId ? null : v.sort,
       filters: v.filters?.filter((f) => f.propId !== propId),
     })),
@@ -142,7 +178,83 @@ export function valueText(value: PropValue | undefined, def: PropertyDef): strin
       .filter(Boolean)
       .join("、");
   }
+  if (def.type === "relation") {
+    return relatedRows(value)
+      .map((row) => row.title || "无标题")
+      .join("、");
+  }
+  if (typeof value === "boolean") return value ? "是" : "否";
   return Array.isArray(value) ? value.join("、") : String(value);
+}
+
+/** 关联属性的值 → 仍然存在的那些行 */
+export function relatedRows(value: PropValue | undefined): PageMeta[] {
+  if (!Array.isArray(value)) return [];
+  const pages = getState().pages;
+  return value.map((id) => pages[id]).filter((p): p is PageMeta => !!p && !p.trashed);
+}
+
+/** 公式或汇总出错时显示的内容 */
+export const COMPUTE_ERROR = "#错误";
+
+/**
+ * 一行里某个属性“实际显示的值”：普通属性就是存下来的值，
+ * 汇总和公式是现算的。depth 用来防止公式互相引用造成死循环。
+ */
+export function cellValue(row: PageMeta, def: PropertyDef, depth = 0): PropValue {
+  if (!isComputed(def.type)) return row.props[def.id] ?? null;
+  if (depth > 6) return COMPUTE_ERROR;
+  const pages = getState().pages;
+  const db = row.parentId ? pages[row.parentId]?.database : null;
+  if (!db) return null;
+
+  if (def.type === "formula") {
+    const result = runFormula(def.formula ?? "", (name): FormulaValue => {
+      if (name === "名称" || name.toLowerCase() === "title" || name.toLowerCase() === "name") {
+        // 属性里真有叫这个名字的就用属性，否则指页面标题
+        if (!db.properties.some((p) => p.name === name)) return row.title;
+      }
+      const target = db.properties.find((p) => p.name === name);
+      if (!target) throw new Error(`没有叫“${name}”的属性`);
+      const value = cellValue(row, target, depth + 1);
+      if (value === COMPUTE_ERROR) throw new Error(`“${name}”计算出错`);
+      if (value === null || typeof value === "number" || typeof value === "boolean") return value;
+      // 单选、多选、关联等转成文字；日期和文本本来就是字符串
+      return target.type === "text" || target.type === "url" || target.type === "date" || isComputed(target.type)
+        ? String(value)
+        : valueText(value, target);
+    });
+    return "error" in result ? COMPUTE_ERROR : result.value;
+  }
+
+  const config = def.rollup;
+  const relation = db.properties.find((p) => p.id === config?.relationProp && p.type === "relation");
+  if (!config || !relation) return null;
+  const rows = relatedRows(row.props[relation.id]);
+  if (config.fn === "count") return rows.length;
+  const targetDb = relation.relationDb ? pages[relation.relationDb]?.database : null;
+  const target = targetDb?.properties.find((p) => p.id === config.targetProp);
+  const texts = rows.map((r) =>
+    target ? valueText(cellValue(r, target, depth + 1), target) : r.title || "无标题",
+  );
+  if (config.fn === "show") return texts.filter(Boolean).join("、") || null;
+  const numbers = rows
+    .map((r, i) => {
+      const raw = target ? cellValue(r, target, depth + 1) : null;
+      return typeof raw === "number" ? raw : parseFloat(texts[i]);
+    })
+    .filter((n) => Number.isFinite(n));
+  if (numbers.length === 0) return null;
+  const total = numbers.reduce((a, b) => a + b, 0);
+  const result =
+    config.fn === "sum"
+      ? total
+      : config.fn === "avg"
+        ? total / numbers.length
+        : config.fn === "min"
+          ? Math.min(...numbers)
+          : Math.max(...numbers);
+  return Number(result.toPrecision(12));
 }
 
 export function isEmptyValue(value: PropValue | undefined): boolean {
@@ -153,7 +265,7 @@ export function rowMatches(row: PageMeta, query: string, db: DatabaseDef): boole
   const q = query.trim().toLowerCase();
   if (!q) return true;
   if ((row.title || "无标题").toLowerCase().includes(q)) return true;
-  return db.properties.some((def) => valueText(row.props[def.id], def).toLowerCase().includes(q));
+  return db.properties.some((def) => valueText(cellValue(row, def), def).toLowerCase().includes(q));
 }
 
 export function sortRows(rows: PageMeta[], db: DatabaseDef, sort: ViewDef["sort"]): PageMeta[] {
@@ -162,10 +274,12 @@ export function sortRows(rows: PageMeta[], db: DatabaseDef, sort: ViewDef["sort"
   if (sort.propId !== "title" && !def) return rows;
   const key = (row: PageMeta): string | number | null => {
     if (!def) return row.title || null;
-    const value = row.props[def.id];
-    if (isEmptyValue(value) && def.type !== "checkbox") return null;
-    if (def.type === "number") return typeof value === "number" ? value : null;
+    const value = cellValue(row, def);
     if (def.type === "checkbox") return value === true ? 1 : 0;
+    if (isEmptyValue(value)) return null;
+    // 数字属性，以及算出数字的汇总 / 公式，都按数值大小排
+    if (typeof value === "number") return value;
+    if (def.type === "number") return null;
     if (isSelect(def.type)) {
       // 按选项在定义里的先后顺序，而不是按名称
       const first = Array.isArray(value) ? value[0] : value;
@@ -222,19 +336,26 @@ export function changePropertyType(page: PageMeta, rows: PageMeta[], propId: str
           .filter(Boolean)
           .map(optionId);
     }
+    // 关联保持原样；换成关联时旧值无法对应到具体的行，清空
+    if (type === "relation") next = def.type === "relation" ? old : null;
+    // 汇总和公式是现算的，不看存下来的值，原值留着以便换回来
+    if (isComputed(type)) continue;
     if (JSON.stringify(next) !== JSON.stringify(old)) setProp(row, propId, next);
   }
 
   updateDatabase(page, (db) => ({
     ...db,
     properties: db.properties.map((p) =>
-      p.id === propId ? { id: p.id, name: p.name, type, ...(isSelect(type) ? { options } : {}) } : p,
+      p.id === propId
+        ? { id: p.id, name: p.name, type, ...defaultConfig(page, type), ...(isSelect(type) ? { options } : {}) }
+        : p,
     ),
     // 看板只能按单选属性分组，日历只能按日期属性排布
     views: db.views.map((v) => ({
       ...v,
       groupBy: v.groupBy === propId && type !== "select" ? null : v.groupBy,
       dateProp: v.dateProp === propId && type !== "date" ? null : v.dateProp,
+      endProp: v.endProp === propId && type !== "date" ? null : v.endProp,
       // 换了类型后原来的条件多半不再适用
       filters: v.filters?.filter((f) => f.propId !== propId),
     })),
@@ -246,7 +367,7 @@ export function exportCsv(page: PageMeta, rows: PageMeta[]) {
   const cell = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
   const lines = [
     ["名称", ...db.properties.map((p) => p.name)],
-    ...rows.map((row) => [row.title || "无标题", ...db.properties.map((def) => valueText(row.props[def.id], def))]),
+    ...rows.map((row) => [row.title || "无标题", ...db.properties.map((def) => valueText(cellValue(row, def), def))]),
   ].map((line) => line.map(cell).join(","));
   // 加 BOM，Excel 才能正确识别中文
   const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
@@ -322,7 +443,7 @@ export function isActiveFilter(rule: FilterRule, db: DatabaseDef): boolean {
 
 function matchRule(row: PageMeta, rule: FilterRule, db: DatabaseDef): boolean {
   const def = db.properties.find((p) => p.id === rule.propId);
-  const raw: PropValue | undefined = def ? row.props[def.id] : row.title;
+  const raw: PropValue | undefined = def ? cellValue(row, def) : row.title;
   const want = rule.value ?? "";
 
   if (rule.op === "isEmpty") return isEmptyValue(raw);

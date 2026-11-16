@@ -1,19 +1,37 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ALargeSmall,
+  ArrowUpRight,
   Calendar,
   Check,
   CircleChevronDown,
   ExternalLink,
+  FileText,
   Hash,
   Link2,
+  Search,
+  Sigma,
   SquareCheck,
+  SquareFunction,
   Tags,
   Type,
   X,
 } from "lucide-react";
-import type { PageMeta, PropertyDef, PropType, PropValue, SelectOption } from "../../../shared/types";
-import { ensureOption, setProp, updateProperty } from "../../db";
+import type { PageMeta, PropertyDef, PropType, PropValue, RollupFn, SelectOption } from "../../../shared/types";
+import {
+  COMPUTE_ERROR,
+  ROLLUP_FNS,
+  cellValue,
+  ensureOption,
+  getDatabase,
+  isComputed,
+  relatedRows,
+  setProp,
+  updateProperty,
+  valueText,
+} from "../../db";
+import { checkFormula } from "../../formula";
+import { navigate, useStore, useTree } from "../../store";
 import { Popover, cx } from "../Popover";
 
 const TYPE_ICONS: Record<PropType | "title", typeof Type> = {
@@ -25,6 +43,9 @@ const TYPE_ICONS: Record<PropType | "title", typeof Type> = {
   date: Calendar,
   checkbox: SquareCheck,
   url: Link2,
+  relation: ArrowUpRight,
+  rollup: Sigma,
+  formula: SquareFunction,
 };
 
 export function PropIcon({ type, size = 14 }: { type: PropType | "title"; size?: number }) {
@@ -60,6 +81,27 @@ function selectedOptions(value: PropValue | undefined, def: PropertyDef): Select
 
 /** 只读展示一个属性值（看板卡片上用）。空值返回 null。 */
 export function ValueDisplay({ value, def }: { value: PropValue | undefined; def: PropertyDef }) {
+  if (def.type === "relation") {
+    const rows = relatedRows(value);
+    if (rows.length === 0) return null;
+    return (
+      <span className="tag-list">
+        {rows.map((row) => (
+          <RowChip key={row.id} row={row} />
+        ))}
+      </span>
+    );
+  }
+  if (isComputed(def.type)) {
+    const text = valueText(value, def);
+    if (!text) return null;
+    return (
+      <span className={cx("value-inline value-text", value === COMPUTE_ERROR && "value-error")}>
+        <span className="value-label">{def.name}</span>
+        {text}
+      </span>
+    );
+  }
   if (def.type === "select" || def.type === "multiSelect") {
     const options = selectedOptions(value, def);
     if (options.length === 0) return null;
@@ -87,7 +129,13 @@ export function ValueDisplay({ value, def }: { value: PropValue | undefined; def
       </span>
     );
   }
-  return <span className="value-inline value-text">{String(value)}</span>;
+  // 光秃秃的数字和文字在卡片上看不出是什么，带上属性名
+  return (
+    <span className="value-inline value-text">
+      <span className="value-label">{def.name}</span>
+      {String(value)}
+    </span>
+  );
 }
 
 export function formatDate(iso: string): string {
@@ -95,6 +143,29 @@ export function formatDate(iso: string): string {
   if (!m) return iso;
   const sameYear = Number(m[1]) === new Date().getFullYear();
   return `${sameYear ? "" : `${m[1]}年`}${Number(m[2])}月${Number(m[3])}日`;
+}
+
+/** 关联到的一行：图标 + 标题 */
+export function RowChip({ row, onRemove }: { row: PageMeta; onRemove?: () => void }) {
+  return (
+    <span className="row-chip">
+      <span className="row-chip-icon">{row.icon ?? <FileText size={13} />}</span>
+      <span className="tag-name">{row.title || "无标题"}</span>
+      {onRemove && (
+        <button
+          type="button"
+          className="tag-remove"
+          aria-label={`取消关联 ${row.title || "无标题"}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+        >
+          <X size={11} />
+        </button>
+      )}
+    </span>
+  );
 }
 
 interface CellProps {
@@ -132,6 +203,11 @@ export function PropertyCell({ row, def, dbPage }: CellProps) {
     case "select":
     case "multiSelect":
       return <SelectCell row={row} def={def} dbPage={dbPage} />;
+    case "relation":
+      return <RelationCell row={row} def={def} dbPage={dbPage} />;
+    case "rollup":
+    case "formula":
+      return <ComputedCell row={row} def={def} />;
     default:
       return <TextCell row={row} def={def} />;
   }
@@ -334,4 +410,262 @@ function SelectEditor({ def, dbPage, selected, onToggle, onCreate }: SelectEdito
       </div>
     </>
   );
+}
+
+/** 汇总和公式：现算、只读。订阅整个页面表，被引用的行一变就跟着更新。 */
+function ComputedCell({ row, def }: { row: PageMeta; def: PropertyDef }) {
+  useStore((s) => s.pages);
+  const value = cellValue(row, def);
+  const text = valueText(value, def);
+  const failed = value === COMPUTE_ERROR;
+  // 公式出错时，把具体原因放进提示里
+  let reason: string | undefined;
+  if (failed && def.type === "formula") {
+    reason = checkFormula(def.formula ?? "") ?? "引用的属性不存在，或者参与运算的值类型不对";
+  }
+  return (
+    <span
+      className={cx("cell cell-computed", failed && "value-error", typeof value === "number" && "cell-number")}
+      title={reason ?? (def.type === "formula" ? def.formula : undefined)}
+    >
+      {text}
+    </span>
+  );
+}
+
+function RelationCell({ row, def, dbPage }: CellProps) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  // 关联的行改名、删除后这里要跟着变
+  useStore((s) => s.pages);
+  const selected = relatedRows(row.props[def.id]);
+
+  const toggle = (target: PageMeta) => {
+    const ids = selected.map((r) => r.id);
+    setProp(row, def.id, ids.includes(target.id) ? ids.filter((id) => id !== target.id) : [...ids, target.id]);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className={cx("cell cell-select", anchor && "open")}
+        aria-label={def.name}
+        aria-haspopup="listbox"
+        onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}
+      >
+        {selected.length > 0 ? (
+          <span className="tag-list">
+            {selected.map((r) => (
+              <RowChip key={r.id} row={r} />
+            ))}
+          </span>
+        ) : (
+          <span className="cell-placeholder">空</span>
+        )}
+      </button>
+      {anchor && (
+        <Popover anchor={anchor} onClose={() => setAnchor(null)} className="select-editor">
+          <RelationEditor row={row} def={def} dbPage={dbPage} selected={selected} onToggle={toggle} />
+        </Popover>
+      )}
+    </>
+  );
+}
+
+interface RelationEditorProps extends CellProps {
+  selected: PageMeta[];
+  onToggle: (target: PageMeta) => void;
+}
+
+function RelationEditor({ row, def, dbPage, selected, onToggle }: RelationEditorProps) {
+  const tree = useTree();
+  const pages = useStore((s) => s.pages);
+  const [query, setQuery] = useState("");
+  const target = def.relationDb ? pages[def.relationDb] : undefined;
+
+  if (!target || target.kind !== "database" || target.trashed) {
+    return (
+      <div className="select-empty">
+        关联的数据库不存在了。点列头，在属性设置里重新选择要关联的数据库。
+        <DatabaseSelect dbPage={dbPage} def={def} />
+      </div>
+    );
+  }
+
+  const q = query.trim().toLowerCase();
+  const selectedIds = new Set(selected.map((r) => r.id));
+  // 不能关联自己
+  const candidates = (tree.children.get(target.id) ?? []).filter(
+    (r) => r.id !== row.id && (!q || (r.title || "无标题").toLowerCase().includes(q)),
+  );
+
+  return (
+    <>
+      <div className="select-search">
+        {selected.map((r) => (
+          <RowChip key={r.id} row={r} onRemove={() => onToggle(r)} />
+        ))}
+        <input
+          autoFocus
+          value={query}
+          placeholder={selected.length ? "" : `在“${target.title || "无标题"}”中搜索…`}
+          aria-label="搜索要关联的行"
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+      <div className="select-hint">
+        <Search size={12} /> 来自“{target.title || "无标题"}”
+      </div>
+      <div className="select-options" role="listbox">
+        {candidates.slice(0, 80).map((r) => (
+          <div
+            key={r.id}
+            className="select-option"
+            role="option"
+            aria-selected={selectedIds.has(r.id)}
+            tabIndex={0}
+            onClick={() => onToggle(r)}
+            onKeyDown={(e) => e.key === "Enter" && onToggle(r)}
+          >
+            <RowChip row={r} />
+            {selectedIds.has(r.id) && <Check size={14} className="select-check" />}
+            <button
+              type="button"
+              className="icon-btn small select-delete"
+              title="打开这一行"
+              aria-label={`打开 ${r.title || "无标题"}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(r.id);
+              }}
+            >
+              <ArrowUpRight size={13} />
+            </button>
+          </div>
+        ))}
+        {candidates.length === 0 && <div className="select-empty">{q ? "没有匹配的行" : "这个数据库里还没有可关联的行"}</div>}
+      </div>
+    </>
+  );
+}
+
+function DatabaseSelect({ dbPage, def }: { dbPage: PageMeta; def: PropertyDef }) {
+  const pages = useStore((s) => s.pages);
+  const databases = Object.values(pages).filter((p) => p.kind === "database" && !p.trashed && !p.hidden);
+  return (
+    <select
+      className="config-select"
+      aria-label="关联到的数据库"
+      value={def.relationDb ?? ""}
+      onChange={(e) => updateProperty(dbPage, def.id, { relationDb: e.target.value })}
+    >
+      <option value="" disabled>
+        选择数据库…
+      </option>
+      {databases.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.title || "无标题"}
+          {p.id === dbPage.id ? "（当前数据库）" : ""}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** 属性菜单里，关联 / 汇总 / 公式各自的设置项。其他类型不需要设置，返回 null。 */
+export function PropertyConfig({ dbPage, def }: { dbPage: PageMeta; def: PropertyDef }) {
+  const pages = useStore((s) => s.pages);
+  const db = getDatabase(dbPage);
+
+  if (def.type === "relation") {
+    return (
+      <div className="prop-config">
+        <label>
+          关联到
+          <DatabaseSelect dbPage={dbPage} def={def} />
+        </label>
+      </div>
+    );
+  }
+
+  if (def.type === "rollup") {
+    const relations = db.properties.filter((p) => p.type === "relation");
+    const config = def.rollup ?? { relationProp: "", targetProp: "title", fn: "show" as RollupFn };
+    const relation = relations.find((p) => p.id === config.relationProp);
+    const targetDb = relation?.relationDb ? pages[relation.relationDb]?.database : null;
+    const set = (patch: Partial<typeof config>) => updateProperty(dbPage, def.id, { rollup: { ...config, ...patch } });
+    if (relations.length === 0) {
+      return <div className="prop-config prop-config-note">汇总要顺着一个“关联”属性去取数据。先给这个数据库添加一个关联属性。</div>;
+    }
+    return (
+      <div className="prop-config">
+        <label>
+          顺着关联
+          <select
+            className="config-select"
+            value={config.relationProp}
+            onChange={(e) => set({ relationProp: e.target.value, targetProp: "title" })}
+          >
+            <option value="" disabled>
+              选择关联属性…
+            </option>
+            {relations.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          取对方的
+          <select className="config-select" value={config.targetProp} onChange={(e) => set({ targetProp: e.target.value })}>
+            <option value="title">名称</option>
+            {targetDb?.properties.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          计算方式
+          <select className="config-select" value={config.fn} onChange={(e) => set({ fn: e.target.value as RollupFn })}>
+            {ROLLUP_FNS.map((f) => (
+              <option key={f.fn} value={f.fn}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    );
+  }
+
+  if (def.type === "formula") {
+    const problem = checkFormula(def.formula ?? "");
+    return (
+      <div className="prop-config">
+        <label>
+          公式
+          <textarea
+            className="config-formula"
+            rows={3}
+            spellCheck={false}
+            value={def.formula ?? ""}
+            placeholder={'例如：prop("数量") * prop("单价")'}
+            onChange={(e) => updateProperty(dbPage, def.id, { formula: e.target.value })}
+          />
+        </label>
+        {problem ? (
+          <div className="prop-config-note value-error">{problem}</div>
+        ) : (
+          <div className="prop-config-note">
+            用 prop("属性名") 引用本行的属性；可用 if、round、min、max、concat、dateBetween、today 等函数。
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return null;
 }

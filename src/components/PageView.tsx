@@ -7,6 +7,7 @@ import {
   HardDriveDownload,
   Image as ImageIcon,
   Kanban,
+  LayoutTemplate,
   LoaderCircle,
   PanelLeft,
   Smile,
@@ -26,7 +27,10 @@ import {
   updatePage,
   useStore,
 } from "../store";
-import { buildTree, getState } from "../store";
+import { applyTemplate, buildTree, getState } from "../store";
+import { BUILTIN_TEMPLATES } from "../templates";
+import { HistoryModal } from "./HistoryModal";
+import { MenuItem, Popover } from "./Popover";
 import { defaultDatabase, exportCsv } from "../db";
 import { DatabaseView, RowProperties } from "./database/DatabaseView";
 import { Editor, type NoteEditor } from "./Editor";
@@ -42,6 +46,9 @@ export function PageView({ id }: { id: string }) {
   const onDirty = useCallback(() => setDirty(true), []);
   const [record, setRecord] = useState<PageRecord | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [templateAnchor, setTemplateAnchor] = useState<HTMLElement | null>(null);
+  const allPages = useStore((s) => s.pages);
   const editorRef = useRef<NoteEditor | null>(null);
   const onReady = useCallback((editor: NoteEditor | null) => {
     editorRef.current = editor;
@@ -65,6 +72,9 @@ export function PageView({ id }: { id: string }) {
   if (!meta) return null;
 
   const isDatabase = meta.kind === "database";
+  const userTemplates = Object.values(allPages)
+    .filter((p) => p.template && !p.trashed && !p.hidden && p.id !== meta.id)
+    .sort((a, b) => a.title.localeCompare(b.title, "zh"));
   const isRow = parent?.kind === "database" && !parent.trashed;
   const blank = !isDatabase && !isRow && !meta.trashed && !dirty && record?.content.length === 0;
 
@@ -86,7 +96,12 @@ export function PageView({ id }: { id: string }) {
 
   return (
     <div className="page">
-      <Topbar page={meta} onExport={exportMarkdown} exportLabel={isDatabase ? "导出为 CSV" : "导出为 Markdown"} />
+      <Topbar
+        page={meta}
+        onExport={exportMarkdown}
+        exportLabel={isDatabase ? "导出为 CSV" : "导出为 Markdown"}
+        onHistory={isDatabase ? undefined : () => setHistoryOpen(true)}
+      />
       {meta.trashed && <TrashBanner page={meta} />}
       <div className="page-scroll">
         {meta.cover && <Cover page={meta} />}
@@ -113,6 +128,9 @@ export function PageView({ id }: { id: string }) {
               <Editor page={record} editable={!meta.trashed} onReady={onReady} onDirty={onDirty} />
               {blank && (
                 <div className="starters">
+                  <button type="button" onClick={(e) => setTemplateAnchor(templateAnchor ? null : e.currentTarget)}>
+                    <LayoutTemplate size={15} /> 使用模板
+                  </button>
                   <span>或者把这个页面变成数据库：</span>
                   <button type="button" onClick={() => updatePage(meta.id, { kind: "database", database: defaultDatabase("table") })}>
                     <Table2 size={15} /> 表格
@@ -139,11 +157,53 @@ export function PageView({ id }: { id: string }) {
           )}
         </div>
       </div>
+      {historyOpen && <HistoryModal page={meta} onClose={() => setHistoryOpen(false)} />}
+      {templateAnchor && (
+        <Popover anchor={templateAnchor} onClose={() => setTemplateAnchor(null)} className="menu template-menu">
+          <div className="menu-title">内置模板</div>
+          {BUILTIN_TEMPLATES.map((tpl) => (
+            <MenuItem
+              key={tpl.id}
+              icon={<span className="template-icon">{tpl.icon}</span>}
+              label={tpl.name}
+              hint={tpl.description}
+              onClick={() => {
+                setTemplateAnchor(null);
+                const editor = editorRef.current;
+                if (!editor) return;
+                // 直接替换编辑器里的内容，随后由编辑器的自动保存写入
+                editor.replaceBlocks(editor.document, tpl.content as Parameters<typeof editor.replaceBlocks>[1]);
+                updatePage(meta.id, { icon: meta.icon ?? tpl.icon, title: meta.title || tpl.name });
+              }}
+            />
+          ))}
+          {userTemplates.length > 0 && <div className="menu-title">我的模板</div>}
+          {userTemplates.map((tpl) => (
+            <MenuItem
+              key={tpl.id}
+              icon={<span className="template-icon">{tpl.icon ?? "📄"}</span>}
+              label={tpl.title || "无标题"}
+              onClick={() => {
+                setTemplateAnchor(null);
+                void applyTemplate(meta.id, tpl.id);
+              }}
+            />
+          ))}
+          <div className="menu-footnote">在任意页面的菜单里选“设为模板”，它就会出现在这里。</div>
+        </Popover>
+      )}
     </div>
   );
 }
 
-function Topbar({ page, onExport, exportLabel }: { page: PageMeta; onExport: () => void; exportLabel: string }) {
+interface TopbarProps {
+  page: PageMeta;
+  onExport: () => void;
+  exportLabel: string;
+  onHistory?: () => void;
+}
+
+function Topbar({ page, onExport, exportLabel, onHistory }: TopbarProps) {
   const pages = useStore((s) => s.pages);
   const saving = useStore((s) => s.saving > 0);
   const collapsed = useStore((s) => s.sidebarCollapsed);
@@ -218,6 +278,7 @@ function Topbar({ page, onExport, exportLabel }: { page: PageMeta; onExport: () 
           showLayout
           onExport={onExport}
           exportLabel={exportLabel}
+          onHistory={onHistory}
           onClose={() => setMenuAnchor(null)}
         />
       )}

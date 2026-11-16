@@ -22,6 +22,7 @@ export function App() {
   const loaded = useStore((s) => s.loaded);
   const pages = useStore((s) => s.pages);
   const searchOpen = useStore((s) => s.searchOpen);
+  const revisions = useStore((s) => s.revisions);
   const collapsed = useStore((s) => s.sidebarCollapsed);
   const error = useStore((s) => s.error);
   const route = useRoute();
@@ -82,7 +83,7 @@ export function App() {
       {!collapsed && <div className="sidebar-backdrop" onClick={() => setSidebarCollapsed(true)} />}
       <main className="main">
         {current ? (
-          <PageView key={current} id={current} />
+          <PageView key={`${current}:${revisions[current] ?? 0}`} id={current} />
         ) : (
           <div className="page">
             {collapsed && (

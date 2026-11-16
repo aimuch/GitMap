@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { FileText, Kanban, Plus } from "lucide-react";
 import type { DatabaseDef, PageMeta, PropertyDef, PropValue, SelectOption, ViewDef } from "../../../shared/types";
-import { addProperty, ensureOption, setProp, updateProperty, updateView } from "../../db";
-import { createPage, getState, navigate, updatePage } from "../../store";
+import { addProperty, cellValue, ensureOption, setProp, updateProperty, updateView } from "../../db";
+import { getState, navigate, updatePage } from "../../store";
 import { cx } from "../Popover";
 import { Tag, ValueDisplay } from "./cells";
 
@@ -11,15 +11,17 @@ interface Props {
   db: DatabaseDef;
   view: ViewDef;
   rows: PageMeta[];
-  /** 新建卡片时预填的属性值（来自当前视图的筛选条件） */
-  rowDefaults: Record<string, PropValue>;
+  /** 刚新建、正在就地输入名称的卡片 */
+  editingId: string | null;
+  onEditDone: () => void;
+  /** 新建一张卡片；props 是它所在列对应的属性值 */
+  onCreate: (props: Record<string, PropValue>) => void;
 }
 
 /** 当前正在拖动的卡片 id */
 let draggingCard: string | null = null;
 
-export function BoardView({ page, db, view, rows, rowDefaults }: Props) {
-  const [editingId, setEditingId] = useState<string | null>(null);
+export function BoardView({ page, db, view, rows, editingId, onEditDone, onCreate }: Props) {
   const [addingGroup, setAddingGroup] = useState(false);
   const selects = db.properties.filter((p) => p.type === "select");
   const group = selects.find((p) => p.id === view.groupBy) ?? selects[0];
@@ -53,13 +55,7 @@ export function BoardView({ page, db, view, rows, rowDefaults }: Props) {
   // 卡片上展示除分组属性外的其他属性
   const cardProps = db.properties.filter((p) => p.id !== group.id);
 
-  const addCard = async (option: SelectOption | null) => {
-    const id = await createPage({
-      parentId: page.id,
-      props: { ...rowDefaults, ...(option ? { [group.id]: option.id } : {}) },
-    });
-    if (id) setEditingId(id);
-  };
+  const addCard = (option: SelectOption | null) => onCreate(option ? { [group.id]: option.id } : {});
 
   return (
     <div className="board">
@@ -71,8 +67,8 @@ export function BoardView({ page, db, view, rows, rowDefaults }: Props) {
           group={group}
           cardProps={cardProps}
           editingId={editingId}
-          onEditDone={() => setEditingId(null)}
-          onAdd={() => void addCard(option)}
+          onEditDone={onEditDone}
+          onAdd={() => addCard(option)}
         />
       ))}
       <div className="board-column board-new-group">
@@ -182,6 +178,7 @@ interface CardProps {
 
 function BoardCard({ card, cardProps, editing, onEditDone }: CardProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const wasEditing = useRef(false);
   useEffect(() => {
     if (editing) inputRef.current?.focus();
   }, [editing]);
@@ -192,8 +189,12 @@ function BoardCard({ card, cardProps, editing, onEditDone }: CardProps) {
       role="button"
       tabIndex={0}
       draggable={!editing}
+      onMouseDown={() => {
+        wasEditing.current = editing;
+      }}
       onClick={() => {
-        if (!editing) navigate(card.id);
+        if (!editing && !wasEditing.current) navigate(card.id);
+        wasEditing.current = false;
       }}
       onKeyDown={(e) => {
         if (e.key === "Enter" && e.target === e.currentTarget) navigate(card.id);
@@ -236,7 +237,7 @@ function BoardCard({ card, cardProps, editing, onEditDone }: CardProps) {
 
 function CardValues({ card, defs }: { card: PageMeta; defs: PropertyDef[] }) {
   const items = defs
-    .map((def) => ({ def, node: ValueDisplay({ value: card.props[def.id], def }) }))
+    .map((def) => ({ def, node: ValueDisplay({ value: cellValue(card, def), def }) }))
     .filter((item) => item.node !== null);
   if (items.length === 0) return null;
   return (

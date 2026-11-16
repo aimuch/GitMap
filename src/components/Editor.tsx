@@ -18,9 +18,10 @@ import {
   useCreateBlockNote,
   type DefaultReactSuggestionItem,
 } from "@blocknote/react";
-import { FilePlus2, FileText, FileX2, PanelTop, Table2 } from "lucide-react";
+import { FilePlus2, FileText, FileX2, Link2, PanelTop, RefreshCw, Table2 } from "lucide-react";
 import { defaultDatabase } from "../db";
 import { createDatabaseBlock } from "./database/InlineDatabase";
+import { createSyncedBlock, registerNestedEditor } from "./SyncedBlock";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import type { PageRecord } from "../../shared/types";
@@ -71,13 +72,15 @@ const pageMention = createReactInlineContentSpec(
   },
 );
 
-const schema = BlockNoteSchema.create({
+export const schema = BlockNoteSchema.create({
   // 带语法高亮的代码块
   blockSpecs: {
     ...defaultBlockSpecs,
     codeBlock: createCodeBlockSpec(codeBlockOptions),
     // 内嵌在正文里的数据库
     database: createDatabaseBlock(),
+    // 同步块：多处引用、编辑的是同一份内容
+    synced: createSyncedBlock(),
   },
   inlineContentSpecs: { ...defaultInlineContentSpecs, pageMention },
 });
@@ -90,9 +93,11 @@ interface Props {
   onReady: (editor: NoteEditor | null) => void;
   /** 内容第一次被修改时调用 */
   onDirty?: () => void;
+  /** 嵌在别的界面里（同步块、历史预览）：不提供新建子页面、数据库、同步块的命令 */
+  nested?: boolean;
 }
 
-export function Editor({ page, editable, onReady, onDirty }: Props) {
+export function Editor({ page, editable, onReady, onDirty, nested }: Props) {
   const theme = useResolvedTheme();
   const pageId = page.id;
 
@@ -158,18 +163,69 @@ export function Editor({ page, editable, onReady, onDirty }: Props) {
           navigate(id);
         },
       };
+      if (nested) return filterSuggestionItems(getDefaultReactSlashMenuItems(editor), query);
+
+      const pages = Object.values(getState().pages).filter((p) => !p.trashed);
+      const recent = (list: typeof pages) => list.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
+
+      // 把已有的数据库嵌进来：和原数据库是同一份数据
+      const linkedDatabases: DefaultReactSuggestionItem[] = recent(
+        pages.filter((p) => p.kind === "database" && !p.hidden),
+      ).map((p) => ({
+        title: `链接数据库：${p.title || "无标题"}`,
+        subtext: "把这个已有的数据库嵌到这里",
+        aliases: [...dbAliases, "link", "lianjie", "链接", "数据库"],
+        group: "页面",
+        icon: <Link2 size={18} />,
+        onItemClick: () => {
+          insertOrUpdateBlockForSlashMenu(editor, { type: "database", props: { pageId: p.id } });
+        },
+      }));
+
+      const syncAliases = ["sync", "synced", "tongbu", "同步", "同步块"];
+      const newSynced: DefaultReactSuggestionItem = {
+        title: "新建同步块",
+        subtext: "新建一块可以在多个页面里同步显示的内容",
+        aliases: syncAliases,
+        group: "同步块",
+        icon: <RefreshCw size={18} />,
+        onItemClick: async () => {
+          const id = await createPage({ hidden: true });
+          if (!id) return;
+          insertOrUpdateBlockForSlashMenu(editor, { type: "synced", props: { sourceId: id } });
+        },
+      };
+      const existingSynced: DefaultReactSuggestionItem[] = recent(pages.filter((p) => p.hidden)).map((p) => ({
+        title: `同步块：${p.title || "未命名"}`,
+        subtext: "插入这个已有的同步块",
+        aliases: syncAliases,
+        group: "同步块",
+        icon: <RefreshCw size={18} />,
+        onItemClick: () => {
+          insertOrUpdateBlockForSlashMenu(editor, { type: "synced", props: { sourceId: p.id } });
+        },
+      }));
+
       return filterSuggestionItems(
-        [...getDefaultReactSlashMenuItems(editor), subPage, inlineDatabase, fullDatabase],
+        [
+          ...getDefaultReactSlashMenuItems(editor),
+          subPage,
+          inlineDatabase,
+          fullDatabase,
+          ...linkedDatabases,
+          newSynced,
+          ...existingSynced,
+        ],
         query,
       );
     },
-    [editor, pageId],
+    [editor, pageId, nested],
   );
 
   const mentionItems = useMemo(
     () => async (query: string) => {
       const items: DefaultReactSuggestionItem[] = Object.values(getState().pages)
-        .filter((p) => !p.trashed && p.id !== pageId)
+        .filter((p) => !p.trashed && !p.hidden && p.id !== pageId)
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .map((p) => ({
           title: p.title || "无标题",
@@ -200,3 +256,6 @@ export function Editor({ page, editable, onReady, onDirty }: Props) {
     </BlockNoteView>
   );
 }
+
+// 同步块里嵌的也是这个编辑器；在这里登记，避免两个文件互相引用
+registerNestedEditor(Editor as Parameters<typeof registerNestedEditor>[0]);
