@@ -72,7 +72,6 @@ export function SearchModal() {
             }}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
-              if (e.key === "Escape") close();
               if (e.key === "ArrowDown") {
                 e.preventDefault();
                 setIndex((i) => Math.min(items.length - 1, i + 1));

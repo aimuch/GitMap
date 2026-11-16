@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createReactBlockSpec, useEditorChange } from "@blocknote/react";
-import { Bookmark, ExternalLink, ListTree, LoaderCircle, Palette, Sigma } from "lucide-react";
+import { Bookmark, ExternalLink, ListTree, LoaderCircle, Palette, Pencil, Sigma } from "lucide-react";
 import { unfurlLink } from "../store";
 import { EmojiPicker } from "./pickers";
 import { cx } from "./Popover";
@@ -257,7 +257,12 @@ export const createEquationBlock = createReactBlockSpec(
   },
 );
 
-/** 网页书签块（Web Bookmark）：输入网址自动抓取站点标题与简介并渲染为卡片 */
+type BookmarkState =
+  | { phase: "editing"; draft: string; error: string | null }
+  | { phase: "resolving"; draft: string }
+  | { phase: "ready" };
+
+/** 网页书签块（Web Bookmark）：输入网址自动抓取站点标题与简介并渲染为卡片，可随时修改网址 */
 export const createBookmarkBlock = createReactBlockSpec(
   {
     type: "bookmark",
@@ -272,16 +277,19 @@ export const createBookmarkBlock = createReactBlockSpec(
   {
     render: ({ block, editor }) => {
       const editable = editor.isEditable;
-      const [input, setInput] = useState("");
-      const [loading, setLoading] = useState(false);
-      const [err, setErr] = useState<string | null>(null);
+      const [bmState, setBmState] = useState<BookmarkState>(() =>
+        block.props.url ? { phase: "ready" } : { phase: "editing", draft: "", error: null },
+      );
+
+      const effective: BookmarkState =
+        !block.props.url && bmState.phase === "ready" ? { phase: "editing", draft: "", error: null } : bmState;
 
       const submit = async () => {
-        let raw = input.trim();
+        if (effective.phase !== "editing") return;
+        let raw = effective.draft.trim();
         if (!raw) return;
         if (!/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
-        setLoading(true);
-        setErr(null);
+        setBmState({ phase: "resolving", draft: raw });
         try {
           const data = await unfurlLink(raw);
           editor.updateBlock(block, {
@@ -292,55 +300,91 @@ export const createBookmarkBlock = createReactBlockSpec(
               siteName: data.siteName,
             },
           });
+          setBmState({ phase: "ready" });
         } catch (e) {
-          setErr(e instanceof Error ? e.message : String(e));
-        } finally {
-          setLoading(false);
+          setBmState({
+            phase: "editing",
+            draft: raw,
+            error: e instanceof Error ? e.message : String(e),
+          });
         }
       };
 
-      if (!block.props.url) {
+      if (effective.phase !== "ready") {
+        const loading = effective.phase === "resolving";
+        const err = effective.phase === "editing" ? effective.error : null;
         return (
-          <div className="bookmark-input-bar" contentEditable={false} onKeyDown={(e) => e.stopPropagation()}>
+          <div
+            className="bookmark-input-bar"
+            contentEditable={false}
+            data-bookmark-state={effective.phase}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
             <Bookmark size={15} />
             <input
               autoFocus={editable}
               disabled={!editable || loading}
-              value={input}
+              value={effective.draft}
               placeholder="输入或粘贴网址（如 https://example.com），回车生成书签卡片…"
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => setBmState({ phase: "editing", draft: e.target.value, error: null })}
               onKeyDown={(e) => {
-                if (!e.nativeEvent.isComposing && e.key === "Enter") {
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "Enter") {
                   e.preventDefault();
                   void submit();
+                } else if (e.key === "Escape" && block.props.url) {
+                  e.preventDefault();
+                  setBmState({ phase: "ready" });
                 }
               }}
             />
-            <button type="button" className="primary-btn small" disabled={loading || !input.trim()} onClick={() => void submit()}>
+            <button
+              type="button"
+              className="primary-btn small"
+              disabled={loading || !effective.draft.trim()}
+              onClick={() => void submit()}
+            >
               {loading ? <LoaderCircle size={13} className="spin" /> : "嵌入书签"}
             </button>
+            {block.props.url && !loading && (
+              <button type="button" className="text-btn small" onClick={() => setBmState({ phase: "ready" })}>
+                取消
+              </button>
+            )}
             {err && <span className="value-error bookmark-err">{err}</span>}
           </div>
         );
       }
 
       return (
-        <a
-          className="bookmark-card"
-          href={/^https?:\/\//i.test(block.props.url) ? block.props.url : "about:blank"}
-          target="_blank"
-          rel="noreferrer noopener"
-          contentEditable={false}
-        >
-          <div className="bookmark-card-main">
-            <div className="bookmark-title">{block.props.title || block.props.url}</div>
-            {block.props.description && <div className="bookmark-desc">{block.props.description}</div>}
-            <div className="bookmark-meta">
-              <ExternalLink size={12} />
-              <span>{block.props.siteName || block.props.url}</span>
+        <div className="bookmark-card-wrap" contentEditable={false} data-bookmark-state="ready">
+          <a
+            className="bookmark-card"
+            href={/^https?:\/\//i.test(block.props.url) ? block.props.url : "about:blank"}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <div className="bookmark-card-main">
+              <div className="bookmark-title">{block.props.title || block.props.url}</div>
+              {block.props.description && <div className="bookmark-desc">{block.props.description}</div>}
+              <div className="bookmark-meta">
+                <ExternalLink size={12} />
+                <span>{block.props.siteName || block.props.url}</span>
+              </div>
             </div>
-          </div>
-        </a>
+          </a>
+          {editable && (
+            <button
+              type="button"
+              className="bookmark-edit-btn"
+              title="更换网址"
+              aria-label="更换书签网址"
+              onClick={() => setBmState({ phase: "editing", draft: block.props.url, error: null })}
+            >
+              <Pencil size={12} /> 更换网址
+            </button>
+          )}
+        </div>
       );
     },
     toExternalHTML: ({ block }) => (

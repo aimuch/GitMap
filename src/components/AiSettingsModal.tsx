@@ -107,14 +107,6 @@ export function AiSettingsModal({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const current = drafts.find((d) => d.id === selectedId) ?? drafts[0];
 
   const patchCurrent = (change: Partial<DraftProvider>) => {

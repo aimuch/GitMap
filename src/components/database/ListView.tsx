@@ -85,7 +85,11 @@ function ListRow({
           onBlur={onEditDone}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing) return;
-            if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              e.currentTarget.blur();
+            }
           }}
         />
       ) : (

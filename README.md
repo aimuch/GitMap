@@ -122,7 +122,8 @@ server/api.ts        本地存储、历史版本、反向链接与工作区检�
 server/ai.ts         多模型流式代理（OpenAI 兼容 / Anthropic / Gemini）与网页书签抓取
 server/seed.ts       首次启动时写入的示例页面与示例数据库
 shared/types.ts      前后端共用的类型定义
-src/store.ts         前端状态、防抖自动保存、路由
+src/machines.ts      核心状态机与纯状态转移（自动保存、浮层栈、加载、内联 AI、历史、导入、拖拽隔离）
+src/store.ts         前端状态存储、防抖自动保存与失败重试、路由与诊断快照
 src/ai.ts            前端 AI 流式客户端、快捷指令模板与数据库自动填充
 src/db.ts            数据库属性、筛选、排序、汇总、底部统计与 CSV 导出
 src/formula.ts       公式词法分析、语法解析与安全求值器

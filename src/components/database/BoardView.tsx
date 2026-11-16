@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { FileText, Kanban, Plus } from "lucide-react";
 import type { DatabaseDef, PageMeta, PropertyDef, PropValue, SelectOption, ViewDef } from "../../../shared/types";
 import { addProperty, cellValue, ensureOption, setProp, updateProperty, updateView, visibleProperties } from "../../db";
+import { endDragSession, getDraggedRowForDb, startDbRowDrag } from "../../machines";
 import { getState, navigate, setPeekRowId, updatePage } from "../../store";
 import { cx } from "../Popover";
 import { Tag, ValueDisplay } from "./cells";
@@ -17,9 +18,6 @@ interface Props {
   /** 新建一张卡片；props 是它所在列对应的属性值 */
   onCreate: (props: Record<string, PropValue>) => void;
 }
-
-/** 当前正在拖动的卡片 id */
-let draggingCard: string | null = null;
 
 export function BoardView({ page, db, view, rows, editingId, onEditDone, onCreate }: Props) {
   const [addingGroup, setAddingGroup] = useState(false);
@@ -62,6 +60,7 @@ export function BoardView({ page, db, view, rows, editingId, onEditDone, onCreat
       {columns.map(({ option, rows: cards }) => (
         <BoardColumn
           key={option?.id ?? "none"}
+          dbId={page.id}
           option={option}
           cards={cards}
           group={group}
@@ -86,7 +85,10 @@ export function BoardView({ page, db, view, rows, editingId, onEditDone, onCreat
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
               if (e.key === "Enter") e.currentTarget.blur();
-              if (e.key === "Escape") setAddingGroup(false);
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                setAddingGroup(false);
+              }
             }}
           />
         ) : (
@@ -100,6 +102,7 @@ export function BoardView({ page, db, view, rows, editingId, onEditDone, onCreat
 }
 
 interface ColumnProps {
+  dbId: string;
   option: SelectOption | null;
   cards: PageMeta[];
   group: PropertyDef;
@@ -109,11 +112,11 @@ interface ColumnProps {
   onAdd: () => void;
 }
 
-function BoardColumn({ option, cards, group, cardProps, editingId, onEditDone, onAdd }: ColumnProps) {
+function BoardColumn({ dbId, option, cards, group, cardProps, editingId, onEditDone, onAdd }: ColumnProps) {
   const [over, setOver] = useState(false);
 
   const onDragOver = (e: DragEvent) => {
-    if (!draggingCard) return;
+    if (!getDraggedRowForDb(dbId)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     setOver(true);
@@ -121,9 +124,10 @@ function BoardColumn({ option, cards, group, cardProps, editingId, onEditDone, o
 
   const onDrop = (e: DragEvent) => {
     setOver(false);
-    const id = draggingCard;
+    const id = getDraggedRowForDb(dbId);
     if (!id) return;
     e.preventDefault();
+    endDragSession();
     const row = getState().pages[id];
     // 已经在这一列里就不用动
     if (row && !cards.some((c) => c.id === id)) setProp(row, group.id, option?.id ?? null);
@@ -155,6 +159,7 @@ function BoardColumn({ option, cards, group, cardProps, editingId, onEditDone, o
         {cards.map((card) => (
           <BoardCard
             key={card.id}
+            dbId={dbId}
             card={card}
             cardProps={cardProps}
             editing={card.id === editingId}
@@ -170,13 +175,14 @@ function BoardColumn({ option, cards, group, cardProps, editingId, onEditDone, o
 }
 
 interface CardProps {
+  dbId: string;
   card: PageMeta;
   cardProps: PropertyDef[];
   editing: boolean;
   onEditDone: () => void;
 }
 
-function BoardCard({ card, cardProps, editing, onEditDone }: CardProps) {
+function BoardCard({ dbId, card, cardProps, editing, onEditDone }: CardProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const wasEditing = useRef(false);
   useEffect(() => {
@@ -203,13 +209,13 @@ function BoardCard({ card, cardProps, editing, onEditDone }: CardProps) {
         if (e.key === "Enter" && e.target === e.currentTarget) setPeekRowId(card.id);
       }}
       onDragStart={(e) => {
-        draggingCard = card.id;
+        startDbRowDrag(dbId, card.id);
         e.dataTransfer.effectAllowed = "move";
         // 用自定义类型而不是 text/plain：内嵌在正文里时，卡片被拖到文字上不会把标题当文本插进去
         e.dataTransfer.setData("application/x-opennotion-row", card.id);
       }}
       onDragEnd={() => {
-        draggingCard = null;
+        endDragSession();
       }}
     >
       <div className="board-card-title">
@@ -226,7 +232,11 @@ function BoardCard({ card, cardProps, editing, onEditDone }: CardProps) {
             onBlur={onEditDone}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
-              if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                e.currentTarget.blur();
+              }
             }}
           />
         ) : (

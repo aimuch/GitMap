@@ -20,6 +20,7 @@ import {
   fetchPage,
   flushPatch,
   navigate,
+  reloadPageContent,
   setAiOpen,
   setAiSettingsOpen,
   updatePage,
@@ -60,11 +61,7 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
   }, [cfg]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setAiOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => abortRef.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -148,10 +145,8 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
     const record = await fetchPage(currentPageId);
     updatePage(currentPageId, { content: [...record.content, ...blocks] });
     await flushPatch(currentPageId);
+    reloadPageContent(currentPageId);
     setAiOpen(false);
-    // 触发当前页面刷新正文
-    window.location.hash = `#/`;
-    window.setTimeout(() => navigate(currentPageId, true), 0);
   };
 
   const canAppendCurrent =
@@ -159,7 +154,13 @@ export function AiModal({ currentPageId }: { currentPageId: string | null }) {
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setAiOpen(false)}>
-      <div className="ai-modal" role="dialog" aria-modal="true" aria-label="AI 助手">
+      <div
+        className="ai-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="AI 助手"
+        data-ai-modal-state={running ? "streaming" : "idle"}
+      >
         <header className="ai-modal-head">
           <span className="ai-brand">
             <Sparkles size={16} /> AI 助手

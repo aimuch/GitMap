@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Ellipsis, Image as ImageIcon, Lock, Maximize2, MessageSquare, Smile, Star, X } from "lucide-react";
-import type { PageRecord } from "../../../shared/types";
+import {
+  CircleAlert,
+  Ellipsis,
+  Image as ImageIcon,
+  Lock,
+  Maximize2,
+  MessageSquare,
+  RotateCcw,
+  Smile,
+  Star,
+  X,
+} from "lucide-react";
+import { transitionPageLoad, useMachine } from "../../machines";
 import { fetchPage, navigate, setPeekRowId, updatePage, useStore } from "../../store";
 import { CommentsBox } from "../CommentsBox";
 import { Editor, type NoteEditor } from "../Editor";
@@ -14,7 +25,8 @@ export function RowDrawer({ id }: { id: string }) {
   const meta = useStore((s) => s.pages[id]);
   const parent = useStore((s) => (meta?.parentId ? s.pages[meta.parentId] : undefined));
   const revision = useStore((s) => s.revisions[id] ?? 0);
-  const [record, setRecord] = useState<PageRecord | null>(null);
+  const [loadState, sendLoad] = useMachine(transitionPageLoad, { status: "loading" });
+  const [reloadKey, setReloadKey] = useState(0);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [emojiAnchor, setEmojiAnchor] = useState<HTMLElement | null>(null);
   const [coverAnchor, setCoverAnchor] = useState<HTMLElement | null>(null);
@@ -23,26 +35,19 @@ export function RowDrawer({ id }: { id: string }) {
   const onReady = useCallback((ed: NoteEditor | null) => {
     editorRef.current = ed;
   }, []);
+  const onDirty = useCallback(() => sendLoad({ type: "MARK_DIRTY" }), [sendLoad]);
 
   useEffect(() => {
     let alive = true;
-    setRecord(null);
+    sendLoad({ type: "RELOAD" });
     fetchPage(id).then(
-      (p) => alive && setRecord(p),
-      () => alive && setPeekRowId(null),
+      (p) => alive && sendLoad({ type: "LOADED", record: p }),
+      (err: Error) => alive && sendLoad({ type: "FAILED", message: err.message }),
     );
     return () => {
       alive = false;
     };
-  }, [id, revision]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPeekRowId(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [id, revision, reloadKey, sendLoad]);
 
   if (!meta || meta.trashed) return null;
   const editable = !meta.locked;
@@ -53,6 +58,7 @@ export function RowDrawer({ id }: { id: string }) {
         className={cx("row-drawer", `font-${meta.font ?? "sans"}`, meta.smallText && "small-text")}
         role="dialog"
         aria-label={meta.title || "数据库行详情"}
+        data-drawer-state={loadState.status}
       >
         <header className="drawer-head">
           <button
@@ -180,10 +186,17 @@ export function RowDrawer({ id }: { id: string }) {
               </div>
             )}
 
-            <CommentsBox page={meta} openComposer={commentOpen} />
+            <CommentsBox page={meta} openComposer={commentOpen} onCloseComposer={() => setCommentOpen(false)} />
 
-            {record ? (
-              <Editor key={`${id}:${revision}`} page={record} editable={editable} onReady={onReady} />
+            {loadState.status === "ready" ? (
+              <Editor key={`${id}:${revision}`} page={loadState.record} editable={editable} onReady={onReady} onDirty={onDirty} />
+            ) : loadState.status === "error" ? (
+              <div className="page-message">
+                <CircleAlert size={16} /> 加载失败：{loadState.message}
+                <button type="button" className="text-btn small" onClick={() => setReloadKey((n) => n + 1)}>
+                  <RotateCcw size={13} /> 重试
+                </button>
+              </div>
             ) : (
               <div className="editor-skeleton" aria-hidden>
                 <span />

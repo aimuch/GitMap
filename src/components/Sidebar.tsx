@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronRight,
@@ -21,7 +21,8 @@ import {
   Table2,
   Trash2,
 } from "lucide-react";
-import { importNotionZip, type ImportResult } from "../notionImport";
+import { endDragSession, getDraggedPageId, startPageDrag, transitionImport, useMachine } from "../machines";
+import { importNotionZip } from "../notionImport";
 import { Logo, Wordmark } from "./Logo";
 import type { PageMeta } from "../../shared/types";
 import {
@@ -49,9 +50,6 @@ import { TrashPopover } from "./TrashPopover";
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 export const modKey = isMac ? "⌘" : "Ctrl+";
 
-/** 当前正在拖动的页面 id（HTML5 拖拽在 dragover 阶段读不到 dataTransfer 的内容） */
-let draggingId: string | null = null;
-
 type DropPosition = "before" | "after" | "inside";
 
 async function newPage(parentId: string | null = null) {
@@ -67,17 +65,27 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
   const [trashAnchor, setTrashAnchor] = useState<HTMLElement | null>(null);
   const [rootDrop, setRootDrop] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [importing, setImporting] = useState<
-    { status: "running"; text: string } | { status: "done"; result: ImportResult } | { status: "error"; message: string } | null
-  >(null);
+  const [importState, sendImport] = useMachine(transitionImport, { status: "idle" });
+
+  useEffect(() => {
+    if (importState.status === "idle") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        sendImport({ type: "DISMISS" });
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [importState.status, sendImport]);
 
   const runImport = async (file: File) => {
-    setImporting({ status: "running", text: "正在读取压缩包…" });
+    sendImport({ type: "START" });
     try {
-      const result = await importNotionZip(file, (text) => setImporting({ status: "running", text }));
-      setImporting({ status: "done", result });
+      const result = await importNotionZip(file, (text) => sendImport({ type: "PROGRESS", text }));
+      sendImport({ type: "SUCCEED", result });
     } catch (err) {
-      setImporting({ status: "error", message: err instanceof Error ? err.message : String(err) });
+      sendImport({ type: "FAIL", message: err instanceof Error ? err.message : String(err) });
     }
   };
   const roots = tree.children.get("") ?? [];
@@ -157,6 +165,7 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
           <section
             className={cx("sidebar-section", "grow", rootDrop && "root-drop")}
             onDragOver={(e) => {
+              const draggingId = getDraggedPageId();
               if (!draggingId || e.target !== e.currentTarget) return;
               e.preventDefault();
               setRootDrop(true);
@@ -164,8 +173,10 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
             onDragLeave={() => setRootDrop(false)}
             onDrop={(e) => {
               setRootDrop(false);
+              const draggingId = getDraggedPageId();
               if (!draggingId || e.target !== e.currentTarget) return;
               e.preventDefault();
+              endDragSession();
               void movePage(draggingId, null, roots.filter((p) => p.id !== draggingId).length);
             }}
           >
@@ -235,21 +246,31 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
       </div>
 
       {trashAnchor && <TrashPopover anchor={trashAnchor} items={tree.trash} onClose={() => setTrashAnchor(null)} />}
-      {importing &&
+      {importState.status !== "idle" &&
         createPortal(
-          <div className="modal-backdrop">
-            <div className="import-modal" role="dialog" aria-modal="true" aria-label="导入 Notion 导出包">
+          <div
+            className="modal-backdrop"
+            data-local-modal="import"
+            onMouseDown={(e) => e.target === e.currentTarget && sendImport({ type: "DISMISS" })}
+          >
+            <div
+              className="import-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label="导入 Notion 导出包"
+              data-import-state={importState.status}
+            >
               <h2>导入 Notion 导出包</h2>
-              {importing.status === "running" && (
+              {importState.status === "running" && (
                 <p className="import-progress" aria-live="polite">
-                  <LoaderCircle size={15} className="spin" /> {importing.text}
+                  <LoaderCircle size={15} className="spin" /> {importState.text}
                 </p>
               )}
-              {importing.status === "done" && (
+              {importState.status === "done" && (
                 <>
                   <p>
-                    导入完成：{importing.result.pages} 个页面，{importing.result.databases} 个数据库（共{" "}
-                    {importing.result.rows} 行），{importing.result.files} 个图片或附件。
+                    导入完成：{importState.result.pages} 个页面，{importState.result.databases} 个数据库（共{" "}
+                    {importState.result.rows} 行），{importState.result.files} 个图片或附件。
                   </p>
                   <p className="import-note">内容都放在“Notion 导入”页面下面。数据库的列类型是按内容猜的，拿不准的都当作文本。</p>
                   <div className="import-actions">
@@ -257,9 +278,9 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
                       type="button"
                       className="primary-btn"
                       onClick={() => {
-                        navigate(importing.result.rootId);
-                        setExpanded(importing.result.rootId, true);
-                        setImporting(null);
+                        navigate(importState.result.rootId);
+                        setExpanded(importState.result.rootId, true);
+                        sendImport({ type: "DISMISS" });
                       }}
                     >
                       查看导入的内容
@@ -267,11 +288,11 @@ export function Sidebar({ currentId }: { currentId: string | null }) {
                   </div>
                 </>
               )}
-              {importing.status === "error" && (
+              {importState.status === "error" && (
                 <>
-                  <p className="value-error">{importing.message}</p>
+                  <p className="value-error">{importState.message}</p>
                   <div className="import-actions">
-                    <button type="button" className="text-btn" onClick={() => setImporting(null)}>
+                    <button type="button" className="text-btn" onClick={() => sendImport({ type: "DISMISS" })}>
                       关闭
                     </button>
                   </div>
@@ -307,6 +328,7 @@ function TreeNode({ page, depth, tree, currentId, draggable }: TreeNodeProps) {
   const active = currentId === page.id;
 
   const canDropHere = () => {
+    const draggingId = getDraggedPageId();
     if (!draggable || !draggingId || draggingId === page.id) return false;
     return !isDescendant(getState().pages, page.id, draggingId);
   };
@@ -323,9 +345,10 @@ function TreeNode({ page, depth, tree, currentId, draggable }: TreeNodeProps) {
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
     const position = drop;
     setDrop(null);
-    if (!canDropHere() || !position || !draggingId) return;
+    const id = getDraggedPageId();
+    if (!canDropHere() || !position || !id) return;
     e.preventDefault();
-    const id = draggingId;
+    endDragSession();
     if (position === "inside") {
       void movePage(id, page.id, kids.filter((p) => p.id !== id).length);
       return;
@@ -351,12 +374,12 @@ function TreeNode({ page, depth, tree, currentId, draggable }: TreeNodeProps) {
           if (e.key === "ArrowLeft") setExpanded(expandKey, false);
         }}
         onDragStart={(e) => {
-          draggingId = page.id;
+          startPageDrag(page.id);
           e.dataTransfer.effectAllowed = "move";
           e.dataTransfer.setData("text/plain", page.title || "无标题");
         }}
         onDragEnd={() => {
-          draggingId = null;
+          endDragSession();
           setDrop(null);
         }}
         onDragOver={onDragOver}

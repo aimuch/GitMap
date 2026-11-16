@@ -1,16 +1,33 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MessageSquare, Send, Trash2 } from "lucide-react";
 import type { PageMeta } from "../../shared/types";
 import { shortId } from "../db";
 import { updatePage } from "../store";
 
-export function CommentsBox({ page, openComposer }: { page: PageMeta; openComposer?: boolean }) {
+export function CommentsBox({
+  page,
+  openComposer,
+  onCloseComposer,
+}: {
+  page: PageMeta;
+  openComposer?: boolean;
+  onCloseComposer?: () => void;
+}) {
   const comments = page.comments ?? [];
   const [text, setText] = useState("");
   const [composing, setComposing] = useState(Boolean(openComposer));
   const editable = !page.trashed && !page.locked;
 
-  if (comments.length === 0 && !composing && !openComposer) return null;
+  useEffect(() => {
+    if (openComposer) setComposing(true);
+  }, [openComposer]);
+
+  const closeComposer = () => {
+    setComposing(false);
+    onCloseComposer?.();
+  };
+
+  if (comments.length === 0 && !composing) return null;
 
   const submit = () => {
     const trimmed = text.trim();
@@ -19,11 +36,11 @@ export function CommentsBox({ page, openComposer }: { page: PageMeta; openCompos
       comments: [...comments, { id: shortId(), author: "我", text: trimmed, createdAt: Date.now() }],
     });
     setText("");
-    setComposing(false);
+    closeComposer();
   };
 
   return (
-    <section className="page-comments" aria-label="页面批注">
+    <section className="page-comments" aria-label="页面批注" data-comments-state={composing ? "composing" : "idle"}>
       {comments.map((c) => (
         <div key={c.id} className="comment-row">
           <span className="comment-avatar">{c.author.slice(0, 1)}</span>
@@ -54,7 +71,7 @@ export function CommentsBox({ page, openComposer }: { page: PageMeta; openCompos
           )}
         </div>
       ))}
-      {editable && (composing || openComposer) ? (
+      {editable && composing ? (
         <form
           className="comment-form"
           onSubmit={(e) => {
@@ -69,7 +86,11 @@ export function CommentsBox({ page, openComposer }: { page: PageMeta; openCompos
             placeholder="添加批注或讨论记录…（回车发送）"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (!e.nativeEvent.isComposing && e.key === "Escape") setComposing(false);
+              if (!e.nativeEvent.isComposing && e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                closeComposer();
+              }
             }}
           />
           <button type="submit" className="primary-btn small" disabled={!text.trim()}>

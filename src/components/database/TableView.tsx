@@ -12,6 +12,7 @@ import {
   updateView,
   visibleProperties,
 } from "../../db";
+import { endDragSession, getDraggedRowForDb, startDbRowDrag } from "../../machines";
 import { movePage, navigate, setPeekRowId, trashPage, updatePage } from "../../store";
 import { MenuDivider, MenuItem, Popover, cx } from "../Popover";
 import { PropIcon, PropertyCell, PropertyConfig } from "./cells";
@@ -24,15 +25,13 @@ interface Props {
   /** 所有行（不受筛选影响），修改属性类型和手动排序时要用 */
   allRows: PageMeta[];
   focusRowId: string | null;
+  onEditDone: () => void;
   onAddRow: () => void;
 }
 
 const MIN_WIDTH = 80;
 
-/** 当前正在拖动的行 id */
-let draggingRow: string | null = null;
-
-export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow }: Props) {
+export function TableView({ page, db, view, rows, allRows, focusRowId, onEditDone, onAddRow }: Props) {
   const [menu, setMenu] = useState<{ anchor: HTMLElement; propId: string } | null>(null);
   const [addAnchor, setAddAnchor] = useState<HTMLElement | null>(null);
   const [live, setLive] = useState<Record<string, number>>({});
@@ -80,6 +79,7 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
   const canReorder = !view.sort;
 
   const onRowDragOver = (row: PageMeta) => (e: DragEvent<HTMLDivElement>) => {
+    const draggingRow = getDraggedRowForDb(page.id);
     if (!canReorder || !draggingRow || draggingRow === row.id) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
@@ -91,9 +91,10 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
   const onRowDrop = (row: PageMeta) => (e: DragEvent<HTMLDivElement>) => {
     const target = dropAt;
     setDropAt(null);
-    const id = draggingRow;
+    const id = getDraggedRowForDb(page.id);
     if (!canReorder || !id || !target || id === row.id) return;
     e.preventDefault();
+    endDragSession();
     const others = allRows.filter((r) => r.id !== id);
     const at = others.findIndex((r) => r.id === row.id);
     void movePage(id, page.id, target.after ? at + 1 : at);
@@ -161,7 +162,13 @@ export function TableView({ page, db, view, rows, allRows, focusRowId, onAddRow 
             }}
             onDrop={onRowDrop(row)}
           >
-            <TitleCell row={row} autoFocus={row.id === focusRowId} canReorder={canReorder} />
+            <TitleCell
+              dbId={page.id}
+              row={row}
+              autoFocus={row.id === focusRowId}
+              canReorder={canReorder}
+              onEditDone={row.id === focusRowId ? onEditDone : undefined}
+            />
             {shownProps.map((def) => (
               <div key={def.id} className="db-td" role="cell">
                 <PropertyCell row={row} def={def} dbPage={page} />
@@ -284,7 +291,19 @@ function SortMark({ view, propId }: { view: ViewDef; propId: string }) {
   return view.sort.dir === "asc" ? <ArrowUp size={13} className="db-sort-mark" /> : <ArrowDown size={13} className="db-sort-mark" />;
 }
 
-function TitleCell({ row, autoFocus, canReorder }: { row: PageMeta; autoFocus: boolean; canReorder: boolean }) {
+function TitleCell({
+  dbId,
+  row,
+  autoFocus,
+  canReorder,
+  onEditDone,
+}: {
+  dbId: string;
+  row: PageMeta;
+  autoFocus: boolean;
+  canReorder: boolean;
+  onEditDone?: () => void;
+}) {
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (autoFocus) ref.current?.focus();
@@ -299,14 +318,14 @@ function TitleCell({ row, autoFocus, canReorder }: { row: PageMeta; autoFocus: b
           title="拖动调整顺序"
           aria-label="拖动调整顺序"
           onDragStart={(e) => {
-            draggingRow = row.id;
+            startDbRowDrag(dbId, row.id);
             e.dataTransfer.effectAllowed = "move";
             e.dataTransfer.setData("application/x-opennotion-row", row.id);
             const rowEl = e.currentTarget.closest(".db-row");
             if (rowEl) e.dataTransfer.setDragImage(rowEl, 12, 16);
           }}
           onDragEnd={() => {
-            draggingRow = null;
+            endDragSession();
           }}
         >
           <GripVertical size={14} />
@@ -320,8 +339,13 @@ function TitleCell({ row, autoFocus, canReorder }: { row: PageMeta; autoFocus: b
         placeholder="无标题"
         aria-label="名称"
         onChange={(e) => updatePage(row.id, { title: e.target.value })}
+        onBlur={() => onEditDone?.()}
         onKeyDown={(e) => {
           if (!e.nativeEvent.isComposing && e.key === "Enter") e.currentTarget.blur();
+          if (!e.nativeEvent.isComposing && e.key === "Escape") {
+            e.stopPropagation();
+            e.currentTarget.blur();
+          }
         }}
       />
       <button

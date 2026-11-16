@@ -15,6 +15,7 @@ import {
   Lock,
   MessageSquare,
   PanelLeft,
+  RotateCcw,
   Smile,
   Sparkles,
   Star,
@@ -22,8 +23,9 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
-import type { PageMeta, PageRecord, SearchHit } from "../../shared/types";
+import type { PageMeta, SearchHit } from "../../shared/types";
 import { blocksPlainText } from "../ai";
+import { transitionPageLoad, useMachine } from "../machines";
 import {
   ancestorsOf,
   applyTemplate,
@@ -34,6 +36,7 @@ import {
   getState,
   navigate,
   restorePage,
+  retryFailedSaves,
   setAiOpen,
   setSidebarCollapsed,
   updatePage,
@@ -78,10 +81,9 @@ function extractOutline(blocks: unknown[], out: OutlineItem[] = []): OutlineItem
 export function PageView({ id }: { id: string }) {
   const meta = useStore((s) => s.pages[id]);
   const parent = useStore((s) => (meta?.parentId ? s.pages[meta.parentId] : undefined));
-  const [dirty, setDirty] = useState(false);
-  const onDirty = useCallback(() => setDirty(true), []);
-  const [record, setRecord] = useState<PageRecord | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadState, sendLoad] = useMachine(transitionPageLoad, { status: "loading" });
+  const [reloadKey, setReloadKey] = useState(0);
+  const onDirty = useCallback(() => sendLoad({ type: "MARK_DIRTY" }), [sendLoad]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [templateAnchor, setTemplateAnchor] = useState<HTMLElement | null>(null);
   const [commentOpen, setCommentOpen] = useState(false);
@@ -96,9 +98,10 @@ export function PageView({ id }: { id: string }) {
 
   useEffect(() => {
     let alive = true;
+    sendLoad({ type: "RELOAD" });
     fetchPage(id).then(
-      (page) => alive && setRecord(page),
-      (err: Error) => alive && setLoadError(err.message),
+      (page) => alive && sendLoad({ type: "LOADED", record: page }),
+      (err: Error) => alive && sendLoad({ type: "FAILED", message: err.message }),
     );
     fetchBacklinks(id).then(
       (list) => alive && setBacklinks(list),
@@ -107,7 +110,7 @@ export function PageView({ id }: { id: string }) {
     return () => {
       alive = false;
     };
-  }, [id]);
+  }, [id, reloadKey, sendLoad]);
 
   useEffect(() => {
     document.title = meta ? `${meta.title || "无标题"} · OpenNotion` : "OpenNotion";
@@ -121,6 +124,8 @@ export function PageView({ id }: { id: string }) {
     .filter((p) => p.template && !p.trashed && !p.hidden && p.id !== meta.id)
     .sort((a, b) => a.title.localeCompare(b.title, "zh"));
   const isRow = parent?.kind === "database" && !parent.trashed;
+  const record = loadState.status === "ready" ? loadState.record : null;
+  const dirty = loadState.status === "ready" ? loadState.dirty : false;
   const blank = !isDatabase && !isRow && editable && !dirty && record?.content.length === 0;
 
   const currentDoc = editorRef.current?.document ?? record?.content ?? [];
@@ -177,7 +182,7 @@ ${bodyHtml}
   };
 
   return (
-    <div className="page">
+    <div className="page" data-page-state={isDatabase ? "ready" : loadState.status}>
       <Topbar
         page={meta}
         onExport={exportPrimary}
@@ -210,7 +215,7 @@ ${bodyHtml}
               <RowProperties row={meta} dbPage={parent} />
             </div>
           )}
-          <CommentsBox page={meta} openComposer={commentOpen} />
+          <CommentsBox page={meta} openComposer={commentOpen} onCloseComposer={() => setCommentOpen(false)} />
           {backlinks.length > 0 && (
             <div className="backlinks-bar">
               <button
@@ -272,9 +277,12 @@ ${bodyHtml}
                 </div>
               )}
             </>
-          ) : loadError ? (
+          ) : loadState.status === "error" ? (
             <div className="page-message">
-              <CircleAlert size={16} /> 加载失败：{loadError}
+              <CircleAlert size={16} /> 加载失败：{loadState.message}
+              <button type="button" className="text-btn small" onClick={() => setReloadKey((n) => n + 1)}>
+                <RotateCcw size={13} /> 重试
+              </button>
             </div>
           ) : (
             <div className="editor-skeleton" aria-hidden>
@@ -364,7 +372,7 @@ interface TopbarProps {
 
 function Topbar({ page, onExport, exportLabel, onExportHtml, onHistory, wordCount }: TopbarProps) {
   const pages = useStore((s) => s.pages);
-  const saving = useStore((s) => s.saving > 0);
+  const saveSummary = useStore((s) => s.saveSummary);
   const collapsed = useStore((s) => s.sidebarCollapsed);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const chain = [...ancestorsOf(pages, page.id), page];
@@ -411,10 +419,26 @@ function Topbar({ page, onExport, exportLabel, onExportHtml, onHistory, wordCoun
             <Lock size={12} /> 已锁定
           </button>
         )}
-        <span className="save-state" aria-live="polite">
-          {saving ? <LoaderCircle size={13} className="spin" /> : <HardDriveDownload size={13} />}
-          {saving ? "保存中…" : "已保存到本地"}
-        </span>
+        {saveSummary.phase === "error" ? (
+          <button
+            type="button"
+            className="save-state save-retry"
+            data-save-state="error"
+            title={saveSummary.message}
+            onClick={() => void retryFailedSaves()}
+          >
+            <CircleAlert size={13} /> 保存失败 · 点击重试
+          </button>
+        ) : (
+          <span className="save-state" data-save-state={saveSummary.phase} aria-live="polite">
+            {saveSummary.phase === "saving" ? (
+              <LoaderCircle size={13} className="spin" />
+            ) : (
+              <HardDriveDownload size={13} />
+            )}
+            {saveSummary.phase === "saving" ? "保存中…" : "已保存到本地"}
+          </span>
+        )}
         {!page.trashed && (
           <>
             <button

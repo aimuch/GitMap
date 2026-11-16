@@ -4,14 +4,15 @@ import { AiModal } from "./components/AiModal";
 import { AiSettingsModal } from "./components/AiSettingsModal";
 import { Logo } from "./components/Logo";
 import { RowDrawer } from "./components/database/RowDrawer";
+import { topOverlayName } from "./machines";
 import {
   createPage,
+  dismissTopOverlay,
   getState,
   loadPages,
   navigate,
-  setAiOpen,
+  sendOverlay,
   setAiSettingsOpen,
-  setSearchOpen,
   setSidebarCollapsed,
   useRoute,
   useStore,
@@ -26,10 +27,12 @@ const LAST_PAGE_KEY = "on:lastPage";
 export function App() {
   const loaded = useStore((s) => s.loaded);
   const pages = useStore((s) => s.pages);
-  const searchOpen = useStore((s) => s.searchOpen);
-  const aiOpen = useStore((s) => s.aiOpen);
-  const aiSettingsOpen = useStore((s) => s.aiSettingsOpen);
-  const peekRowId = useStore((s) => s.peekRowId);
+  const overlay = useStore((s) => s.overlay);
+  const searchOpen = overlay.modal === "search";
+  const aiOpen = overlay.modal === "ai";
+  const aiSettingsOpen = overlay.aiSettings;
+  const peekRowId = overlay.peekRowId;
+  const topOverlay = topOverlayName(overlay);
   const revisions = useStore((s) => s.revisions);
   const collapsed = useStore((s) => s.sidebarCollapsed);
   const error = useStore((s) => s.error);
@@ -64,7 +67,7 @@ export function App() {
   }, [current]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    const onShortcut = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       const key = e.key.toLowerCase();
       if (key === "k" || key === "p") {
@@ -73,23 +76,37 @@ export function App() {
         if (key === "k" && inEditor && sel && !sel.isCollapsed) return;
         e.preventDefault();
         e.stopPropagation();
-        setSearchOpen(!getState().searchOpen);
+        sendOverlay({ type: "TOGGLE_SEARCH" });
       } else if (key === "j") {
         e.preventDefault();
         e.stopPropagation();
-        setAiOpen(!getState().aiOpen);
+        sendOverlay({ type: "TOGGLE_AI" });
       } else if (e.key === "\\") {
         e.preventDefault();
         setSidebarCollapsed(!getState().sidebarCollapsed);
       }
     };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      // 局部模态框（如页面历史、导入进度）优先于全局浮层栈
+      if (document.querySelector("[data-local-modal]")) return;
+      if (dismissTopOverlay()) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onShortcut, true);
+    window.addEventListener("keydown", onEscape);
+    return () => {
+      window.removeEventListener("keydown", onShortcut, true);
+      window.removeEventListener("keydown", onEscape);
+    };
   }, []);
 
   return (
     <div
       className="app"
+      data-boot-state={loaded ? "ready" : "loading"}
+      data-top-overlay={topOverlay}
       onClick={(e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         const link = (e.target as HTMLElement | null)?.closest?.("a");

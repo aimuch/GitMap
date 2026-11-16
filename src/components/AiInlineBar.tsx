@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { AiChatMessage } from "../../shared/types";
 import { AI_ACTIONS, loadAiConfig, streamAiChat, useAiConfig, type AiActionPreset } from "../ai";
+import { transitionAiInline, useMachine } from "../machines";
 import { setAiSettingsOpen } from "../store";
 
 interface Props {
@@ -34,42 +35,51 @@ export function AiInlineBar({
 }: Props) {
   const cfg = useAiConfig();
   const [prompt, setPrompt] = useState("");
-  const [output, setOutput] = useState("");
-  const [reasoning, setReasoning] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
+  const [aiState, send] = useMachine(transitionAiInline, { phase: "idle" });
   const [copied, setCopied] = useState(false);
-  const [history, setHistory] = useState<AiChatMessage[]>([]);
   const lastPromptRef = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const running = aiState.phase === "streaming";
+  const applying = aiState.phase === "applying";
+  const output =
+    aiState.phase === "streaming" || aiState.phase === "ready" || aiState.phase === "applying" ? aiState.output : "";
+  const reasoning =
+    aiState.phase === "streaming" || aiState.phase === "ready" || aiState.phase === "applying" ? aiState.reasoning : "";
+  const error = aiState.phase === "error" ? aiState.message : null;
+  const history =
+    aiState.phase === "ready" || aiState.phase === "applying" || aiState.phase === "error" ? aiState.history : [];
 
   useEffect(() => {
     if (!cfg) void loadAiConfig().catch(() => {});
   }, [cfg]);
 
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
+
   const runWithMessages = async (messages: AiChatMessage[]) => {
-    setRunning(true);
-    setError(null);
-    setOutput("");
-    setReasoning("");
+    abortRef.current?.abort();
+    send({ type: "START", messages });
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
       const full = await streamAiChat({
         messages,
         signal: ctrl.signal,
-        onReasoning: (_d, r) => setReasoning(r),
-        onDelta: (_d, t) => setOutput(t),
+        onReasoning: (_d, r) => send({ type: "REASONING", full: r }),
+        onDelta: (_d, t) => send({ type: "DELTA", full: t }),
       });
-      setHistory([...messages, { role: "assistant", content: full }]);
+      if (!ctrl.signal.aborted) {
+        send({ type: "COMPLETE", full });
+      }
     } catch (err) {
       if (!ctrl.signal.aborted) {
-        setError(err instanceof Error ? err.message : String(err));
+        send({ type: "FAIL", message: err instanceof Error ? err.message : String(err) });
       }
     } finally {
-      setRunning(false);
-      abortRef.current = null;
+      if (abortRef.current === ctrl) abortRef.current = null;
     }
   };
 
@@ -121,13 +131,25 @@ export function AiInlineBar({
   const activeProvider = cfg?.providers.find((p) => p.id === cfg.activeProviderId) ?? cfg?.providers[0];
   const hasSelection = Boolean(selectedText.trim());
 
+  const applyOutput = async (mode: "insert" | "replace") => {
+    if (aiState.phase !== "ready") return;
+    const text = aiState.output;
+    send({ type: "APPLY_START" });
+    try {
+      await onInsert(text, mode);
+    } catch (err) {
+      send({ type: "APPLY_FAIL", message: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
   return (
-    <div className="ai-inline" role="region" aria-label="AI 写作助手">
+    <div className="ai-inline" role="region" aria-label="AI 写作助手" data-ai-phase={aiState.phase}>
       <div className="ai-inline-top">
         <Sparkles size={15} className="ai-inline-icon" />
         <input
           ref={inputRef}
           value={prompt}
+          disabled={applying}
           placeholder={
             output
               ? "输入修改意见（例如“再简短一点”、“改成表格”）后回车…"
@@ -144,6 +166,7 @@ export function AiInlineBar({
             }
             if (e.key === "Escape") {
               e.preventDefault();
+              e.stopPropagation();
               abortRef.current?.abort();
               onClose();
             }
@@ -164,17 +187,32 @@ export function AiInlineBar({
             className="text-btn small danger"
             onClick={() => {
               abortRef.current?.abort();
-              setRunning(false);
+              abortRef.current = null;
+              send({ type: "STOP" });
             }}
           >
             <Square size={12} /> 停止
           </button>
         ) : (
-          <button type="button" className="primary-btn small" disabled={!prompt.trim()} onClick={submitFreePrompt}>
+          <button
+            type="button"
+            className="primary-btn small"
+            disabled={!prompt.trim() || applying}
+            onClick={submitFreePrompt}
+          >
             生成
           </button>
         )}
-        <button type="button" className="icon-btn small" aria-label="关闭 AI 助手" onClick={onClose}>
+        <button
+          type="button"
+          className="icon-btn small"
+          aria-label="关闭 AI 助手"
+          disabled={applying}
+          onClick={() => {
+            abortRef.current?.abort();
+            onClose();
+          }}
+        >
           <X size={15} />
         </button>
       </div>
@@ -210,17 +248,18 @@ export function AiInlineBar({
 
       {!running && output && (
         <div className="ai-inline-actions">
-          <button type="button" className="primary-btn small" onClick={() => void onInsert(output, "insert")}>
-            <CornerDownLeft size={13} /> 插入正文
+          <button type="button" className="primary-btn small" disabled={applying} onClick={() => void applyOutput("insert")}>
+            <CornerDownLeft size={13} /> {applying ? "正在写入…" : "插入正文"}
           </button>
           {hasSelection && (
-            <button type="button" className="text-btn small" onClick={() => void onInsert(output, "replace")}>
+            <button type="button" className="text-btn small" disabled={applying} onClick={() => void applyOutput("replace")}>
               <Replace size={13} /> 替换选中内容
             </button>
           )}
           <button
             type="button"
             className="text-btn small"
+            disabled={applying}
             onClick={() => {
               if (lastPromptRef.current) void runWithMessages([{ role: "user", content: lastPromptRef.current }]);
             }}
@@ -230,6 +269,7 @@ export function AiInlineBar({
           <button
             type="button"
             className="text-btn small"
+            disabled={applying}
             onClick={() => {
               void navigator.clipboard?.writeText(output);
               setCopied(true);
@@ -238,7 +278,7 @@ export function AiInlineBar({
           >
             {copied ? <Check size={13} /> : <Copy size={13} />} 复制
           </button>
-          <button type="button" className="text-btn small danger" onClick={onClose}>
+          <button type="button" className="text-btn small danger" disabled={applying} onClick={onClose}>
             弃用
           </button>
         </div>

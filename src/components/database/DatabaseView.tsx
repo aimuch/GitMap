@@ -84,6 +84,7 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
   );
 
   const selectView = (id: string) => {
+    setFocusRowId(null);
     setActiveId(id);
     writeLocal(storageKey, id);
   };
@@ -141,7 +142,7 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
     view.sort?.propId === "title" ? "名称" : db.properties.find((p) => p.id === view.sort?.propId)?.name;
 
   return (
-    <div className="database">
+    <div className="database" data-active-view={view.type}>
       <div className="db-toolbar">
         <div className="db-tabs" role="tablist">
           {db.views.map((v) => {
@@ -270,6 +271,7 @@ export function DatabaseView({ page, viewStorageKey }: { page: PageMeta; viewSto
           rows={rows}
           allRows={allRows}
           focusRowId={focusRowId}
+          onEditDone={() => setFocusRowId(null)}
           onAddRow={() => void addRow()}
         />
       ) : view.type === "board" ? (

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, FileText, Plus } from "lucide-react";
 import type { DatabaseDef, PageMeta, PropertyDef, ViewDef } from "../../../shared/types";
 import { addProperty, setProp, updateView } from "../../db";
+import { endDragSession, getDraggedRowForDb, startDbRowDrag } from "../../machines";
 import { getState, navigate, setPeekRowId, updatePage } from "../../store";
 import { cx } from "../Popover";
 import { ValueDisplay } from "./cells";
@@ -24,9 +25,6 @@ const pad = (n: number) => String(n).padStart(2, "0");
 export function toIso(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
-
-/** 当前正在拖动的行 id */
-let draggingRow: string | null = null;
 
 export function CalendarView({ page, db, view, rows, editingId, onEditDone, onCreate }: Props) {
   const dateProps = db.properties.filter((p) => p.type === "date");
@@ -95,7 +93,7 @@ export function CalendarView({ page, db, view, rows, editingId, onEditDone, onCr
 
   const dropHandlers = (key: string, date: string | null) => ({
     onDragOver: (e: DragEvent) => {
-      if (!draggingRow) return;
+      if (!getDraggedRowForDb(page.id)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       if (over !== key) setOver(key);
@@ -105,9 +103,11 @@ export function CalendarView({ page, db, view, rows, editingId, onEditDone, onCr
     },
     onDrop: (e: DragEvent) => {
       setOver(null);
-      const row = draggingRow ? getState().pages[draggingRow] : null;
+      const draggingId = getDraggedRowForDb(page.id);
+      const row = draggingId ? getState().pages[draggingId] : null;
       if (!row) return;
       e.preventDefault();
+      endDragSession();
       if ((row.props[dateDef.id] ?? null) !== date) setProp(row, dateDef.id, date);
     },
   });
@@ -115,6 +115,7 @@ export function CalendarView({ page, db, view, rows, editingId, onEditDone, onCr
   const card = (row: PageMeta) => (
     <CalendarCard
       key={row.id}
+      dbId={page.id}
       row={row}
       statusDef={statusDef}
       editing={row.id === editingId}
@@ -205,13 +206,14 @@ export function CalendarView({ page, db, view, rows, editingId, onEditDone, onCr
 }
 
 interface CardProps {
+  dbId: string;
   row: PageMeta;
   statusDef: PropertyDef | undefined;
   editing: boolean;
   onEditDone: () => void;
 }
 
-function CalendarCard({ row, statusDef, editing, onEditDone }: CardProps) {
+function CalendarCard({ dbId, row, statusDef, editing, onEditDone }: CardProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -233,13 +235,13 @@ function CalendarCard({ row, statusDef, editing, onEditDone }: CardProps) {
         if (e.key === "Enter" && e.target === e.currentTarget) setPeekRowId(row.id);
       }}
       onDragStart={(e) => {
-        draggingRow = row.id;
+        startDbRowDrag(dbId, row.id);
         e.dataTransfer.effectAllowed = "move";
         // 用自定义类型而不是 text/plain：内嵌在正文里时，卡片被拖到文字上不会把标题当文本插进去
         e.dataTransfer.setData("application/x-opennotion-row", row.id);
       }}
       onDragEnd={() => {
-        draggingRow = null;
+        endDragSession();
       }}
     >
       <div className="cal-card-title">
@@ -256,7 +258,11 @@ function CalendarCard({ row, statusDef, editing, onEditDone }: CardProps) {
             onBlur={onEditDone}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
-              if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                e.currentTarget.blur();
+              }
             }}
           />
         ) : (

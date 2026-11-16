@@ -1,20 +1,35 @@
 import { useMemo, useSyncExternalStore } from "react";
 import type { HistoryEntry, NewPageInput, PageMeta, PagePatch, PageRecord, SearchHit, UnfurlData } from "../shared/types";
+import {
+  INITIAL_OVERLAY_STATE,
+  getDragSnapshot,
+  summarizeSaveStates,
+  topOverlayName,
+  transitionOverlay,
+  type OverlayEvent,
+  type OverlayState,
+  type PageSavePhase,
+  type SaveSummary,
+} from "./machines";
 
 export type ThemeSetting = "light" | "dark" | "system";
 
 interface State {
   pages: Record<string, PageMeta>;
-  /** 页面正文被整体替换（恢复历史、套用模板）的次数；变了就要重新加载编辑器 */
+  /** 页面正文被整体替换（恢复历史、套用模板、AI 追加）的次数；变了就要重新加载编辑器 */
   revisions: Record<string, number>;
   loaded: boolean;
-  /** 正在进行或排队中的保存请求数 */
+  /** 派生自持久化保存状态机的全局保存摘要 */
+  saveSummary: SaveSummary;
+  /** 正在进行或排队中的保存请求数（与 saveSummary 严格同步） */
   saving: number;
   error: string | null;
   expanded: Record<string, true>;
   sidebarCollapsed: boolean;
   sidebarWidth: number;
   theme: ThemeSetting;
+  /** 统一的浮层与弹窗栈状态机 */
+  overlay: OverlayState;
   searchOpen: boolean;
   aiOpen: boolean;
   aiSettingsOpen: boolean;
@@ -56,12 +71,14 @@ let state: State = {
   pages: {},
   revisions: {},
   loaded: false,
+  saveSummary: { phase: "idle" },
   saving: 0,
   error: null,
   expanded: readLocal<Record<string, true>>("expanded", {}),
   sidebarCollapsed: narrowQuery.matches ? true : readLocal("sidebarCollapsed", false),
   sidebarWidth: readLocal("sidebarWidth", 260),
   theme: readTheme(),
+  overlay: INITIAL_OVERLAY_STATE,
   searchOpen: false,
   aiOpen: false,
   aiSettingsOpen: false,
@@ -191,7 +208,7 @@ export function movePage(id: string, parentId: string | null, index: number) {
 }
 
 /** 正文在服务器上被整体换掉之后调用：丢掉本地还没发出的修改，并让编辑器重新加载 */
-function reloadContent(id: string) {
+export function reloadPageContent(id: string) {
   dropPatch(id);
   set({ revisions: { ...state.revisions, [id]: (state.revisions[id] ?? 0) + 1 } });
 }
@@ -213,14 +230,14 @@ export async function fetchVersion(id: string, ts: number): Promise<PageRecord> 
 export async function restoreVersion(id: string, ts: number): Promise<boolean> {
   await flushPatch(id);
   const done = await mutate(`/api/pages/${id}/history/${ts}/restore`, "POST");
-  if (done) reloadContent(id);
+  if (done) reloadPageContent(id);
   return !!done;
 }
 
 export async function applyTemplate(targetId: string, templateId: string): Promise<boolean> {
   await flushPatch(targetId);
   const done = await mutate(`/api/pages/${targetId}/apply-template`, "POST", { templateId });
-  if (done) reloadContent(targetId);
+  if (done) reloadPageContent(targetId);
   return !!done;
 }
 
@@ -256,7 +273,7 @@ export async function uploadFile(file: File): Promise<string> {
   return data.url as string;
 }
 
-/* ---------- 带防抖的自动保存 ---------- */
+/* ---------- 持久化自动保存状态机（debouncing → saving → idle | error） ---------- */
 
 interface Pending {
   patch: PagePatch;
@@ -265,7 +282,17 @@ interface Pending {
 
 const pendingPatches = new Map<string, Pending>();
 const inflight = new Map<string, Promise<void>>();
+const pageSaveStates = new Map<string, { phase: PageSavePhase; error?: string }>();
+const failedPatches = new Map<string, PagePatch>();
 const SAVE_DELAY = 500;
+
+function syncSaveState() {
+  const saveSummary = summarizeSaveStates(pageSaveStates);
+  set({
+    saveSummary,
+    saving: saveSummary.phase === "saving" ? saveSummary.count : 0,
+  });
+}
 
 /** 立即更新界面，稍后把修改合并成一次请求写入磁盘。 */
 export function updatePage(id: string, patch: PagePatch) {
@@ -275,23 +302,25 @@ export function updatePage(id: string, patch: PagePatch) {
     set({ pages: { ...state.pages, [id]: { ...current, ...metaPatch, updatedAt: Date.now() } } });
   }
   const existing = pendingPatches.get(id);
-  if (existing) {
-    window.clearTimeout(existing.timer);
-  } else {
-    set({ saving: state.saving + 1 });
-  }
+  if (existing) window.clearTimeout(existing.timer);
+  const priorFailed = failedPatches.get(id);
+  failedPatches.delete(id);
   pendingPatches.set(id, {
-    patch: { ...existing?.patch, ...patch },
+    patch: { ...priorFailed, ...existing?.patch, ...patch },
     timer: window.setTimeout(() => void flushPatch(id), SAVE_DELAY),
   });
+  pageSaveStates.set(id, { phase: "debouncing" });
+  syncSaveState();
 }
 
 function dropPatch(id: string) {
   const pending = pendingPatches.get(id);
-  if (!pending) return;
-  window.clearTimeout(pending.timer);
-  pendingPatches.delete(id);
-  set({ saving: Math.max(0, state.saving - 1) });
+  if (pending) {
+    window.clearTimeout(pending.timer);
+    pendingPatches.delete(id);
+  }
+  failedPatches.delete(id);
+  if (pageSaveStates.delete(id)) syncSaveState();
 }
 
 export function flushPatch(id: string): Promise<void> {
@@ -300,19 +329,47 @@ export function flushPatch(id: string): Promise<void> {
   if (!pending) return previous;
   window.clearTimeout(pending.timer);
   pendingPatches.delete(id);
+  pageSaveStates.set(id, { phase: "saving" });
+  syncSaveState();
   // 同一页面的保存请求按顺序发出，避免旧内容覆盖新内容
   const next = previous
-    .then(() => request(`/api/pages/${id}`, { method: "PATCH", json: pending.patch, keepalive: byteLength(pending.patch) < 60_000 }))
+    .then(() =>
+      request(`/api/pages/${id}`, {
+        method: "PATCH",
+        json: pending.patch,
+        keepalive: byteLength(pending.patch) < 60_000,
+      }),
+    )
     .then(
-      () => {},
-      (err) => reportError(err),
+      () => {
+        if (!pendingPatches.has(id)) pageSaveStates.delete(id);
+      },
+      (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        // 保留失败的修改，便于后续编辑合并或点击顶栏一键重试
+        const newer = pendingPatches.get(id);
+        if (!newer) {
+          failedPatches.set(id, { ...failedPatches.get(id), ...pending.patch });
+          pageSaveStates.set(id, { phase: "error", error: msg });
+        }
+        reportError(err);
+      },
     )
     .finally(() => {
-      set({ saving: Math.max(0, state.saving - 1) });
       if (inflight.get(id) === next) inflight.delete(id);
+      syncSaveState();
     });
   inflight.set(id, next);
   return next;
+}
+
+export function retryFailedSaves(): Promise<void> {
+  const entries = [...failedPatches.entries()];
+  for (const [id, patch] of entries) {
+    failedPatches.delete(id);
+    updatePage(id, patch);
+  }
+  return flushAll();
 }
 
 function byteLength(value: unknown) {
@@ -320,13 +377,25 @@ function byteLength(value: unknown) {
 }
 
 export function flushAll(): Promise<void> {
-  // 既包括还在防抖等待的修改，也包括已经发出但还没返回的请求
   const ids = new Set([...pendingPatches.keys(), ...inflight.keys()]);
   return Promise.all([...ids].map((id) => flushPatch(id))).then(() => {});
 }
 
-// 桌面版在关闭窗口前通过它确认所有修改都已保存
-(window as unknown as { __openNotionFlush?: () => Promise<void> }).__openNotionFlush = flushAll;
+// 桌面版关闭前保存钩子 + 状态机只读诊断快照（供调试与自动化检查）
+const winHooks = window as unknown as {
+  __openNotionFlush?: () => Promise<void>;
+  __openNotionState?: () => Record<string, unknown>;
+};
+winHooks.__openNotionFlush = flushAll;
+winHooks.__openNotionState = () => ({
+  route: currentPageId(),
+  bootStatus: state.loaded ? "ready" : "loading",
+  topOverlay: topOverlayName(state.overlay),
+  overlay: state.overlay,
+  saveSummary: state.saveSummary,
+  drag: getDragSnapshot(),
+  pageCount: Object.keys(state.pages).length,
+});
 
 window.addEventListener("pagehide", () => void flushAll());
 window.addEventListener("beforeunload", (e) => {
@@ -336,7 +405,7 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 
-/* ---------- 界面状态 ---------- */
+/* ---------- 界面与全局浮层栈状态机 ---------- */
 
 export function setExpanded(id: string, open: boolean) {
   const expanded = { ...state.expanded };
@@ -357,20 +426,39 @@ export function setSidebarWidth(width: number, persist = false) {
   if (persist) writeLocal("sidebarWidth", w);
 }
 
+export function sendOverlay(event: OverlayEvent) {
+  const next = transitionOverlay(state.overlay, event);
+  if (next === state.overlay) return;
+  set({
+    overlay: next,
+    searchOpen: next.modal === "search",
+    aiOpen: next.modal === "ai",
+    aiSettingsOpen: next.aiSettings,
+    peekRowId: next.peekRowId,
+  });
+}
+
+/** 按栈顶优先关闭最上层浮层；如果有浮层被关闭则返回 true */
+export function dismissTopOverlay(): boolean {
+  if (topOverlayName(state.overlay) === "none") return false;
+  sendOverlay({ type: "ESCAPE" });
+  return true;
+}
+
 export function setSearchOpen(open: boolean) {
-  set({ searchOpen: open });
+  sendOverlay({ type: open ? "OPEN_SEARCH" : "CLOSE_SEARCH" });
 }
 
 export function setAiOpen(open: boolean) {
-  set({ aiOpen: open });
+  sendOverlay({ type: open ? "OPEN_AI" : "CLOSE_AI" });
 }
 
 export function setAiSettingsOpen(open: boolean) {
-  set({ aiSettingsOpen: open });
+  sendOverlay({ type: open ? "OPEN_AI_SETTINGS" : "CLOSE_AI_SETTINGS" });
 }
 
 export function setPeekRowId(id: string | null) {
-  set({ peekRowId: id });
+  sendOverlay(id ? { type: "OPEN_PEEK", rowId: id } : { type: "CLOSE_PEEK" });
 }
 
 const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
@@ -484,7 +572,7 @@ export function useRoute(): string | null {
 export function navigate(id: string | null, replace = false) {
   // 手机上选中页面后自动收起侧边栏浮层
   if (isNarrow() && !replace && !state.sidebarCollapsed) set({ sidebarCollapsed: true });
-  if (state.peekRowId) set({ peekRowId: null });
+  sendOverlay({ type: "NAVIGATED" });
   const hash = id ? `#/${id}` : "#/";
   if (replace) {
     window.history.replaceState(null, "", hash);
