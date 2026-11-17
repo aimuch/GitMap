@@ -519,6 +519,7 @@ export interface AiProviderPresetInfo {
 	readonly defaultBaseUrl: string;
 	readonly defaultModel: string;
 	readonly requiresApiKey: boolean;
+	readonly defaultApiFormat: string;
 }
 
 export interface AiSettingsConfig {
@@ -1539,6 +1540,7 @@ export interface ResponseUpdateExtensionSetting extends ResponseWithErrorInfo {
 
 export interface RequestOpenExtensionSettings extends BaseMessage {
 	readonly command: 'openExtensionSettings';
+	readonly section?: 'ai'; // Open the settings of this section
 }
 export interface ResponseOpenExtensionSettings extends ResponseWithErrorInfo {
 	readonly command: 'openExtensionSettings';

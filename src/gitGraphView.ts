@@ -654,7 +654,7 @@ export class GitGraphView extends Disposable {
 			case 'openExtensionSettings':
 				this.sendMessage({
 					command: 'openExtensionSettings',
-					error: await openExtensionSettings()
+					error: await openExtensionSettings(msg.section)
 				});
 				break;
 			case 'updateExtensionSetting':

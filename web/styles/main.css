@@ -1508,10 +1508,27 @@ svg.openFolderIcon, svg.closedFolderIcon, svg.fileIcon{
 	display:flex;
 	align-items:center;
 	gap:1px;
-	padding:0 4px 0 22px;
+	padding:0 7px 0 25px;
 	background:linear-gradient(var(--git-graph-rowActionsTint), var(--git-graph-rowActionsTint)), var(--vscode-editor-background);
 	-webkit-mask-image:linear-gradient(to right, transparent, #000 18px);
 	mask-image:linear-gradient(to right, transparent, #000 18px);
+}
+/* A raised pill behind the buttons, so that they stand out from the row (whose background they otherwise share) */
+#rowActions::before{
+	content:'';
+	position:absolute;
+	top:max(1px, calc((var(--git-graph-rowHeight) - 26px) / 2));
+	bottom:max(1px, calc((var(--git-graph-rowHeight) - 26px) / 2));
+	left:20px;
+	right:3px;
+	border-radius:6px;
+	border:1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border, rgba(128,128,128,0.35)));
+	background:var(--vscode-editorWidget-background, var(--vscode-editor-background));
+	box-shadow:0 1px 3px var(--vscode-widget-shadow, rgba(0,0,0,0.3));
+	pointer-events:none;
+}
+#rowActions > .rowAction{
+	position:relative;
 }
 #commitTable tr.commit.multiSelected #rowActions{
 	--git-graph-rowActionsTint:var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,0.25));
@@ -1532,10 +1549,11 @@ svg.openFolderIcon, svg.closedFolderIcon, svg.fileIcon{
 	background-color:transparent;
 	color:var(--vscode-icon-foreground, var(--vscode-foreground));
 	cursor:pointer;
-	opacity:0.8;
+	opacity:0.9;
 }
 .rowAction:hover{
 	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+	color:var(--vscode-foreground);
 	opacity:1;
 }
 

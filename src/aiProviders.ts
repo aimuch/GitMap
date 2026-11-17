@@ -8,7 +8,7 @@ import { AiProviderPresetInfo, AiSettingsConfig } from './types';
 
 /**
  * The providers of the language models that explain commits: the models provided in Visual Studio Code (e.g. by GitHub Copilot), or a
- * provider whose API is called directly with the person's API key (all of them have an OpenAI-compatible Chat Completions API).
+ * provider whose API is called directly with the person's API key (OpenAI Chat Completions, OpenAI Responses or Anthropic Messages).
  */
 export const enum AiProvider {
 	VsCode = 'VS Code',
@@ -28,6 +28,106 @@ interface AiProviderPreset {
 	readonly baseUrl: string; // The default base URL of its API ('' => it must be set)
 	readonly model: string; // The default model ('' => it must be set)
 	readonly requiresApiKey: boolean;
+	readonly apiFormat?: AiApiFormat; // The format of its API (default: Chat Completions)
+}
+
+/**
+ * The formats of the APIs that can be called: OpenAI Chat Completions (`/chat/completions`), OpenAI Responses (`/responses`), and
+ * Anthropic Messages (`/messages`).
+ */
+export type AiApiFormat = 'chat' | 'responses' | 'anthropic';
+export const AI_API_FORMATS: ReadonlyArray<AiApiFormat> = ['chat', 'responses', 'anthropic'];
+const DEFAULT_ENDPOINT_PATHS: { readonly [format in AiApiFormat]: string } = { chat: 'chat/completions', responses: 'responses', anthropic: 'messages' };
+
+/**
+ * How much the model thinks (reasons) before answering: 'default' sends nothing (the model's default).
+ */
+export type AiThinking = 'default' | 'off' | 'low' | 'medium' | 'high';
+const AI_THINKING_VALUES: ReadonlyArray<AiThinking> = ['default', 'off', 'low', 'medium', 'high'];
+
+export const DEFAULT_AI_TIMEOUT_SECONDS = 90;
+
+/**
+ * The options of the requests sent to a direct provider (from the `git-map.ai.*` settings).
+ */
+export interface AiRequestOptions {
+	readonly apiFormat: AiApiFormat;
+	readonly apiFormatIsDefault: boolean; // The provider's default format is used (=> the other OpenAI format is tried if it isn't found)
+	readonly endpointPath: string; // A custom path (or full URL) replacing the format's default path ('' => the default)
+	readonly temperature: number | null; // NULL => not sent
+	readonly maxTokens: number | null; // NULL => not sent (Anthropic Messages requires it, so 4096 is sent)
+	readonly thinking: AiThinking;
+	readonly stream: boolean;
+	readonly timeoutMs: number;
+	readonly extraBody: { readonly [key: string]: any } | null; // Merged into the body of each request
+	readonly extraHeaders: { readonly [name: string]: string } | null;
+	readonly configError: string | null; // An invalid setting (e.g. extra parameters that aren't a JSON object)
+}
+
+/**
+ * The raw values of the request settings.
+ */
+export interface AiRequestSettings {
+	readonly apiFormat?: unknown;
+	readonly endpointPath?: unknown;
+	readonly temperature?: unknown;
+	readonly maxTokens?: unknown;
+	readonly thinking?: unknown;
+	readonly stream?: unknown;
+	readonly timeoutSeconds?: unknown;
+	readonly extraBody?: unknown;
+	readonly extraHeaders?: unknown;
+}
+
+/**
+ * Get the request options from the raw values of the settings.
+ * @param provider The provider (whose default format is used when no format is set).
+ * @param settings The raw values.
+ */
+export function parseAiRequestSettings(provider: string, settings: AiRequestSettings): AiRequestOptions {
+	const preset = PRESETS[provider];
+	const defaultFormat: AiApiFormat = preset && preset.apiFormat ? preset.apiFormat : 'chat';
+	const format = typeof settings.apiFormat === 'string' && AI_API_FORMATS.includes(<AiApiFormat>settings.apiFormat) ? <AiApiFormat>settings.apiFormat : null;
+	const errors: string[] = [];
+	const parseNumber = (value: unknown, min: number, max: number, integer: boolean): number | null => {
+		if (value === null || typeof value === 'undefined' || (typeof value === 'string' && value.trim() === '')) return null;
+		const num = typeof value === 'number' ? value : Number(String(value).trim());
+		if (!isFinite(num) || num < min || num > max) return null;
+		return integer ? Math.round(num) : num;
+	};
+	const parseObject = (value: unknown, name: string, example: string): { [key: string]: any } | null => {
+		if (value === null || typeof value === 'undefined') return null;
+		if (typeof value === 'object') return Array.isArray(value) ? null : <{ [key: string]: any }>value;
+		if (typeof value !== 'string' || value.trim() === '') return null;
+		const parsed = parseJson(value);
+		if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+			errors.push(t('The {0} setting must be a JSON object, e.g. {1}.', name, example));
+			return null;
+		}
+		return parsed;
+	};
+	const thinking = typeof settings.thinking === 'string' && AI_THINKING_VALUES.includes(<AiThinking>settings.thinking) ? <AiThinking>settings.thinking : 'default';
+	const timeoutSeconds = parseNumber(settings.timeoutSeconds, 5, 3600, true);
+	const extraBody = parseObject(settings.extraBody, 'git-map.ai.extraBody', '{"enable_thinking": false}');
+	const rawHeaders = parseObject(settings.extraHeaders, 'git-map.ai.extraHeaders', '{"X-Header": "value"}');
+	let extraHeaders: { [name: string]: string } | null = null;
+	if (rawHeaders !== null) {
+		extraHeaders = {};
+		for (const name of Object.keys(rawHeaders)) extraHeaders[name] = String(rawHeaders[name]);
+	}
+	return {
+		apiFormat: format !== null ? format : defaultFormat,
+		apiFormatIsDefault: format === null,
+		endpointPath: typeof settings.endpointPath === 'string' ? settings.endpointPath.trim() : '',
+		temperature: parseNumber(settings.temperature, 0, 2, false),
+		maxTokens: parseNumber(settings.maxTokens, 1, 1000000, true),
+		thinking: thinking,
+		stream: settings.stream !== false,
+		timeoutMs: (timeoutSeconds !== null ? timeoutSeconds : DEFAULT_AI_TIMEOUT_SECONDS) * 1000,
+		extraBody: extraBody,
+		extraHeaders: extraHeaders,
+		configError: errors.length > 0 ? errors.join(' ') : null
+	};
 }
 
 const PRESETS: { readonly [provider: string]: AiProviderPreset } = {
@@ -38,7 +138,7 @@ const PRESETS: { readonly [provider: string]: AiProviderPreset } = {
 	[AiProvider.OpenAI]: { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: '', requiresApiKey: true },
 	[AiProvider.Ollama]: { name: 'Ollama', baseUrl: 'http://localhost:11434/v1', model: '', requiresApiKey: false },
 	[AiProvider.Magpie]: { name: 'Magpie', baseUrl: 'http://127.0.0.1:3425/v1', model: '', requiresApiKey: false },
-	[AiProvider.CCSwitch]: { name: 'CC Switch', baseUrl: 'http://127.0.0.1:15721/v1', model: '', requiresApiKey: false },
+	[AiProvider.CCSwitch]: { name: 'CC Switch', baseUrl: 'http://127.0.0.1:15721/v1', model: '', requiresApiKey: false, apiFormat: 'responses' },
 	[AiProvider.OpenAICompatible]: { name: 'OpenAI Compatible', baseUrl: '', model: '', requiresApiKey: false }
 };
 
@@ -51,6 +151,7 @@ export interface DirectAiConfig {
 	readonly baseUrl: string;
 	readonly model: string;
 	readonly requiresApiKey: boolean;
+	readonly request: AiRequestOptions;
 }
 
 /**
@@ -65,7 +166,8 @@ export function getDirectAiConfig(): DirectAiConfig | null {
 		name: preset.name,
 		baseUrl: (config.aiBaseUrl !== '' ? config.aiBaseUrl : getDefaultBaseUrl(provider)).replace(/\/+$/, ''),
 		model: config.aiModel !== '' ? config.aiModel : preset.model,
-		requiresApiKey: preset.requiresApiKey
+		requiresApiKey: preset.requiresApiKey,
+		request: parseAiRequestSettings(provider, config.aiRequestSettings)
 	};
 }
 
@@ -124,8 +226,6 @@ const ALL_DIRECT_PROVIDERS: ReadonlyArray<AiProvider> = [
 ];
 
 export const AI_PROVIDER_VALUES: ReadonlyArray<string> = [AiProvider.VsCode, ...ALL_DIRECT_PROVIDERS];
-
-const STREAM_TIMEOUT_MS = 60000;
 
 /* API Keys (stored in the Secret Storage of Visual Studio Code, never in the Extension Settings) */
 
@@ -191,13 +291,14 @@ export async function getApiKey(provider: AiProvider): Promise<string | null> {
 
 function getAiProviderPresets(): ReadonlyArray<AiProviderPresetInfo> {
 	return [
-		{ id: AiProvider.VsCode, name: 'VS Code', defaultBaseUrl: '', defaultModel: '', requiresApiKey: false },
+		{ id: AiProvider.VsCode, name: 'VS Code', defaultBaseUrl: '', defaultModel: '', requiresApiKey: false, defaultApiFormat: 'chat' },
 		...ALL_DIRECT_PROVIDERS.map((id) => ({
 			id: id,
 			name: PRESETS[id].name,
 			defaultBaseUrl: getDefaultBaseUrl(id),
 			defaultModel: PRESETS[id].model,
-			requiresApiKey: PRESETS[id].requiresApiKey
+			requiresApiKey: PRESETS[id].requiresApiKey,
+			defaultApiFormat: PRESETS[id].apiFormat || 'chat'
 		}))
 	];
 }
@@ -301,7 +402,7 @@ export async function clearApiKey() {
 	vscode.window.showInformationMessage(picked.providers.length === 1 ? t('The API key of {0} was deleted.', picked.label) : t('All stored AI API keys were deleted.'));
 }
 
-/* The OpenAI-compatible Chat Completions API */
+/* The request: Chat Completions, Responses or Anthropic Messages */
 
 /**
  * Get what's missing before a direct provider can be used.
@@ -311,22 +412,133 @@ export async function getDirectAiProblem(config: DirectAiConfig): Promise<{ erro
 	if (config.baseUrl === '') return { error: t('Set the base URL of the API of {0} in the "git-map.ai.baseUrl" setting.', config.name), needsApiKey: false };
 	if (!/^https?:\/\//i.test(config.baseUrl)) return { error: t('The base URL of the API must start with https:// or http:// (in the "git-map.ai.baseUrl" setting).'), needsApiKey: false };
 	if (config.model === '') return { error: t('Set the model of {0} to use in the "git-map.ai.model" setting.', config.name), needsApiKey: false };
+	if (config.request.configError !== null) return { error: config.request.configError, needsApiKey: false };
 	if (config.requiresApiKey && await getApiKey(config.provider) === null) return { error: t('Set the API key of {0} with the "Git Map: Set AI API Key..." command.', config.name), needsApiKey: true };
 	return null;
 }
 
 /**
- * Send a prompt to an OpenAI-compatible Chat Completions API, streaming the response.
- * @param baseUrl The base URL of the API (`/chat/completions` is appended).
- * @param model The model.
+ * Get the URL a request in a format is sent to.
+ */
+export function getAiRequestUrl(baseUrl: string, format: AiApiFormat, endpointPath: string) {
+	const custom = endpointPath.trim();
+	if (/^https?:\/\//i.test(custom)) return custom;
+	const pathPart = custom !== '' ? custom : DEFAULT_ENDPOINT_PATHS[format];
+	return baseUrl.replace(/\/+$/, '') + '/' + pathPart.replace(/^\/+/, '');
+}
+
+/**
+ * Build the body of a request (without anything that depends on the prompt other than the prompt itself).
+ */
+export function buildAiRequestBody(format: AiApiFormat, provider: string, model: string, prompt: string, options: AiRequestOptions): { [key: string]: any } {
+	const body: { [key: string]: any } = { model: model };
+	const thinkingOn = options.thinking === 'low' || options.thinking === 'medium' || options.thinking === 'high';
+	if (format === 'responses') {
+		body.input = prompt;
+		body.store = false;
+		if (options.temperature !== null) body.temperature = options.temperature;
+		if (options.maxTokens !== null) body.max_output_tokens = options.maxTokens;
+		if (options.thinking === 'off') body.reasoning = { effort: 'minimal' };
+		else if (thinkingOn) body.reasoning = { effort: options.thinking };
+	} else if (format === 'anthropic') {
+		const budget = options.thinking === 'low' ? 1024 : options.thinking === 'medium' ? 4096 : 16000;
+		const maxTokens = options.maxTokens !== null ? options.maxTokens : 4096;
+		body.max_tokens = thinkingOn ? Math.max(maxTokens, budget + 2048) : maxTokens;
+		body.messages = [{ role: 'user', content: prompt }];
+		if (thinkingOn) body.thinking = { type: 'enabled', budget_tokens: budget };
+		else if (options.thinking === 'off') body.thinking = { type: 'disabled' };
+		// Extended thinking only accepts the default temperature
+		if (options.temperature !== null && !thinkingOn) body.temperature = options.temperature;
+	} else {
+		body.messages = [{ role: 'user', content: prompt }];
+		if (options.temperature !== null) body.temperature = options.temperature;
+		if (options.maxTokens !== null) body.max_tokens = options.maxTokens;
+		if (options.thinking !== 'default') {
+			if (provider === AiProvider.Qwen) {
+				body.enable_thinking = thinkingOn;
+			} else if (provider === AiProvider.Doubao) {
+				body.thinking = { type: thinkingOn ? 'enabled' : 'disabled' };
+			} else if (provider === AiProvider.DeepSeek) {
+				// DeepSeek switches thinking by model (deepseek-chat / deepseek-reasoner), not by a parameter
+			} else {
+				body.reasoning_effort = thinkingOn ? options.thinking : 'minimal';
+			}
+		}
+	}
+	if (options.stream) body.stream = true;
+	if (options.extraBody !== null) Object.assign(body, options.extraBody);
+	return body;
+}
+
+/**
+ * Build the headers of a request.
+ */
+function buildAiRequestHeaders(format: AiApiFormat, apiKey: string | null, options: AiRequestOptions) {
+	const headers: { [name: string]: string } = { 'Content-Type': 'application/json', 'Accept': options.stream ? 'text/event-stream' : 'application/json' };
+	if (format === 'anthropic') {
+		headers['anthropic-version'] = '2023-06-01';
+		if (apiKey !== null) headers['x-api-key'] = apiKey;
+	} else if (apiKey !== null) {
+		headers['Authorization'] = 'Bearer ' + apiKey;
+	}
+	if (options.extraHeaders !== null) Object.assign(headers, options.extraHeaders);
+	return headers;
+}
+
+/**
+ * Describe the request that would be sent (for the preview in Settings): the URL & the body, with the prompt shortened.
+ */
+export function previewAiRequest(provider: string, baseUrl: string, model: string, options: AiRequestOptions) {
+	const body = buildAiRequestBody(options.apiFormat, provider, model !== '' ? model : '<model>', '<prompt>', options);
+	return { url: getAiRequestUrl(baseUrl !== '' ? baseUrl : 'https://…', options.apiFormat, options.endpointPath), body: body, fallback: getFallbackFormat(options) };
+}
+
+/**
+ * The format tried when the default format of a provider's isn't found (404/405): the other OpenAI format.
+ */
+function getFallbackFormat(options: AiRequestOptions): AiApiFormat | null {
+	if (!options.apiFormatIsDefault || options.endpointPath !== '') return null;
+	return options.apiFormat === 'chat' ? 'responses' : options.apiFormat === 'responses' ? 'chat' : null;
+}
+
+/**
+ * The result of a single request.
+ */
+interface AiAttemptResult {
+	readonly error: string | null;
+	readonly status: number | null; // The HTTP status of an error response (NULL => no error response)
+}
+
+/**
+ * Send a prompt to the API of a direct provider, streaming the response. If the provider's default format isn't found (e.g. a gateway
+ * that only serves the Responses API returns 404 for `/chat/completions`), the other OpenAI format is tried.
+ * @param config The provider, its base URL, model & request options.
  * @param apiKey The API key (NULL => none is sent, e.g. for a local model).
  * @param prompt The prompt (a user message).
  * @param onText Called with each part of the response, as it's received.
  * @param token Cancels the request.
- * @returns The error, or NULL.
+ * @returns The error (NULL if there's none), and the format that was used.
  */
-export async function streamChatCompletion(baseUrl: string, model: string, apiKey: string | null, prompt: string, onText: (text: string) => void, token: vscode.CancellationToken): Promise<string | null> {
-	if (typeof fetch !== 'function') return t('This version of Visual Studio Code can\'t call the API (it requires Visual Studio Code 1.82 or later).');
+export async function streamAiCompletion(config: DirectAiConfig, apiKey: string | null, prompt: string, onText: (text: string) => void, token: vscode.CancellationToken): Promise<{ error: string | null, format: AiApiFormat, url: string }> {
+	const options = config.request;
+	const first = options.apiFormat;
+	const firstUrl = getAiRequestUrl(config.baseUrl, first, options.endpointPath);
+	const result = await sendAiRequest(first, firstUrl, config, apiKey, prompt, onText, token);
+	const fallback = getFallbackFormat(options);
+	if (fallback !== null && (result.status === 404 || result.status === 405) && !token.isCancellationRequested) {
+		const fallbackUrl = getAiRequestUrl(config.baseUrl, fallback, '');
+		const second = await sendAiRequest(fallback, fallbackUrl, config, apiKey, prompt, onText, token);
+		if (second.status === 404 || second.status === 405) {
+			return { error: t('Neither {0} nor {1} was found at {2} (HTTP {3}). Check the API Base URL and the model, or choose the API Format in Settings → AI.', '/' + DEFAULT_ENDPOINT_PATHS[first], '/' + DEFAULT_ENDPOINT_PATHS[fallback], getHost(config.baseUrl), String(second.status)), format: fallback, url: fallbackUrl };
+		}
+		return { error: second.error, format: fallback, url: fallbackUrl };
+	}
+	return { error: result.error, format: first, url: firstUrl };
+}
+
+async function sendAiRequest(format: AiApiFormat, url: string, config: DirectAiConfig, apiKey: string | null, prompt: string, onText: (text: string) => void, token: vscode.CancellationToken): Promise<AiAttemptResult> {
+	if (typeof fetch !== 'function') return { error: t('This version of Visual Studio Code can\'t call the API (it requires Visual Studio Code 1.82 or later).'), status: null };
+	const options = config.request;
 	const controller = new AbortController(), cancellation = token.onCancellationRequested(() => controller.abort());
 	let timedOut = false, timer: NodeJS.Timeout | null = null;
 	const resetTimeout = () => {
@@ -334,91 +546,199 @@ export async function streamChatCompletion(baseUrl: string, model: string, apiKe
 		timer = setTimeout(() => {
 			timedOut = true;
 			controller.abort();
-		}, STREAM_TIMEOUT_MS);
+		}, options.timeoutMs);
 	};
 	resetTimeout();
 	try {
-		const headers: { [name: string]: string } = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' };
-		if (apiKey !== null) headers['Authorization'] = 'Bearer ' + apiKey;
-		const response = await fetch(baseUrl.replace(/\/+$/, '') + '/chat/completions', {
+		const response = await fetch(url, {
 			method: 'POST',
-			headers: headers,
-			body: JSON.stringify({ model: model, stream: true, messages: [{ role: 'user', content: prompt }] }),
+			headers: buildAiRequestHeaders(format, apiKey, options),
+			body: JSON.stringify(buildAiRequestBody(format, config.provider, config.model, prompt, options)),
 			signal: controller.signal
 		});
 		resetTimeout();
 		if (!response.ok || response.body === null) {
-			return t('The API returned an error ({0}): {1}', String(response.status), await getErrorMessage(response));
+			return { error: t('The API returned an error ({0}) for {1}: {2}', String(response.status), 'POST ' + getPathOfUrl(url), await getErrorMessage(response)), status: response.status };
 		}
 		const contentType = (response.headers.get('content-type') || '').toLowerCase();
-		if (contentType.includes('application/json')) {
-			const json = parseJson(await response.text());
-			if (json !== null && typeof json.error === 'object' && json.error !== null) {
-				return t('The API returned an error: {0}', String(json.error.message || JSON.stringify(json.error)));
+		if (!contentType.includes('text/event-stream')) {
+			const text = await response.text();
+			const json = parseJson(text);
+			if (json === null) {
+				// Some servers stream without the event-stream content type
+				if (/^\s*(data|event):/m.test(text)) return { error: parseEventStreamText(format, text, onText, token), status: null };
+				return { error: t('The API returned a response that isn\'t JSON: {0}', text.trim().substring(0, 300)), status: null };
 			}
-			const choice = json !== null && Array.isArray(json.choices) ? json.choices[0] : null;
-			const messageContent = choice && choice.message && typeof choice.message.content === 'string' ? choice.message.content : '';
-			if (messageContent === '') return t('The model returned an empty response.');
+			const error = getJsonError(json);
+			if (error !== null) return { error: t('The API returned an error: {0}', error), status: null };
+			const messageContent = getTextOfJsonResponse(format, json);
+			if (messageContent === '') return { error: t('The model returned an empty response.'), status: null };
 			onText(messageContent);
-			return null;
+			return { error: null, status: null };
 		}
 
 		const decoder = new TextDecoder();
 		const reader = response.body.getReader();
-		let buffer = '', done = false, receivedText = false;
-		const processLine = (rawLine: string): string | null => {
-			const line = rawLine.trim();
-			if (!line.startsWith('data:')) return null;
-			const data = line.substring(5).trim();
-			if (data === '[DONE]') {
-				done = true;
-				return null;
-			}
-			const event = parseJson(data);
-			if (event === null) return null;
-			if (typeof event.error === 'object' && event.error !== null) return t('The API returned an error: {0}', String(event.error.message || JSON.stringify(event.error)));
-			const choice = Array.isArray(event.choices) ? event.choices[0] : null;
-			const text = choice && choice.delta && typeof choice.delta.content === 'string'
-				? choice.delta.content
-				: (choice && choice.message && typeof choice.message.content === 'string' ? choice.message.content : '');
-			if (text !== '') {
-				receivedText = true;
-				onText(text);
-			}
-			return null;
-		};
-		while (!done) {
+		const parser = new EventStreamParser(format, onText);
+		while (!parser.done) {
 			const chunk = await reader.read();
 			resetTimeout();
 			if (chunk.done) {
-				buffer += decoder.decode();
+				parser.push(decoder.decode(), true);
 				break;
 			}
-			buffer += decoder.decode(chunk.value, { stream: true });
-			// Server-Sent Events: each event is a line "data: {json}", and the stream ends with "data: [DONE]"
-			let newline: number;
-			while ((newline = buffer.indexOf('\n')) > -1) {
-				const line = buffer.substring(0, newline);
-				buffer = buffer.substring(newline + 1);
-				const lineError = processLine(line);
-				if (lineError !== null) return lineError;
-				if (done) break;
-			}
-		}
-		if (!done && buffer.trim() !== '') {
-			const trailingError = processLine(buffer);
-			if (trailingError !== null) return trailingError;
+			parser.push(decoder.decode(chunk.value, { stream: true }), false);
+			if (parser.error !== null) break;
 		}
 		await reader.cancel().catch(() => { });
-		if (!receivedText && !token.isCancellationRequested) return t('The model returned an empty response.');
-		return null;
+		if (parser.error !== null) return { error: parser.error, status: null };
+		if (!parser.receivedText && !token.isCancellationRequested) return { error: t('The model returned an empty response.'), status: null };
+		return { error: null, status: null };
 	} catch (error) {
-		if (token.isCancellationRequested) return null;
-		if (timedOut) return t('The API at {0} timed out without responding.', getHost(baseUrl));
-		return t('Unable to call the API at {0}: {1}', getHost(baseUrl), error instanceof Error ? ((<any>error).cause instanceof Error ? error.message + ' (' + (<any>error).cause.message + ')' : error.message) : String(error));
+		if (token.isCancellationRequested) return { error: null, status: null };
+		if (timedOut) return { error: t('The API at {0} timed out without responding.', getHost(url)), status: null };
+		return { error: t('Unable to call the API at {0}: {1}', getHost(url), error instanceof Error ? ((<any>error).cause instanceof Error ? error.message + ' (' + (<any>error).cause.message + ')' : error.message) : String(error)), status: null };
 	} finally {
 		if (timer !== null) clearTimeout(timer);
 		cancellation.dispose();
+	}
+}
+
+function parseEventStreamText(format: AiApiFormat, text: string, onText: (text: string) => void, token: vscode.CancellationToken) {
+	const parser = new EventStreamParser(format, onText);
+	parser.push(text, true);
+	if (parser.error !== null) return parser.error;
+	return !parser.receivedText && !token.isCancellationRequested ? t('The model returned an empty response.') : null;
+}
+
+/**
+ * Parses Server-Sent Events: each event has a line "data: {json}" (Chat Completions ends with "data: [DONE]"; the Responses & Anthropic
+ * Messages APIs send typed events).
+ */
+export class EventStreamParser {
+	private buffer = '';
+	public done = false;
+	public error: string | null = null;
+	public receivedText = false;
+
+	constructor(private readonly format: AiApiFormat, private readonly onText: (text: string) => void) { }
+
+	public push(text: string, end: boolean) {
+		this.buffer += text;
+		let newline: number;
+		while (!this.done && this.error === null && (newline = this.buffer.indexOf('\n')) > -1) {
+			const line = this.buffer.substring(0, newline);
+			this.buffer = this.buffer.substring(newline + 1);
+			this.processLine(line);
+		}
+		if (end && !this.done && this.error === null && this.buffer.trim() !== '') {
+			this.processLine(this.buffer);
+			this.buffer = '';
+		}
+	}
+
+	private processLine(rawLine: string) {
+		const line = rawLine.trim();
+		if (!line.startsWith('data:')) return;
+		const data = line.substring(5).trim();
+		if (data === '[DONE]') {
+			this.done = true;
+			return;
+		}
+		const event = parseJson(data);
+		if (event === null || typeof event !== 'object') return;
+		const error = getJsonError(event);
+		if (error !== null) {
+			this.error = t('The API returned an error: {0}', error);
+			return;
+		}
+		let text = '';
+		const type = typeof event.type === 'string' ? event.type : '';
+		if (type === 'response.output_text.delta' && typeof event.delta === 'string') {
+			text = event.delta;
+		} else if (type === 'content_block_delta' && event.delta && event.delta.type === 'text_delta' && typeof event.delta.text === 'string') {
+			text = event.delta.text;
+		} else if (type === 'response.completed' || type === 'response.done' || type === 'message_stop') {
+			if (!this.receivedText && type !== 'message_stop' && event.response) text = getTextOfJsonResponse('responses', event.response);
+			this.done = true;
+		} else if (Array.isArray(event.choices)) {
+			const choice = event.choices[0];
+			text = choice && choice.delta && typeof choice.delta.content === 'string'
+				? choice.delta.content
+				: (choice && choice.message && typeof choice.message.content === 'string' ? choice.message.content : '');
+		}
+		if (text !== '') {
+			this.receivedText = true;
+			this.onText(text);
+		}
+	}
+}
+
+/**
+ * Get the error in a JSON response or event (`{"error": {...}}`, a Responses API `response.failed` event, or an Anthropic `error` event).
+ */
+function getJsonError(json: any): string | null {
+	if (json === null || typeof json !== 'object') return null;
+	if (typeof json.error === 'object' && json.error !== null) return String(json.error.message || JSON.stringify(json.error));
+	if (typeof json.error === 'string' && json.error !== '') return json.error;
+	if (json.type === 'error' && typeof json.message === 'string') return json.message;
+	if ((json.type === 'response.failed' || json.type === 'response.incomplete') && json.response) {
+		const responseError = json.response.error;
+		if (responseError && typeof responseError.message === 'string') return responseError.message;
+		if (json.response.incomplete_details && typeof json.response.incomplete_details.reason === 'string') return json.response.incomplete_details.reason;
+		return json.type;
+	}
+	return null;
+}
+
+/**
+ * Get the text of a complete (non-streamed) response.
+ */
+function getTextOfJsonResponse(format: AiApiFormat, json: any): string {
+	if (json === null || typeof json !== 'object') return '';
+	if (Array.isArray(json.choices)) {
+		const choice = json.choices[0];
+		return choice && choice.message && typeof choice.message.content === 'string' ? choice.message.content : '';
+	}
+	if (typeof json.output_text === 'string') return json.output_text;
+	if (Array.isArray(json.output)) {
+		return json.output.filter((item: any) => item && item.type === 'message' && Array.isArray(item.content))
+			.map((item: any) => item.content.filter((part: any) => part && part.type === 'output_text' && typeof part.text === 'string').map((part: any) => part.text).join(''))
+			.join('');
+	}
+	if (Array.isArray(json.content)) {
+		return json.content.filter((part: any) => part && part.type === 'text' && typeof part.text === 'string').map((part: any) => part.text).join('');
+	}
+	return '';
+}
+
+function getPathOfUrl(url: string) {
+	try {
+		return new URL(url).pathname;
+	} catch (_) {
+		return url;
+	}
+}
+
+/**
+ * Send a short prompt with the current settings, to check that they work.
+ * @returns What happened: the reply, the format & URL used, and how long it took.
+ */
+export async function testAiConnection(): Promise<{ ok: boolean, text: string, error: string | null, format: AiApiFormat | null, url: string | null, ms: number, fellBack: boolean }> {
+	const config = getDirectAiConfig();
+	if (config === null) return { ok: false, text: '', error: t('Choose a provider whose API Git Map calls directly first.'), format: null, url: null, ms: 0, fellBack: false };
+	const problem = await getDirectAiProblem(config);
+	if (problem !== null) return { ok: false, text: '', error: problem.error, format: null, url: null, ms: 0, fellBack: false };
+	const source = new vscode.CancellationTokenSource();
+	const started = Date.now();
+	let text = '';
+	try {
+		const result = await streamAiCompletion(config, await getApiKey(config.provider), 'Reply with exactly one word: OK', (part) => {
+			text += part;
+		}, source.token);
+		return { ok: result.error === null, text: text.trim().substring(0, 200), error: result.error, format: result.format, url: result.url, ms: Date.now() - started, fellBack: result.format !== config.request.apiFormat };
+	} finally {
+		source.dispose();
 	}
 }
 

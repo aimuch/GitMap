@@ -5,7 +5,7 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import { WebSocket, WebSocketServer } from 'ws';
-import { AiProvider, clearApiKey, getApiKey, loadAiSettingsSnapshot, setAiSecretStorage, setApiKey } from '../aiProviders';
+import { AiProvider, DEFAULT_AI_TIMEOUT_SECONDS, clearApiKey, getApiKey, loadAiSettingsSnapshot, parseAiRequestSettings, previewAiRequest, setAiSecretStorage, setApiKey, testAiConnection } from '../aiProviders';
 import { AvatarManager } from '../avatarManager';
 import { setSettingFallbackStorage } from '../config';
 import { DataSource } from '../dataSource';
@@ -356,8 +356,10 @@ export class GitMapServer {
       onOpenTerminal: (payload) => {
         this.broadcast({ type: 'terminal:requestOpen', payload });
       },
-      onOpenSettingsUi: () => {
-        this.broadcast({ type: 'shell:openAppSettings' });
+      onOpenSettingsUi: (query) => {
+        // "@ext:aimdev.git-map ai" opens the AI section
+        const section = typeof query === 'string' && /\bai\b/.test(query.replace(/^@ext:\S+/, '')) ? 'ai' : undefined;
+        this.broadcast({ type: 'shell:openAppSettings', section });
       },
       onClipboardWrite: async (text) => {
         if (this.desktopHooks.writeClipboard) {
@@ -1005,8 +1007,19 @@ export class GitMapServer {
         for (const preset of snapshot.presets) {
           if (preset.requiresApiKey) keys[preset.id] = (await getApiKey(preset.id as AiProvider)) !== null;
         }
-        return { ...snapshot, presets: snapshot.presets.filter((p) => p.id !== AiProvider.VsCode), keys };
+        return { ...snapshot, presets: snapshot.presets.filter((p) => p.id !== AiProvider.VsCode), keys, defaultTimeoutSeconds: DEFAULT_AI_TIMEOUT_SECONDS };
       }
+
+      case 'ai:preview': {
+        // Describe the request the (unsaved) values in Settings would send
+        const provider = String(params.provider || '');
+        const options = parseAiRequestSettings(provider, params.request || {});
+        const preview = previewAiRequest(provider, String(params.baseUrl || ''), String(params.model || ''), options);
+        return { ...preview, error: options.configError };
+      }
+
+      case 'ai:test':
+        return testAiConnection();
 
       case 'ai:setApiKey': {
         const key = typeof params.key === 'string' ? params.key.trim() : '';

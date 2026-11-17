@@ -1,4 +1,4 @@
-import { AI_PROVIDER_VALUES, AiProvider, getAiSettingsSnapshot } from './aiProviders';
+import { AI_PROVIDER_VALUES, AiProvider, AiRequestSettings, getAiSettingsSnapshot } from './aiProviders';
 import * as vscode from 'vscode';
 import {
 	AiSettingsConfig,
@@ -560,6 +560,24 @@ class Config {
 	get aiModel() {
 		const value = this.config.get('ai.model', '');
 		return typeof value === 'string' ? value.trim() : '';
+	}
+
+	/**
+	 * Get the raw values of the `git-map.ai.*` settings of the requests sent to a direct provider (API format, endpoint path,
+	 * temperature, max tokens, thinking, streaming, timeout, extra body parameters & headers).
+	 */
+	get aiRequestSettings(): AiRequestSettings {
+		return {
+			apiFormat: this.config.get('ai.apiFormat', ''),
+			endpointPath: this.config.get('ai.endpointPath', ''),
+			temperature: this.config.get('ai.temperature', ''),
+			maxTokens: this.config.get('ai.maxTokens', ''),
+			thinking: this.config.get('ai.thinking', 'default'),
+			stream: this.config.get('ai.stream', true),
+			timeoutSeconds: this.config.get('ai.timeoutSeconds', ''),
+			extraBody: this.config.get('ai.extraBody', ''),
+			extraHeaders: this.config.get('ai.extraHeaders', '')
+		};
 	}
 
 	/**

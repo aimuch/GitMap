@@ -103,6 +103,35 @@
       hintMagpie: '请求经由本机 Magpie 网关转发到其中已登录的模型服务。请保持 Magpie 运行，并填写它提供的模型名；无需 API Key。默认地址读取 ~/.config/magpie/gateway.json。',
       hintCcSwitch: '请求经由 CC Switch 本地路由转发到当前为 Codex 选中的服务商。请在 CC Switch 中开启本地路由，并填写该服务商的模型名；无需 API Key。',
       hintOllama: '使用本机 Ollama 服务，无需 API Key。',
+      aiRequestHeader: '接口与参数',
+      aiApiFormat: '接口格式',
+      aiApiFormatDefault: '默认（{0}）',
+      aiEndpointPath: '接口路径（可选）',
+      aiThinking: '思考 / 推理强度',
+      aiThinkingDefault: '默认（不发送）',
+      aiThinkingOff: '关闭',
+      aiThinkingLow: '低',
+      aiThinkingMedium: '中',
+      aiThinkingHigh: '高',
+      aiTemperature: '温度 (0–2)',
+      aiMaxTokens: '最大输出 Tokens',
+      aiTimeout: '超时（秒）',
+      aiStream: '流式输出（推荐；网关不支持流式时关闭）',
+      aiRecommendHint: '参考值：生成提交说明 温度 0.2、思考「关闭」或「低」（更快更省）；解释提交 温度 0.3。留空 = 不发送，使用服务商默认值。思考模型（o 系列、GPT-5、Claude 思考）通常不接受自定义温度，留空即可。',
+      aiAdvanced: '高级：额外请求参数 / 请求头',
+      aiExtraBody: '额外请求参数（JSON，合并进请求体，覆盖上面的同名参数）',
+      aiExtraHeaders: '额外请求头（JSON）',
+      aiPreview: '请求预览',
+      aiTest: '保存并测试连接',
+      aiTesting: '正在测试…',
+      aiTestOk: '连接成功（{0} ms，{1}）：{2}',
+      aiTestFellBack: '默认接口不存在，已自动改用 {0}。建议把「接口格式」设为它，省去每次多试一次。',
+      aiTestFailed: '测试失败：{0}',
+      aiFallbackNote: '若返回 404/405，会自动改试 {0}',
+      phTemperature: '留空 = 默认；参考 0.2',
+      phMaxTokens: '留空 = 默认；参考 1024',
+      phEndpointPath: '留空 = {0}',
+      phModelName: '模型名称',
       openedIn: '已在 {0} 中打开',
       openInTerminal: '在外部终端中打开',
       openInEditor: '在编辑器中打开',
@@ -208,7 +237,36 @@
       aiCommitToggle: 'Enable AI Commit Message Generation',
       hintMagpie: 'Requests go through the local Magpie gateway to the providers signed in to it. Keep Magpie running and set a model it serves; no API key needed. The default address is read from ~/.config/magpie/gateway.json.',
       hintCcSwitch: 'Requests go through the CC Switch local routing to the provider currently selected for Codex. Turn on local routing in CC Switch and set a model that provider serves; no API key needed.',
-      hintOllama: 'Uses the local Ollama server; no API key needed.',
+      hintOllama: 'Uses the local Ollama service; no API key needed.',
+      aiRequestHeader: 'API & Parameters',
+      aiApiFormat: 'API Format',
+      aiApiFormatDefault: 'Default ({0})',
+      aiEndpointPath: 'Endpoint Path (Optional)',
+      aiThinking: 'Thinking / Reasoning Effort',
+      aiThinkingDefault: 'Default (not sent)',
+      aiThinkingOff: 'Off',
+      aiThinkingLow: 'Low',
+      aiThinkingMedium: 'Medium',
+      aiThinkingHigh: 'High',
+      aiTemperature: 'Temperature (0–2)',
+      aiMaxTokens: 'Max Output Tokens',
+      aiTimeout: 'Timeout (Seconds)',
+      aiStream: 'Stream responses (recommended; turn off if a gateway doesn\'t support streaming)',
+      aiRecommendHint: 'Suggested: commit messages — temperature 0.2, thinking Off or Low (faster and cheaper); explaining commits — temperature 0.3. Empty = not sent (the provider\'s default). Reasoning models (o-series, GPT-5, Claude thinking) usually reject a custom temperature, so leave it empty.',
+      aiAdvanced: 'Advanced: extra body parameters / headers',
+      aiExtraBody: 'Extra body parameters (JSON, merged into the request, overriding the parameters above)',
+      aiExtraHeaders: 'Extra headers (JSON)',
+      aiPreview: 'Request Preview',
+      aiTest: 'Save & Test Connection',
+      aiTesting: 'Testing…',
+      aiTestOk: 'Connected ({0} ms, {1}): {2}',
+      aiTestFellBack: 'The default endpoint wasn\'t found, so {0} was used. Set the API Format to it to skip the extra attempt.',
+      aiTestFailed: 'Test failed: {0}',
+      aiFallbackNote: 'If it returns 404/405, {0} is tried automatically',
+      phTemperature: 'Empty = default; suggested 0.2',
+      phMaxTokens: 'Empty = default; suggested 1024',
+      phEndpointPath: 'Empty = {0}',
+      phModelName: 'Model name',
       openedIn: 'Opened in {0}',
       openInTerminal: 'Open in External Terminal',
       openInEditor: 'Open in Editor',
@@ -472,7 +530,7 @@
         break;
 
       case 'shell:openAppSettings':
-        openAppSettingsModal();
+        openAppSettingsModal(msg.section);
         break;
 
       case 'tab:openDiff':
@@ -3164,6 +3222,69 @@
     const hint = providerId === 'Magpie' ? tr('hintMagpie') : providerId === 'CC Switch' ? tr('hintCcSwitch') : providerId === 'Ollama' ? tr('hintOllama') : '';
     hintEl.textContent = hint;
     hintEl.classList.toggle('hidden', hint === '');
+    const defaultFormat = preset && preset.defaultApiFormat ? preset.defaultApiFormat : 'chat';
+    document.getElementById('cfgAiApiFormatDefault').textContent = tr('aiApiFormatDefault', AI_FORMAT_LABELS[defaultFormat] || defaultFormat);
+    syncAiRequestFields();
+  }
+
+  const AI_FORMAT_LABELS = { chat: 'Chat Completions', responses: 'Responses', anthropic: 'Anthropic Messages' };
+  const AI_FORMAT_PATHS = { chat: '/chat/completions', responses: '/responses', anthropic: '/messages' };
+
+  /** The request settings as entered in Settings (not necessarily saved). */
+  function readAiRequestForm() {
+    return {
+      apiFormat: document.getElementById('cfgAiApiFormat').value,
+      endpointPath: document.getElementById('cfgAiEndpointPath').value.trim(),
+      temperature: document.getElementById('cfgAiTemperature').value.trim(),
+      maxTokens: document.getElementById('cfgAiMaxTokens').value.trim(),
+      thinking: document.getElementById('cfgAiThinking').value,
+      stream: document.getElementById('cfgAiStream').checked,
+      timeoutSeconds: document.getElementById('cfgAiTimeout').value.trim(),
+      extraBody: document.getElementById('cfgAiExtraBody').value.trim(),
+      extraHeaders: document.getElementById('cfgAiExtraHeaders').value.trim()
+    };
+  }
+
+  let aiPreviewTimer = null;
+  let aiPreviewSeq = 0;
+  function syncAiRequestFields() {
+    const info = settingsUi.aiInfo;
+    if (!info) return;
+    const providerId = document.getElementById('cfgAiProvider').value;
+    const preset = info.presets.find((p) => p.id === providerId) || null;
+    const chosen = document.getElementById('cfgAiApiFormat').value || (preset && preset.defaultApiFormat) || 'chat';
+    document.getElementById('cfgAiEndpointPath').placeholder = tr('phEndpointPath', AI_FORMAT_PATHS[chosen] || '');
+    document.getElementById('cfgAiTemperature').placeholder = tr('phTemperature');
+    document.getElementById('cfgAiMaxTokens').placeholder = tr('phMaxTokens');
+    document.getElementById('cfgAiTimeout').placeholder = String(info.defaultTimeoutSeconds || 90);
+    clearTimeout(aiPreviewTimer);
+    aiPreviewTimer = setTimeout(updateAiPreview, 150);
+  }
+
+  async function updateAiPreview() {
+    const seq = ++aiPreviewSeq;
+    const providerId = document.getElementById('cfgAiProvider').value;
+    const preset = settingsUi.aiInfo ? settingsUi.aiInfo.presets.find((p) => p.id === providerId) : null;
+    const baseUrl = document.getElementById('cfgAiBaseUrl').value.trim() || (preset ? preset.defaultBaseUrl : '');
+    const model = document.getElementById('cfgAiModel').value.trim() || (preset ? preset.defaultModel : '');
+    const pre = document.getElementById('cfgAiPreview');
+    try {
+      const res = await rpc('ai:preview', { provider: providerId, baseUrl, model, request: readAiRequestForm() });
+      if (seq !== aiPreviewSeq) return;
+      let text = 'POST ' + res.url + '\n' + JSON.stringify(res.body, null, 2);
+      if (res.fallback) text += '\n\n# ' + tr('aiFallbackNote', AI_FORMAT_PATHS[res.fallback]);
+      if (res.error) text = '⚠ ' + res.error + '\n\n' + text;
+      pre.textContent = text;
+      pre.classList.toggle('has-error', !!res.error);
+    } catch (err) {
+      if (seq === aiPreviewSeq) pre.textContent = err.message;
+    }
+  }
+
+  function showAiTestResult(text, kind) {
+    const el = document.getElementById('cfgAiTestResult');
+    el.textContent = text;
+    el.className = 'ai-test-result ' + (kind || '');
   }
 
   async function openAppSettingsModal(section) {
@@ -3201,6 +3322,17 @@
       document.getElementById('cfgAiBaseUrl').value = s['git-map.ai.baseUrl'] || '';
       document.getElementById('cfgAiExplain').checked = !!s['git-map.ai.explainCommit.enabled'];
       document.getElementById('cfgAiCommitMsg').checked = s['git-map.ai.commitMessage.enabled'] !== false;
+      const asText = (v) => (v === undefined || v === null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+      document.getElementById('cfgAiApiFormat').value = ['chat', 'responses', 'anthropic'].includes(s['git-map.ai.apiFormat']) ? s['git-map.ai.apiFormat'] : '';
+      document.getElementById('cfgAiEndpointPath').value = asText(s['git-map.ai.endpointPath']);
+      document.getElementById('cfgAiThinking').value = ['off', 'low', 'medium', 'high'].includes(s['git-map.ai.thinking']) ? s['git-map.ai.thinking'] : 'default';
+      document.getElementById('cfgAiTemperature').value = asText(s['git-map.ai.temperature']);
+      document.getElementById('cfgAiMaxTokens').value = asText(s['git-map.ai.maxTokens']);
+      document.getElementById('cfgAiTimeout').value = asText(s['git-map.ai.timeoutSeconds']);
+      document.getElementById('cfgAiStream').checked = s['git-map.ai.stream'] !== false;
+      document.getElementById('cfgAiExtraBody').value = asText(s['git-map.ai.extraBody']);
+      document.getElementById('cfgAiExtraHeaders').value = asText(s['git-map.ai.extraHeaders']);
+      document.getElementById('cfgAiTestResult').classList.add('hidden');
       syncAiProviderFields();
       await loadLaunchers(false);
     } catch (err) {
@@ -3226,9 +3358,22 @@
       ['git-map.ai.explainCommit.enabled', document.getElementById('cfgAiExplain').checked],
       ['git-map.ai.commitMessage.enabled', document.getElementById('cfgAiCommitMsg').checked]
     ];
+    const req = readAiRequestForm();
+    const toNumber = (v) => (v === '' || !isFinite(Number(v)) ? '' : Number(v));
+    updates.push(
+      ['git-map.ai.apiFormat', req.apiFormat],
+      ['git-map.ai.endpointPath', req.endpointPath],
+      ['git-map.ai.thinking', req.thinking === 'default' ? '' : req.thinking],
+      ['git-map.ai.temperature', toNumber(req.temperature)],
+      ['git-map.ai.maxTokens', toNumber(req.maxTokens)],
+      ['git-map.ai.timeoutSeconds', toNumber(req.timeoutSeconds)],
+      ['git-map.ai.stream', req.stream],
+      ['git-map.ai.extraBody', req.extraBody],
+      ['git-map.ai.extraHeaders', req.extraHeaders]
+    );
     // Only write settings whose value changed: each write notifies the graph view, which re-renders
     for (const [key, value] of updates) {
-      if (state.settings[key] !== value && !(state.settings[key] === undefined && value === '')) {
+      if (state.settings[key] !== value && !(state.settings[key] === undefined && (value === '' || (key === 'git-map.ai.stream' && value === true)))) {
         const res = await rpc('settings:update', { key, value });
         state.settings = res.settings || state.settings;
       }
@@ -3249,7 +3394,37 @@
   document.querySelectorAll('#appSettingsModal .settings-nav-item').forEach((btn) => {
     btn.addEventListener('click', () => selectSettingsSection(btn.getAttribute('data-section')));
   });
-  document.getElementById('cfgAiProvider').addEventListener('change', syncAiProviderFields);
+  document.getElementById('cfgAiProvider').addEventListener('change', () => {
+    // A format chosen for one provider rarely fits another
+    document.getElementById('cfgAiApiFormat').value = '';
+    document.getElementById('cfgAiEndpointPath').value = '';
+    syncAiProviderFields();
+  });
+  ['cfgAiModel', 'cfgAiBaseUrl', 'cfgAiApiFormat', 'cfgAiEndpointPath', 'cfgAiThinking', 'cfgAiTemperature', 'cfgAiMaxTokens', 'cfgAiTimeout', 'cfgAiStream', 'cfgAiExtraBody', 'cfgAiExtraHeaders'].forEach((id) => {
+    const el = document.getElementById(id);
+    el.addEventListener('input', syncAiRequestFields);
+    el.addEventListener('change', syncAiRequestFields);
+  });
+  document.getElementById('btnTestAi').addEventListener('click', async () => {
+    const btn = document.getElementById('btnTestAi');
+    btn.disabled = true;
+    showAiTestResult(tr('aiTesting'), 'pending');
+    try {
+      await saveAppSettings(false);
+      const res = await rpc('ai:test');
+      if (res.ok) {
+        let text = tr('aiTestOk', res.ms, AI_FORMAT_LABELS[res.format] || res.format, res.text || '(…)');
+        if (res.fellBack) text += '\n' + tr('aiTestFellBack', AI_FORMAT_LABELS[res.format] || res.format);
+        showAiTestResult(text, 'ok');
+      } else {
+        showAiTestResult(tr('aiTestFailed', res.error || ''), 'error');
+      }
+    } catch (err) {
+      showAiTestResult(tr('aiTestFailed', err.message), 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
   document.getElementById('cfgTerminalApp').addEventListener('change', syncLauncherCustomRows);
   document.getElementById('cfgEditorApp').addEventListener('change', syncLauncherCustomRows);
   document.getElementById('btnRedetectApps').addEventListener('click', () => loadLaunchers(true).catch((err) => showToast(err.message, 'error')));

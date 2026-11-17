@@ -353,8 +353,8 @@ export function createPullRequest(config: PullRequestConfig, sourceOwner: string
  * Open the Visual Studio Code Settings Editor to the Git Map Extension Settings.
  * @returns A promise resolving to the ErrorInfo of the executed command.
  */
-export function openExtensionSettings(): Thenable<ErrorInfo> {
-	return vscode.commands.executeCommand('workbench.action.openSettings', '@ext:aimdev.git-map').then(
+export function openExtensionSettings(section?: string): Thenable<ErrorInfo> {
+	return vscode.commands.executeCommand('workbench.action.openSettings', '@ext:aimdev.git-map' + (section ? ' ' + section : '')).then(
 		() => null,
 		() => t('Visual Studio Code was unable to open the Git Map Extension Settings.')
 	);

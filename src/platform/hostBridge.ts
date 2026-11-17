@@ -102,7 +102,7 @@ export interface HostBridgeHandlers {
   onOpenMultiDiff?: (payload: MultiDiffOpenPayload) => void;
   onOpenFile?: (payload: FileOpenPayload) => void;
   onOpenTerminal?: (payload: TerminalOpenPayload) => void;
-  onOpenSettingsUi?: () => void;
+  onOpenSettingsUi?: (query?: string) => void;
   onClipboardWrite?: (text: string) => Promise<boolean>;
   onOpenExternal?: (url: string) => Promise<boolean>;
   onToast?: (payload: ToastPayload) => Promise<string | undefined>;

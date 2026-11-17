@@ -1361,5 +1361,11 @@
 	"⋯ {0} unchanged lines collapsed ⋯": "⋯ 已折叠 {0} 行未更改内容 ⋯",
 	"Zoom Out Timeline": "缩小时间轴刻度",
 	"Zoom In Timeline": "放大时间轴刻度",
-	"Drag playhead, click ticks, or use ↑ / ↓ keys to travel through commits": "拖动蓝色游标、点击刻度或按 ↑ / ↓ 键在各次提交间穿越回溯"
+	"Drag playhead, click ticks, or use ↑ / ↓ keys to travel through commits": "拖动蓝色游标、点击刻度或按 ↑ / ↓ 键在各次提交间穿越回溯",
+	"The API returned an error ({0}) for {1}: {2}": "API 返回错误（{0}，{1}）：{2}",
+	"The API returned a response that isn't JSON: {0}": "API 返回的不是 JSON：{0}",
+	"Neither {0} nor {1} was found at {2} (HTTP {3}). Check the API Base URL and the model, or choose the API Format in Settings → AI.": "{2} 上 {0} 和 {1} 都不存在（HTTP {3}）。请检查 API 地址和模型名，或在 设置 → AI 中选择「接口格式」。",
+	"The {0} setting must be a JSON object, e.g. {1}.": "设置 {0} 必须是 JSON 对象，例如 {1}。",
+	"Choose a provider whose API Git Map calls directly first.": "请先选择一个由 Git Map 直接调用其 API 的 AI 服务。",
+	"API format, thinking, temperature & more…": "接口格式、思考、温度等更多选项…"
 }

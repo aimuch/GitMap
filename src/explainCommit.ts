@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getApiKey, getDirectAiConfig, getDirectAiProblem, getHost, streamChatCompletion } from './aiProviders';
+import { getApiKey, getDirectAiConfig, getDirectAiProblem, getHost, streamAiCompletion } from './aiProviders';
 import { Language } from './l10n';
 import { LanguageModelInfo } from './types';
 
@@ -122,11 +122,11 @@ async function runLanguageModel(prompt: string, modelId: string | null, unavaila
 		if (problem !== null) return { text: '', model: null, error: problem.error };
 		const modelName = direct.model + ' (' + direct.name + ')';
 		let text = '';
-		const error = await streamChatCompletion(direct.baseUrl, direct.model, await getApiKey(direct.provider), prompt, (part) => {
+		const result = await streamAiCompletion(direct, await getApiKey(direct.provider), prompt, (part) => {
 			text += part;
 			onProgress(text, modelName);
 		}, token);
-		return { text: text, model: modelName, error: error };
+		return { text: text, model: modelName, error: result.error };
 	}
 	const api = getApi();
 	if (api === null) return { text: '', model: null, error: unavailableMessage };

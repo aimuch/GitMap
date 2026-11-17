@@ -4,6 +4,8 @@ import { GitMapServer } from '../server/appServer';
 
 let mainWindow: BrowserWindow | null = null;
 let gitMapServer: GitMapServer | null = null;
+// Set once the app is really quitting (Cmd+Q, the menu, the Dock): until then, closing the window on macOS only hides it
+let isQuitting = false;
 
 // Last-resort safety net: an unexpected error in a background task (a failed spawn, a dropped SSH socket, ...)
 // is logged instead of taking down the whole app with a modal "JavaScript error in the main process" dialog.
@@ -26,6 +28,7 @@ async function createWindow(serverUrl: string) {
     title: 'GitMap',
     icon: iconPath,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#181818' : '#ffffff',
+    show: false, // Shown once the page has rendered, so that it doesn't flash blank
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 14, y: 12 } : undefined,
     webPreferences: {
@@ -44,11 +47,36 @@ async function createWindow(serverUrl: string) {
     return { action: 'deny' };
   });
 
-  await mainWindow.loadURL(serverUrl);
+  const win = mainWindow;
+  win.once('ready-to-show', () => win.show());
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
+  // macOS: the red close button (and Cmd+W) hide the window instead of destroying it, like other Mac apps. Clicking the Dock icon
+  // then shows it again instantly, with its tabs, terminals & scroll positions as they were (no reload).
+  win.on('close', (event) => {
+    if (process.platform !== 'darwin' || isQuitting) return;
+    event.preventDefault();
+    if (win.isFullScreen()) {
+      // Hiding a full-screen window leaves an empty black Space behind, so leave full screen first
+      win.once('leave-full-screen', () => win.hide());
+      win.setFullScreen(false);
+    } else {
+      win.hide();
+    }
   });
+
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
+  });
+
+  await win.loadURL(serverUrl);
+}
+
+function showMainWindow() {
+  if (mainWindow === null || mainWindow.isDestroyed()) return false;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  return true;
 }
 
 function buildAppMenu() {
@@ -224,6 +252,7 @@ app.whenReady().then(async () => {
   await createWindow(serverUrl);
 
   app.on('activate', async () => {
+    if (showMainWindow()) return;
     if (BrowserWindow.getAllWindows().length === 0 && gitMapServer) {
       await createWindow(gitMapServer.getUrl());
     }
@@ -237,5 +266,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
   void gitMapServer?.stop();
 });

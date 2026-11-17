@@ -38,6 +38,11 @@
 
 ### 7. AI 服务
 - 支持 DeepSeek、Kimi、豆包、通义千问、OpenAI、Ollama、**Magpie（本地网关）**、**CC Switch（本地路由）** 与任意 OpenAI 兼容接口；API Key 在设置中保存，Magpie / CC Switch / Ollama 无需 Key。
+- 设置 → AI → 接口与参数：
+  - **接口格式**：OpenAI Chat Completions（`/chat/completions`）、OpenAI Responses（`/responses`）、Anthropic Messages（`/messages`）。CC Switch 默认用 Responses，其余默认用 Chat Completions。用默认格式时如果返回 404/405，会自动改试另一种 OpenAI 格式。
+  - **接口路径**：可自定义路径，也可以直接填完整 URL。
+  - 还可以设置思考 / 推理强度（默认 / 关闭 / 低 / 中 / 高，按服务商映射为 `reasoning_effort`、`reasoning.effort`、`enable_thinking`、`thinking` 等参数）、温度、最大输出 Tokens、超时、是否流式输出，以及额外请求参数 / 请求头（JSON）。
+  - 设置页会实时显示**请求预览**，还有「保存并测试连接」按钮。
 
 ### 8. 安全
 - 内置服务只接受来自 GitMap 页面本身的 WebSocket 连接（校验 Origin 与 Host），防止其它网页或 DNS 重绑定驱动终端与 SSH。
@@ -46,15 +51,25 @@
 
 ## 快速开始
 
-### 安装依赖与构建
+### 安装依赖与编译源码
 
 ```bash
 npm install
 npm run build
 ```
 
+> `npm run build` **只是把 TypeScript 编译到 `dist/`**（供 `npm run desktop` / `npm run web` 直接运行），**不会生成安装包**。要生成 `.dmg` / `.exe` / `.AppImage` 等安装包，请看下面的 [打包跨平台安装包](#打包跨平台安装包本地打包--github-actions-自动发布-releases)（`npm run dist*` 会先自动执行一次 `build`，无需手动先跑）。
+>
 > 若国内网络下载 Electron 二进制较慢，可使用：
 > `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install`
+
+| 命令 | 作用 | 产物 |
+| --- | --- | --- |
+| `npm run build` | 编译源码 | `dist/`（不是安装包） |
+| `npm start` | 编译并启动桌面版 | 无 |
+| `npm run desktop` | 直接启动已编译的桌面版 | 无 |
+| `npm run pack` | 编译并生成免安装 App 目录 | `release/mac-arm64/GitMap.app` 等 |
+| `npm run dist:mac` 等 | 编译并打包安装包 | `release/GitMap-<版本>-mac-arm64.dmg` 等 |
 
 ### 模式一：启动跨平台桌面端 App（Electron）
 
@@ -87,6 +102,8 @@ npm run dist:win      # 打包 Windows x64 (setup 安装版 .exe + portable 便�
 npm run dist:linux    # 打包 Linux x64 (.AppImage + .deb)
 npm run pack          # 仅生成免安装解包目录（调试打包产物用）
 ```
+
+> 以上命令都会先执行 `npm run build` 再调用 electron-builder，产物在 `release/` 下。本地构建默认使用 ad-hoc 签名（未经 Apple 公证），首次在其它 Mac 上打开需右键 →「打开」。跨平台打包（如在 macOS 上打 Windows / Linux 包）可能缺少依赖，建议在目标系统上打包，或直接用下面的 GitHub Actions。
 
 #### 2. GitHub Actions CI 自动打包发布到 Releases
 仓库已配置好以下工作流：

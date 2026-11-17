@@ -268,7 +268,8 @@ class SettingsWidget {
 				(!isDirectAi ? '<p class="settingsDescription">' + t('Uses the language models provided in Visual Studio Code (e.g. GitHub Copilot Chat). No API URL or API key is needed.') + '</p>'
 					: ai.provider === 'Magpie' ? '<p class="settingsDescription">' + t('Requests go through the local gateway of Magpie, which calls the providers signed in to it. Keep Magpie running, and set a model it serves. No API key is needed.') + '</p>'
 						: ai.provider === 'CC Switch' ? '<p class="settingsDescription">' + t('Requests go through the local routing of CC Switch to the provider currently selected for Codex. Turn on local routing in CC Switch, and set a model that provider serves. No API key is needed.') + '</p>'
-							: '');
+							: '') +
+				(isDirectAi ? '<p class="settingsDescription"><span id="settingsAiAdvanced" class="settingsLink" tabindex="-1">' + t('API format, thinking, temperature & more…') + '</span></p>' : '');
 			html += '<div class="settingsSection" id="settingsAiSection"><h3>' + MENU_ICONS.sparkle + t('AI · All Repositories') + '</h3>' +
 				'<div class="settingsCheckboxes two">' +
 				'<span>' + checkbox('settingsAiCommitMessage', t('Generate Commit Messages'), t('Adds an action to generate commit messages from uncommitted changes in the Source Control view and the Git Map View.')) + '</span>' +
@@ -802,6 +803,13 @@ class SettingsWidget {
 		if (clearApiKeyBtn !== null) {
 			clearApiKeyBtn.addEventListener('click', () => {
 				sendMessage({ command: 'clearAiApiKey' });
+			});
+		}
+		const aiAdvancedLink = document.getElementById('settingsAiAdvanced');
+		if (aiAdvancedLink !== null) {
+			aiAdvancedLink.addEventListener('click', () => {
+				flushAiTextInputs();
+				sendMessage({ command: 'openExtensionSettings', section: 'ai' });
 			});
 		}
 		const customizeCdvActionsBtn = document.getElementById('settingsCustomizeCdvActions');

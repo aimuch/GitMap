@@ -691,7 +691,7 @@ export const commands = {
       return undefined;
     }
     if (command === 'workbench.action.openSettings') {
-      hostBridge.getHandlers().onOpenSettingsUi?.();
+      hostBridge.getHandlers().onOpenSettingsUi?.(typeof rest[0] === 'string' ? rest[0] : undefined);
       return undefined;
     }
     if (command === 'vscode.diff') {

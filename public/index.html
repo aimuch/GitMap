@@ -318,6 +318,62 @@
               <label class="inline-check"><input type="checkbox" id="cfgAiExplain" /> <span data-i18n="aiExplainToggle">启用 AI 解释提交 (Explain Commit)</span></label>
               <label class="inline-check"><input type="checkbox" id="cfgAiCommitMsg" /> <span data-i18n="aiCommitToggle">启用 AI 生成提交信息</span></label>
             </div>
+
+            <h4 data-i18n="aiRequestHeader">接口与参数</h4>
+            <div class="form-row-2">
+              <label><span data-i18n="aiApiFormat">接口格式</span>
+                <select id="cfgAiApiFormat">
+                  <option value="" id="cfgAiApiFormatDefault">默认</option>
+                  <option value="chat">OpenAI Chat Completions · /chat/completions</option>
+                  <option value="responses">OpenAI Responses · /responses</option>
+                  <option value="anthropic">Anthropic Messages · /messages</option>
+                </select>
+              </label>
+              <label><span data-i18n="aiEndpointPath">接口路径（可选）</span>
+                <input type="text" id="cfgAiEndpointPath" spellcheck="false" />
+              </label>
+            </div>
+            <div class="form-row-2">
+              <label><span data-i18n="aiThinking">思考 / 推理强度</span>
+                <select id="cfgAiThinking">
+                  <option value="default" data-i18n="aiThinkingDefault">默认（不发送）</option>
+                  <option value="off" data-i18n="aiThinkingOff">关闭</option>
+                  <option value="low" data-i18n="aiThinkingLow">低</option>
+                  <option value="medium" data-i18n="aiThinkingMedium">中</option>
+                  <option value="high" data-i18n="aiThinkingHigh">高</option>
+                </select>
+              </label>
+              <label><span data-i18n="aiTemperature">温度 (0–2)</span>
+                <input type="number" id="cfgAiTemperature" min="0" max="2" step="0.1" />
+              </label>
+            </div>
+            <div class="form-row-2">
+              <label><span data-i18n="aiMaxTokens">最大输出 Tokens</span>
+                <input type="number" id="cfgAiMaxTokens" min="1" step="1" />
+              </label>
+              <label><span data-i18n="aiTimeout">超时（秒）</span>
+                <input type="number" id="cfgAiTimeout" min="5" max="3600" step="1" />
+              </label>
+            </div>
+            <label class="inline-check"><input type="checkbox" id="cfgAiStream" /> <span data-i18n="aiStream">流式输出（推荐；网关不支持流式时关闭）</span></label>
+            <p class="settings-hint" data-i18n="aiRecommendHint">参考值：生成提交说明 温度 0.2、思考「关闭」或「低」（更快更省）；解释提交 温度 0.3。留空 = 不发送，使用服务商默认值。思考模型（o 系列、GPT-5、Claude 思考）通常不接受自定义温度，留空即可。</p>
+            <details class="settings-advanced">
+              <summary data-i18n="aiAdvanced">高级：额外请求参数 / 请求头</summary>
+              <label><span data-i18n="aiExtraBody">额外请求参数（JSON，合并进请求体，覆盖上面的同名参数）</span>
+                <textarea id="cfgAiExtraBody" rows="3" spellcheck="false" placeholder='{"enable_thinking": false}'></textarea>
+              </label>
+              <label><span data-i18n="aiExtraHeaders">额外请求头（JSON）</span>
+                <textarea id="cfgAiExtraHeaders" rows="2" spellcheck="false" placeholder='{"X-Custom-Header": "value"}'></textarea>
+              </label>
+            </details>
+            <div class="ai-preview">
+              <div class="ai-preview-head">
+                <span data-i18n="aiPreview">请求预览</span>
+                <button type="button" id="btnTestAi" class="mini-btn"><span class="icon-slot" data-icon="refresh"></span><span data-i18n="aiTest">保存并测试连接</span></button>
+              </div>
+              <pre id="cfgAiPreview" class="ai-preview-body"></pre>
+              <p id="cfgAiTestResult" class="ai-test-result hidden"></p>
+            </div>
           </section>
         </div>
       </div>
