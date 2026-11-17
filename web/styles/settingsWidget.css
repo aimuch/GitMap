@@ -1,0 +1,518 @@
+#settingsWidget{
+	display:flex;
+	flex-direction:column;
+	position:fixed;
+	top:0;
+	right:0;
+	bottom:0;
+	width:min(640px, calc(100vw - 40px));
+	z-index:31;
+	box-sizing:border-box;
+	background-color:var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
+	border-left:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	box-shadow:-8px 0 24px var(--vscode-widget-shadow);
+	color:var(--vscode-foreground);
+	fill:var(--vscode-icon-foreground, var(--vscode-foreground));
+	font-size:13px;
+	line-height:1.4;
+	transform:translateX(calc(100% + 32px));
+	visibility:hidden;
+	-webkit-user-select:none;
+	user-select:none;
+}
+#settingsWidget.active{
+	transform:none;
+	visibility:visible;
+}
+#settingsWidget.transition{
+	transition:transform .2s ease, visibility .2s;
+}
+
+#settingsHeader{
+	display:flex;
+	align-items:center;
+	gap:10px;
+	padding:12px 14px 12px 20px;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+}
+#settingsHeader h2{
+	display:flex;
+	align-items:center;
+	gap:7px;
+	flex:1 1 auto;
+	margin:0;
+	font-size:15px;
+	font-weight:600;
+	line-height:28px;
+}
+#settingsHeader h2 svg.uiIcon{
+	width:16px !important;
+	height:16px !important;
+	opacity:0.85;
+}
+#settingsRepoName{
+	min-width:0;
+	overflow:hidden;
+	color:var(--vscode-descriptionForeground);
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+#settingsClose{
+	position:relative;
+	flex:0 0 auto;
+	width:28px;
+	height:28px;
+	border-radius:6px;
+	cursor:pointer;
+}
+#settingsClose:hover{
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+#settingsClose svg{
+	position:absolute;
+	left:6px;
+	top:6px;
+	width:16px !important;
+	height:16px !important;
+	opacity:0.8;
+}
+
+#settingsContent{
+	display:flex;
+	flex-direction:column;
+	flex:1 1 auto;
+	gap:22px;
+	min-height:0;
+	padding:18px 20px 20px;
+	overflow-x:hidden;
+	overflow-y:auto;
+}
+#settingsWidget.loading #settingsContent{
+	opacity:0.2;
+}
+#settingsFooter{
+	display:flex;
+	align-items:center;
+	justify-content:space-between;
+	gap:10px;
+	padding:12px 20px;
+	border-top:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+}
+#settingsFooter:empty{
+	display:none;
+}
+
+.settingsSection{
+	display:flex;
+	flex-direction:column;
+	gap:10px;
+}
+.settingsSection h3{
+	display:flex;
+	align-items:center;
+	gap:6px;
+	margin:0;
+	color:var(--vscode-descriptionForeground);
+	font-size:12px;
+	font-weight:700;
+	letter-spacing:0.04em;
+}
+.settingsSection h3 svg.uiIcon{
+	width:13px !important;
+	height:13px !important;
+	opacity:0.85;
+}
+.settingsLabel{
+	font-weight:600;
+}
+
+.settingsPresets{
+	display:grid;
+	grid-template-columns:repeat(3, minmax(0, 1fr));
+	gap:8px;
+}
+.settingsPreset{
+	display:flex;
+	flex-direction:column;
+	align-items:flex-start;
+	gap:8px;
+	min-width:0;
+	padding:10px 12px;
+	border:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	border-radius:8px;
+	background-color:var(--vscode-editor-background);
+	color:inherit;
+	font:inherit;
+	text-align:left;
+	cursor:pointer;
+}
+.settingsPreset:hover{
+	border-color:var(--vscode-focusBorder);
+}
+.settingsPreset.selected{
+	padding:9px 11px;
+	border:2px solid var(--vscode-focusBorder);
+	background-color:color-mix(in srgb, var(--vscode-focusBorder) 18%, var(--vscode-editor-background));
+}
+.settingsPresetColours{
+	display:flex;
+	gap:4px;
+}
+.settingsPresetColours span{
+	width:14px;
+	height:14px;
+	border-radius:50%;
+}
+.settingsPresetName{
+	font-size:12.5px;
+	font-weight:500;
+}
+.settingsPreset.selected .settingsPresetName{
+	font-weight:700;
+}
+
+.settingsRow{
+	display:flex;
+	flex-wrap:wrap;
+	align-items:center;
+	gap:12px;
+	padding-top:2px;
+}
+.settingsRow .settingsLabel{
+	width:96px;
+}
+.settingsSegmented{
+	display:inline-flex;
+	padding:2px;
+	border:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	border-radius:7px;
+	background-color:var(--vscode-editor-background);
+}
+.settingsSegment{
+	height:26px;
+	padding:0 12px;
+	border:0;
+	border-radius:5px;
+	background-color:transparent;
+	color:var(--vscode-descriptionForeground);
+	font:inherit;
+	cursor:pointer;
+}
+.settingsSegment:hover{
+	color:var(--vscode-foreground);
+}
+.settingsSegment.selected{
+	background-color:var(--vscode-button-secondaryBackground, rgba(128,128,128,0.25));
+	color:var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+}
+
+.settingsChoices{
+	display:flex;
+	flex-wrap:wrap;
+	gap:8px;
+}
+.settingsChoice{
+	display:inline-flex;
+	align-items:center;
+	gap:8px;
+	height:32px;
+	padding:0 12px;
+	border:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	border-radius:8px;
+	cursor:pointer;
+}
+.settingsChoice:hover{
+	border-color:var(--vscode-focusBorder);
+}
+.settingsChoice.selected{
+	border-color:var(--vscode-focusBorder);
+	background-color:color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
+}
+.settingsChoice .customRadio{
+	margin:0;
+}
+
+.settingsStatusBarPreview{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	height:22px;
+	padding:0 8px;
+	border-radius:4px;
+	background-color:var(--vscode-statusBar-background, #007acc);
+	color:var(--vscode-statusBar-foreground, #ffffff);
+	fill:var(--vscode-statusBar-foreground, #ffffff);
+	font-size:12px;
+}
+
+.settingsCheckboxes{
+	display:grid;
+	grid-template-columns:repeat(3, minmax(0, 1fr));
+	gap:8px 12px;
+}
+.settingsCheckboxes.two{
+	grid-template-columns:repeat(2, minmax(0, 1fr));
+}
+.settingsCheckboxes > span.wide{
+	grid-column:1 / -1;
+}
+.settingsCheckboxes label{
+	cursor:pointer;
+}
+.settingsSection .customCheckbox{
+	margin-right:8px;
+}
+.settingsSection label > input[type=checkbox]:checked ~ .customCheckbox:after{
+	border-color:var(--vscode-button-foreground, var(--vscode-foreground));
+}
+.settingsSection label > input[type=radio]:checked ~ .customRadio:after{
+	background-color:var(--vscode-button-background, var(--vscode-focusBorder));
+}
+
+.settingsCard{
+	display:flex;
+	flex-direction:column;
+	gap:8px;
+	padding:12px;
+	border:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	border-radius:8px;
+	background-color:var(--vscode-editor-background);
+}
+.settingsCardHeader{
+	display:flex;
+	align-items:center;
+	justify-content:space-between;
+	gap:8px;
+	min-height:26px;
+}
+.settingsCardHeader h4{
+	display:flex;
+	align-items:center;
+	gap:6px;
+	margin:0;
+	font-size:13px;
+	font-weight:600;
+}
+.settingsCardHeader h4 svg.uiIcon{
+	width:14px !important;
+	height:14px !important;
+	opacity:0.85;
+}
+.settingsCardButtons{
+	display:inline-flex;
+	gap:6px;
+}
+.settingsBtn{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	height:26px;
+	padding:0 10px;
+	border:1px solid var(--vscode-button-border, rgba(128,128,128,0.35));
+	border-radius:6px;
+	background-color:var(--vscode-button-secondaryBackground, rgba(128,128,128,0.1));
+	color:var(--vscode-button-secondaryForeground, inherit);
+	fill:currentColor;
+	font:inherit;
+	font-size:12.5px;
+	cursor:pointer;
+}
+.settingsBtn:hover{
+	background-color:var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.2));
+}
+.settingsBtn svg{
+	width:14px !important;
+	height:14px !important;
+}
+.settingsLink{
+	color:var(--vscode-textLink-foreground);
+	font-size:12.5px;
+	text-decoration:underline;
+	cursor:pointer;
+}
+.settingsLink:hover{
+	color:var(--vscode-textLink-activeForeground);
+}
+
+.settingsGrid{
+	display:grid;
+	grid-template-columns:max-content minmax(0, 1fr) auto;
+	align-items:center;
+	gap:4px 12px;
+	font-size:12.5px;
+}
+.settingsGrid.two{
+	grid-template-columns:max-content minmax(0, 1fr);
+}
+.settingsGrid.settingsAiGrid{
+	gap:8px 12px;
+}
+.settingsSelect, .settingsInput{
+	box-sizing:border-box;
+	width:100%;
+	min-width:0;
+	height:28px;
+	padding:0 8px;
+	border:1px solid var(--vscode-input-border, var(--vscode-panel-border, rgba(128,128,128,0.35)));
+	border-radius:6px;
+	background-color:var(--vscode-input-background, var(--vscode-editor-background));
+	color:var(--vscode-input-foreground, var(--vscode-foreground));
+	font:inherit;
+	font-size:12.5px;
+	outline:none;
+}
+.settingsInput{
+	-webkit-user-select:text;
+	user-select:text;
+}
+.settingsInput.mono{
+	font-family:var(--vscode-editor-font-family);
+	font-size:12px;
+}
+.settingsInput::placeholder{
+	color:var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
+}
+.settingsSelect:focus, .settingsInput:focus{
+	border-color:var(--vscode-focusBorder);
+}
+.settingsAiKeyStatus.ok{
+	color:var(--vscode-testing-iconPassed, #3fb950);
+}
+.settingsAiKeyStatus.missing{
+	color:var(--vscode-editorWarning-foreground, #d29922);
+}
+.settingsAiKeyStatus.optional{
+	color:var(--vscode-descriptionForeground);
+}
+.settingsKey{
+	color:var(--vscode-descriptionForeground);
+	white-space:nowrap;
+}
+.settingsValue{
+	min-width:0;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+	-webkit-user-select:text;
+	user-select:text;
+}
+.settingsValue.mono{
+	font-family:var(--vscode-editor-font-family);
+	font-size:12px;
+}
+.settingsDescription{
+	margin:0;
+	color:var(--vscode-descriptionForeground);
+	font-size:12.5px;
+}
+
+.settingsCard .btns{
+	display:inline-flex;
+	gap:2px;
+}
+.settingsCard .btns div{
+	position:relative;
+	width:22px;
+	height:22px;
+	border-radius:4px;
+	cursor:pointer;
+}
+.settingsCard .btns div:hover{
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+.settingsCard .btns div svg{
+	position:absolute;
+	left:4px;
+	top:4px;
+	width:14px !important;
+	height:14px !important;
+	opacity:0.8;
+}
+
+.settingsRemote{
+	display:grid;
+	grid-template-columns:max-content minmax(0, 1fr) auto;
+	align-items:center;
+	gap:4px 12px;
+	font-size:12.5px;
+}
+.settingsRemote + .settingsRemote{
+	padding-top:6px;
+	border-top:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+}
+.settingsRemoteName{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+}
+.settingsRemoteUrls{
+	display:flex;
+	flex-direction:column;
+	min-width:0;
+}
+.settingsOptions{
+	display:flex;
+	flex-direction:column;
+	gap:6px;
+	padding-top:4px;
+	font-size:12.5px;
+}
+.settingsOptions label{
+	cursor:pointer;
+}
+.settingsSection label > input[type=checkbox]:checked ~ .customCheckbox, .settingsSection label > input[type=radio]:checked ~ .customRadio{
+	border-color:var(--vscode-button-background, var(--vscode-focusBorder));
+}
+.settingsSection label > input[type=checkbox]:checked ~ .customCheckbox{
+	background-color:var(--vscode-button-background, var(--vscode-focusBorder));
+}
+.settingsSection .hideRemoteBtn{
+	position:relative;
+	display:inline-block;
+	width:13px;
+	height:13px;
+	cursor:pointer;
+}
+.settingsSection .hideRemoteBtn svg{
+	position:absolute;
+	top:0;
+	left:0;
+}
+
+#settingsLoading{
+	display:none;
+	position:absolute;
+	top:50%;
+	left:0;
+	right:0;
+	z-index:32;
+	line-height:24px;
+	text-align:center;
+}
+#settingsWidget.loading #settingsLoading{
+	display:block;
+}
+#settingsLoading svg{
+	display:inline-block;
+	width:15px !important;
+	height:20px !important;
+	margin-top:2px;
+	margin-right:8px;
+	vertical-align:top;
+	animation:loadingIconAnimation 2s linear infinite;
+}
+
+#settingsWidget .settingsWidgetInfo{
+	cursor:help;
+}
+#settingsWidget .settingsWidgetInfo > svg{
+	width:15px !important;
+	height:15px !important;
+	margin-top:-2px;
+	margin-left:5px;
+	vertical-align:middle;
+	opacity:0.7;
+}
+#settingsWidget:not(.active){
+	box-shadow:none;
+}

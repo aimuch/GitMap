@@ -1,0 +1,106 @@
+.contextMenu{
+	display:block;
+	position:absolute;
+	background-color:var(--vscode-menu-background);
+	border:1px solid var(--vscode-menu-border, rgba(128,128,128,0.25));
+	border-radius:8px;
+	box-shadow:0 8px 24px var(--vscode-widget-shadow);
+	color:var(--vscode-menu-foreground);
+	list-style-type:none;
+	margin:0;
+	padding:4px;
+	z-index:10;
+	-webkit-user-select:none;
+	user-select:none;
+}
+body.vscode-high-contrast .contextMenu{
+	outline:1px solid var(--vscode-menu-border, transparent);
+	outline-offset:-1px;
+}
+
+.contextMenu li{
+	cursor:default;
+	-webkit-user-select:none;
+	user-select:none;
+}
+
+.contextMenu li.contextMenuItem{
+	display:flex;
+	align-items:center;
+	gap:9px;
+	padding:5px 12px;
+	border-radius:5px;
+	white-space:nowrap;
+}
+.contextMenuItemIcon{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	flex:0 0 15px;
+	width:15px;
+	height:15px;
+	opacity:0.82;
+}
+.contextMenuItemIcon svg{
+	width:14px !important;
+	height:14px !important;
+	stroke:currentColor;
+}
+.contextMenuItemIcon svg:not([fill="none"]){
+	fill:currentColor;
+	stroke:none;
+}
+.contextMenu li.contextMenuItem:hover .contextMenuItemIcon{
+	opacity:1;
+}
+.contextMenuItemLabel{
+	flex:1 1 auto;
+}
+.contextMenuItemShortcut{
+	flex:0 0 auto;
+	margin-left:auto;
+	padding-left:20px;
+	font-size:11.5px;
+	opacity:0.65;
+}
+
+.contextMenu li.contextMenuItem:hover{
+	background-color:var(--vscode-menu-selectionBackground, var(--vscode-menu-background));
+	color:var(--vscode-menu-selectionForeground, var(--vscode-menu-foreground));
+}
+body.vscode-high-contrast .contextMenu li.contextMenuItem:hover{
+	outline:1px solid var(--vscode-menu-selectionBorder, transparent);
+	outline-offset:-2px;
+}
+
+.contextMenu li.contextMenuDivider{
+	margin:4px 6px;
+	border-top:1px solid var(--vscode-menu-separatorBackground);
+	opacity:0.5;
+}
+
+.contextMenu.checked li.contextMenuItem{
+	position:relative;
+	padding-left:30px;
+}
+
+.contextMenu.checked li.contextMenuItem .contextMenuItemCheck{
+	position:absolute;
+	width:12px;
+	height:16px;
+	top:50%;
+	margin-top:-8px;
+	left:10px;
+	-webkit-user-select:none;
+	user-select:none;
+}
+
+.contextMenu.checked li.contextMenuItem .contextMenuItemCheck svg{
+	fill:var(--vscode-menu-foreground);
+	opacity:0.6;
+}
+
+.contextMenu.checked li.contextMenuItem:hover .contextMenuItemCheck svg{
+	fill:var(--vscode-menu-selectionForeground);
+	opacity:0.8;
+}

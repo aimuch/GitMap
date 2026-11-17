@@ -1,0 +1,3847 @@
+/* Body */
+
+body{
+	display:block;
+	position:fixed;
+	top:0;
+	left:0;
+	right:0;
+	bottom:0;
+	margin:0;
+	padding:0;
+}
+body.unableToLoad{
+	margin:0 20px;
+}
+body.unableToLoad h2, body.unableToLoad h3, body.unableToLoad p{
+	text-align:center;
+}
+
+body #view{
+	display:block;
+	position:fixed;
+	top:0;
+	left:0;
+	right:0;
+	bottom:0;
+	background-color:var(--vscode-editor-background);
+	overflow-x:hidden;
+	overflow-y:auto;
+}
+body #view:focus{
+	outline:none;
+}
+
+body.selection-background-color-exists ::-moz-selection{
+	background-color: var(--vscode-selection-background);
+}
+body.selection-background-color-exists ::selection{
+	background-color: var(--vscode-selection-background);
+}
+
+code{
+	line-height:1;
+}
+
+
+/* Content */
+
+#content{
+	position:relative;
+}
+
+
+/* Overlays */
+
+#eventCaptureElem{
+	display:block;
+	position:fixed;
+	left:0;
+	right:0;
+	top:0;
+	bottom:0;
+	z-index:40;
+}
+#eventCaptureElem.rowResize{
+	cursor:row-resize;
+}
+#eventCaptureElem.colResize{
+	cursor:col-resize;
+}
+#eventCaptureElem.grabbing{
+	cursor:grabbing;
+}
+
+/* The shadow cast on the commits scrolled below the sticky controls (as on the lists of Visual Studio Code) */
+#scrollShadow.active{
+	position:fixed;
+	top:var(--git-graph-headerHeight, 0px);
+	left:0;
+	right:0;
+	height:6px;
+	box-shadow:var(--vscode-scrollbar-shadow) 0 6px 6px -6px inset;
+	pointer-events:none;
+	z-index:20;
+}
+/* The shadow is below the column headers when they are frozen */
+body.freezeColumnHeaders #scrollShadow.active{
+	top:calc(var(--git-graph-headerHeight, 0px) + var(--git-graph-colHeadersHeight, 0px));
+}
+
+
+/* Commit Graph */
+
+#commitGraph{
+	display:block;
+	position:absolute;
+	left:0;
+	top:0;
+	z-index:2;
+	pointer-events:none;
+}
+#commitGraph circle{
+	pointer-events:all;
+}
+#commitGraph circle.current{
+	fill:var(--vscode-editor-background);
+	stroke-width:2;
+}
+#commitGraph circle:not(.current){
+	stroke:var(--vscode-editor-background);
+	stroke-width:1;
+	stroke-opacity:0.75;
+}
+#commitGraph circle.avatar{
+	stroke-width:2;
+	stroke-opacity:1;
+}
+#commitGraph circle.avatar.current{
+	stroke-width:3;
+}
+#commitGraph text.avatarInitial{
+	fill:#ffffff;
+	font-family:var(--vscode-font-family);
+	font-size:9.5px;
+	font-weight:700;
+	text-anchor:middle;
+	dominant-baseline:central;
+	pointer-events:none;
+}
+#commitGraph svg.branchHighlight text[data-branch]:not(.highlight){
+	opacity:0.25;
+}
+/* The avatar of the author, inside the circle of the commit (the circle of the commit receives the mouse events) */
+#commitGraph circle.avatarImage{
+	stroke:none;
+	pointer-events:none;
+}
+#commitGraph circle.stashInner{
+	stroke-opacity:1;
+	pointer-events:none;
+	fill:transparent;
+}
+#commitGraph path.shadow{
+	fill:none;
+	stroke:var(--vscode-editor-background);
+	stroke-opacity:0.75;
+	stroke-width:4;
+}
+#commitGraph path.line{
+	fill:none;
+	stroke-width:2;
+}
+#commitGraph path.line, #commitGraph circle{
+	transition:opacity .15s ease;
+}
+#commitGraph svg.branchHighlight path.line:not(.highlight), #commitGraph svg.branchHighlight circle[data-branch]:not(.highlight){
+	opacity:0.25;
+}
+#commitGraph svg.branchHighlight path.line.highlight{
+	stroke-width:2.5;
+}
+
+#titleTooltip{
+	position:fixed;
+	max-width:500px;
+	padding:3px 8px;
+	background-color:var(--vscode-editorHoverWidget-background);
+	border:1px solid var(--vscode-editorHoverWidget-border);
+	border-radius:3px;
+	box-shadow:0 2px 8px var(--vscode-widget-shadow);
+	color:var(--vscode-editorHoverWidget-foreground);
+	font-size:12px;
+	line-height:18px;
+	white-space:pre-wrap;
+	word-wrap:break-word;
+	pointer-events:none;
+	z-index:100;
+}
+
+#graphTooltip{
+	display:block;
+	position:absolute;
+	pointer-events:none;
+}
+#graphTooltipPointer{
+	position:absolute;
+	display:block;
+	width:30px;
+	height:2px;
+	left:4px;
+	top:0;
+	margin-top:-1px;
+	z-index:4;
+}
+#graphTooltipContent{
+	position:relative;
+	left:23px;
+	top:0;
+	background-color:var(--vscode-menu-background);
+	border-width:2px;
+	border-style:solid;
+	border-radius:5px;
+	color:var(--vscode-menu-foreground);
+	font-size:13px;
+	line-height:22px;
+	white-space:normal;
+	z-index:5;
+}
+#graphTooltipShadow{
+	position:absolute;
+	left:23px;
+	top:0;
+	border-radius:5px;
+	box-shadow:0 0 30px 5px var(--vscode-widget-shadow);
+	z-index:3;
+}
+
+.graphTooltipTitle, .graphTooltipSection{
+	padding:3px 10px;
+}
+.graphTooltipTitle{
+	text-align:center;
+	font-weight:700;
+}
+.graphTooltipSection{
+	border-top:1px solid rgba(128,128,128,0.5);
+}
+.graphTooltipRef, .graphTooltipCombinedRef{
+	display:inline-block;
+	height:18px;
+	line-height:18px;
+}
+.graphTooltipRef{
+	margin:2px;
+	padding:0 5px;
+	background-color:rgba(128,128,128,0.15);
+	border-radius:5px;
+	border:1px solid rgba(128,128,128,0.75);
+	vertical-align:top;
+	font-size:12px;
+	cursor:default;
+}
+.graphTooltipCombinedRef{
+	margin-left:5px;
+	padding-left:5px;
+	border-left:1px solid rgba(128,128,128,0.45);
+	font-style:italic;
+}
+
+
+/* Commit Table */
+
+#commitTable{
+	z-index:1;
+}
+#commitTable table{
+	width:100%;
+	border-collapse:collapse;
+}
+#commitTable table, #commitTable tbody, #commitTable tr, #commitTable th, #commitTable td{
+	white-space:nowrap;
+	font-size:13px;
+	cursor:default;
+	text-overflow:ellipsis;
+}
+/* Only the cells clip their contents, as the column headers can't be frozen (sticky) inside an element that clips */
+#commitTable th, #commitTable td{
+	overflow:hidden;
+}
+/* The height of the rows of commits (the git-map.graph.density Extension Setting) */
+body{
+	--git-graph-rowHeight:32px;
+}
+body.compactRows{
+	--git-graph-rowHeight:24px;
+}
+#commitTable td{
+	line-height:var(--git-graph-rowHeight);
+	padding:0 6px;
+}
+#commitTable th{
+	position:relative;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	line-height:18px;
+	padding:6px 12px;
+	color:var(--vscode-descriptionForeground);
+	font-size:12px;
+	font-weight:600;
+	text-align:left;
+}
+/* The column headers stay visible below the controls (the git-map.graph.freezeColumnHeaders Extension Setting). They are above the
+   graph, and their bottom border is drawn as a shadow, as the borders of a table with collapsed borders don't move with sticky cells. */
+body.freezeColumnHeaders #commitTable th{
+	position:sticky;
+	top:var(--git-graph-headerHeight, 0px);
+	z-index:4;
+	background-color:var(--vscode-editor-background);
+	border-bottom-color:transparent;
+	box-shadow:inset 0 -1px 0 var(--vscode-panel-border, rgba(128,128,128,0.35));
+}
+/* The footer stays visible at the bottom of the view (the git-map.graph.freezeFooter Extension Setting) */
+body.freezeFooter #footer{
+	position:sticky;
+	bottom:0;
+	z-index:4;
+	background-color:var(--vscode-editor-background);
+}
+#commitTable td.dateCol{
+	color:var(--vscode-descriptionForeground);
+}
+#commitTable td.hashCol{
+	color:var(--vscode-descriptionForeground);
+	font-family:var(--vscode-editor-font-family);
+	font-size:12px;
+}
+#commitTable tr.commit td{
+	cursor:pointer;
+}
+
+#commitTable tr.commit.current span.description .text{
+	font-weight:bold;
+}
+
+#commitTable tr.commit span.description{
+	display:flex;
+}
+#commitTable tr.commit span.description .commitHeadDot, #commitTable tr.commit td span.description .gitRef{
+	flex-shrink:0;
+}
+#commitTable tr.commit span.description .text{
+	display:inline-block;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+	overflow:hidden;
+	flex-grow:1;
+}
+
+#commitTable tr.commit.mute td.text, #commitTable tr.commit.mute span.description .text{
+	opacity:0.5;
+}
+
+#commitTable.fixedLayout table{
+	table-layout:fixed;
+}
+#commitTable.autoLayout.limitGraphWidth td.graphCol, #commitTable.autoLayout.limitGraphWidth th.graphCol{
+	max-width:var(--limitGraphWidth);
+	box-sizing:border-box;
+}
+#commitTable.autoLayout td.descriptionCol, #commitTable.autoLayout th.descriptionCol{
+	width:100%;
+	max-width:0;
+}
+#commitTable.autoLayout td.authorCol, #commitTable.autoLayout th.authorCol{
+	max-width:124px;
+}
+@media screen and (min-width: 775px) and (max-width: 850px) {
+	#commitTable.autoLayout td.dateCol, #commitTable.autoLayout th.dateCol, #commitTable.autoLayout td.authorCol, #commitTable.autoLayout th.authorCol{
+		max-width:100px;
+	}
+}
+@media screen and (min-width: 700px) and (max-width: 775px) {
+	#commitTable.autoLayout td.dateCol, #commitTable.autoLayout th.dateCol, #commitTable.autoLayout td.authorCol, #commitTable.autoLayout th.authorCol{
+		max-width:90px;
+	}
+}
+@media screen and (max-width: 700px) {
+	#commitTable.autoLayout td.dateCol, #commitTable.autoLayout th.dateCol, #commitTable.autoLayout td.authorCol, #commitTable.autoLayout th.authorCol{
+		max-width:80px;
+	}
+}
+
+.resizeCol{
+	position:absolute;
+	top:0;
+	height:100%;
+	display:block;
+	width:6px;
+	cursor:col-resize;
+}
+.resizeCol.left{
+	left:0;
+	border-left:1px solid rgba(128,128,128,0.25);
+}
+.resizeCol.right{
+	right:0;
+}
+
+
+/* Commit Details View */
+
+#cdv.inline{
+	vertical-align:top;
+}
+#cdv.inline td{
+	background-color:rgba(128,128,128,0.1);
+	position:relative;
+	font-size:13px;
+	line-height:18px;
+	white-space:normal;
+}
+#cdv.docked{
+	display:block;
+	position:fixed;
+	left:0;
+	right:0;
+	bottom:0;
+	background-color:rgba(128,128,128,0.1);
+	font-size:13px;
+	line-height:18px;
+	white-space:normal;
+	cursor:default;
+}
+#cdvContent{
+	position:absolute;
+	left:0;
+	right:32px;
+}
+
+#cdvControls{
+	position:absolute;
+	right:0;
+	width:32px;
+}
+
+.cdvControlBtn{
+	position:relative;
+	margin:4px;
+	width:24px;
+	height:24px;
+	cursor:pointer;
+}
+.cdvControlBtn.active{
+	background-color:rgba(128,128,128,0.25);
+}
+.cdvControlBtn.active:hover{
+	background-color:rgba(128,128,128,0.35);
+}
+
+#cdvCodeReview, #cdvHideUnchanged{
+	border-radius:4px;
+}
+.cdvControlBtn svg.uiIcon{
+	width:15px !important;
+	height:15px !important;
+	left:4.5px;
+	top:4.5px;
+	opacity:0.7;
+}
+.cdvControlBtn:hover svg.uiIcon, .cdvControlBtn.active svg.uiIcon{
+	opacity:1;
+}
+.cdvControlBtn.active#cdvHideUnchanged{
+	color:var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+	box-shadow:inset 0 0 0 1px var(--vscode-focusBorder);
+}
+
+#cdvFileViewTypeTree{
+	border-radius:4px 4px 0 0;
+	margin-bottom:0;
+}
+#cdvFileViewTypeList{
+	border-radius:0 0 4px 4px;
+	margin-top:0;
+}
+.cdvFileViewTypeBtn{
+	background-color:rgba(128,128,128,0.125);
+}
+
+#cdvExternalDiff{
+	display:none;
+}
+#cdvExternalDiff.enabled{
+	display:block;
+}
+
+.cdvControlBtn svg{
+	position:absolute;
+	width:20px;
+	height:20px;
+	left:2px;
+	top:2px;
+	fill:var(--vscode-editor-foreground);
+	fill-opacity:0.6;
+}
+.cdvControlBtn:hover svg, .cdvControlBtn.active svg{
+	fill-opacity:0.75;
+}
+.cdvControlBtn.active:hover svg{
+	fill-opacity:0.9;
+}
+
+#cdvSummary, #cdvFiles, #cdvLoading{
+	position:absolute;
+	top:0;
+	bottom:0;
+	box-sizing:border-box;
+	border-right:1px solid rgba(128,128,128,0.2);
+	overflow-x:hidden;
+	overflow-y:auto;
+}
+#cdvDivider{
+	position:absolute;
+	left:50%;
+	width:6px;
+	cursor:col-resize;
+}
+#cdvSummary{
+	left:0;
+	width:50%;
+	padding:10px;
+	text-overflow:ellipsis;
+	-webkit-user-select:text;
+	user-select:text;
+}
+
+.cdvSummaryHeader{
+	display:flex;
+	align-items:center;
+	gap:10px;
+	margin-bottom:10px;
+}
+.cdvSummaryHeader .authorInitial{
+	flex:0 0 auto;
+	width:32px;
+	height:32px;
+	margin:0;
+	font-size:14px;
+	line-height:32px;
+}
+.cdvSummaryAvatar{
+	flex:0 0 auto;
+	width:32px;
+	height:32px;
+}
+.cdvSummaryAvatar > img{
+	width:32px;
+	height:32px;
+	border-radius:50%;
+}
+.cdvSummaryHeaderText{
+	display:flex;
+	flex-direction:column;
+	min-width:0;
+}
+.cdvSummaryAuthor{
+	font-weight:600;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+.cdvSummaryDate{
+	color:var(--vscode-descriptionForeground);
+	font-size:12px;
+}
+.cdvSummarySubject{
+	font-size:14px;
+	font-weight:600;
+	line-height:20px;
+	word-wrap:break-word;
+}
+.cdvSummaryBody{
+	margin-top:6px;
+	color:var(--vscode-descriptionForeground);
+	word-wrap:break-word;
+}
+.cdvSummaryDetails{
+	display:grid;
+	grid-template-columns:max-content minmax(0, 1fr);
+	gap:4px 10px;
+	margin-top:12px;
+	padding-top:10px;
+	border-top:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+	font-size:12.5px;
+}
+.cdvSummaryKey{
+	color:var(--vscode-descriptionForeground);
+	white-space:nowrap;
+}
+.cdvSummaryValue{
+	overflow:hidden;
+	text-overflow:ellipsis;
+	word-wrap:break-word;
+}
+.cdvSummaryHash{
+	font-family:var(--vscode-editor-font-family);
+	font-size:12px;
+}
+#cdvActions{
+	display:flex;
+	flex-wrap:wrap;
+	gap:6px;
+	margin-top:12px;
+}
+#cdvActions:empty{
+	display:none;
+}
+.cdvActionBtn{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	height:26px;
+	padding:0 12px;
+	border:1px solid var(--vscode-button-border, rgba(128,128,128,0.35));
+	border-radius:6px;
+	background-color:var(--vscode-button-secondaryBackground, rgba(128,128,128,0.1));
+	color:var(--vscode-button-secondaryForeground, inherit);
+	font-family:inherit;
+	font-size:12.5px;
+	cursor:pointer;
+}
+.cdvActionBtn svg{
+	flex:0 0 auto;
+	width:13px !important;
+	height:13px !important;
+	stroke:currentColor;
+}
+.cdvActionBtn svg:not([fill="none"]){
+	fill:currentColor;
+	stroke:none;
+}
+.cdvActionBtn:hover{
+	background-color:var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.2));
+}
+.cdvActionBtn.primary{
+	border-color:transparent;
+	background-color:var(--vscode-button-background, rgba(128,128,128,0.2));
+	color:var(--vscode-button-foreground, inherit);
+}
+.cdvActionBtn.primary:hover{
+	background-color:var(--vscode-button-hoverBackground, rgba(128,128,128,0.3));
+}
+.cdvActionBtn:focus-visible{
+	outline:2px solid var(--vscode-focusBorder);
+	outline-offset:1px;
+}
+
+.signatureInfo{
+	cursor:help;
+	margin-left:4px;
+	vertical-align:middle;
+	line-height:13px;
+}
+.signatureInfo svg{
+	vertical-align:0 !important;
+}
+.signatureInfo.G svg, .signatureInfo.X svg{
+	fill:#009028;
+	opacity:0.9;
+}
+.signatureInfo.U svg, .signatureInfo.Y svg, .signatureInfo.R svg, .signatureInfo.E svg{
+	fill:#f09000;
+	opacity:1;
+}
+.signatureInfo.B svg{
+	fill:#e00000;
+	opacity:0.8;
+}
+
+#cdvFiles{
+	left:50%;
+	right:0;
+	padding:4px 8px 8px 0;
+	-webkit-user-select:none;
+	user-select:none;
+}
+#cdvFiles ul{
+	list-style-type:none;
+	-webkit-margin-before:0;
+	-webkit-margin-after:0;
+	-webkit-margin-start:0px;
+	-webkit-margin-end:0px;
+	-webkit-padding-start:25px;
+	margin:0;
+	padding:0 0 0 25px;
+}
+#cdvFiles > ul, #cdvFileView > ul{
+	-webkit-padding-start:4px;
+	padding:0 0 0 4px;
+}
+#cdvFiles li{
+	margin-top:1px;
+	white-space:nowrap;
+	text-overflow:ellipsis;
+	overflow-x:hidden;
+}
+
+#cdvLoading{
+	left:0;
+	right:0;
+	padding:10px;
+	-webkit-user-select:none;
+	user-select:none;
+	text-align:center;
+	line-height:24px;
+	text-overflow:ellipsis;
+}
+#cdvLoading svg{
+	display:inline-block;
+	width:15px !important;
+	height:20px !important;
+	margin-top:2px;
+	margin-right:8px;
+	vertical-align:top;
+	fill:var(--vscode-editor-foreground);
+	animation:loadingIconAnimation 2s linear infinite;
+}
+
+.cdvHeightResize{
+	position:absolute;
+	left:0;
+	right:0;
+	height:6px;
+	cursor:row-resize;
+}
+
+#cdv.inline #cdvContent, #cdv.inline #cdvControls{
+	top:0;
+	bottom:2px;
+}
+#cdv.inline #cdvContent{
+	border-left:1px solid rgba(128,128,128,0.2);
+}
+#cdv.inline #cdvDivider{
+	top:0;
+	bottom:6px;
+}
+#cdv.inline .cdvHeightResize{
+	bottom:0;
+	border-bottom:2px solid rgba(128,128,128,0.2);
+}
+
+#cdv.docked #cdvContent, #cdv.docked #cdvControls{
+	top:2px;
+	bottom:0;
+}
+#cdv.docked #cdvDivider{
+	top:6px;
+	bottom:0;
+}
+#cdv.docked .cdvHeightResize{
+	top:0;
+	border-top:2px solid rgba(128,128,128,0.2);
+}
+
+#cdv.docked.right{
+	top:0;
+	left:auto;
+	box-sizing:border-box;
+	border-left:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	background-color:var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+#cdv.docked.right #cdvContent{
+	top:36px;
+	bottom:0;
+	left:6px;
+	right:0;
+	overflow-x:hidden;
+	overflow-y:auto;
+}
+/* The summary & files are one column, which is scrolled as a whole (with the tabs of the files sticky) */
+#cdv.docked.right #cdvSummary, #cdv.docked.right #cdvFiles{
+	position:static;
+	width:auto !important;
+	height:auto !important;
+	border-right:none;
+	overflow:visible;
+}
+#cdv.docked.right #cdvSummary{
+	padding:14px 16px 14px 10px;
+}
+#cdv.docked.right #cdvFiles{
+	padding:0;
+}
+#cdv.docked.right #cdvDivider{
+	display:none;
+}
+#cdv.docked.right #cdvLoading{
+	padding-top:16px;
+}
+
+/* Commit Details View (docked to the right): Header */
+#cdvHeader{
+	position:absolute;
+	top:0;
+	left:6px;
+	right:0;
+	height:36px;
+	box-sizing:border-box;
+	display:flex;
+	align-items:center;
+	gap:2px;
+	padding:0 8px 0 10px;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+	color:var(--vscode-descriptionForeground);
+	font-size:12px;
+	-webkit-user-select:none;
+	user-select:none;
+}
+.cdvHeaderTitle{
+	flex:1 1 auto;
+	min-width:0;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+#cdvHeader .cdvControlBtn, #cdvTabs .cdvControlBtn{
+	flex:0 0 auto;
+	margin:0;
+	width:26px;
+	height:26px;
+	border-radius:6px;
+	background-color:transparent;
+}
+#cdvHeader .cdvControlBtn:hover, #cdvTabs .cdvControlBtn:hover{
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+#cdvHeader .cdvControlBtn.active, #cdvTabs .cdvControlBtn.active{
+	background-color:rgba(128,128,128,0.25);
+}
+#cdvHeader .cdvControlBtn svg, #cdvTabs .cdvControlBtn svg{
+	width:14px;
+	height:14px;
+	left:6px;
+	top:6px;
+}
+#cdvHeader #cdvExternalDiff{
+	display:none;
+}
+#cdvHeader #cdvExternalDiff.enabled{
+	display:block;
+}
+
+/* Commit Details View (docked to the right): Summary */
+.cdvAuthor{
+	display:flex;
+	align-items:center;
+	gap:12px;
+	margin-bottom:12px;
+}
+.cdvAuthor .authorInitial{
+	flex:0 0 auto;
+	width:36px;
+	height:36px;
+	margin:0;
+	font-size:15px;
+	line-height:36px;
+}
+.cdvAuthor .cdvSummaryAvatar, .cdvAuthor .cdvSummaryAvatar > img{
+	width:36px;
+	height:36px;
+}
+.cdvAuthorText{
+	flex:1 1 auto;
+	min-width:0;
+	display:flex;
+	flex-direction:column;
+	gap:2px;
+}
+.cdvAuthorText > span{
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+.cdvAuthorText > span + span{
+	font-size:12px;
+}
+.cdvMuted{
+	color:var(--vscode-descriptionForeground);
+}
+.cdvChips{
+	display:flex;
+	flex-wrap:wrap;
+	align-items:center;
+	gap:6px;
+	margin-bottom:12px;
+}
+.cdvChip{
+	display:inline-flex;
+	align-items:center;
+	gap:5px;
+	height:24px;
+	padding:0 9px;
+	box-sizing:border-box;
+	border:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.35));
+	border-radius:12px;
+	background-color:var(--vscode-button-secondaryBackground, rgba(128,128,128,0.15));
+	color:var(--vscode-foreground);
+	font-family:inherit;
+	font-size:12px;
+	cursor:pointer;
+}
+.cdvChip:hover{
+	background-color:var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.25));
+}
+.cdvChip.active{
+	border-color:var(--vscode-focusBorder);
+	color:var(--vscode-textLink-foreground, var(--vscode-foreground));
+}
+.cdvChip:focus-visible{
+	outline:1px solid var(--vscode-focusBorder);
+	outline-offset:1px;
+}
+.cdvChip.mono{
+	font-family:var(--vscode-editor-font-family);
+}
+.cdvChip svg{
+	flex:0 0 auto;
+	width:12px;
+	height:12px;
+	fill:currentColor;
+}
+.cdvSubject{
+	margin:0 0 6px;
+	font-size:15px;
+	font-weight:600;
+	line-height:1.4;
+	word-wrap:break-word;
+}
+.cdvBody{
+	color:var(--vscode-descriptionForeground);
+	font-size:12.5px;
+	word-wrap:break-word;
+}
+.cdvLine{
+	display:flex;
+	flex-wrap:wrap;
+	align-items:center;
+	gap:6px;
+	margin-top:10px;
+	font-size:12px;
+}
+.cdvBranch{
+	display:inline-flex;
+	align-items:center;
+	gap:4px;
+	height:20px;
+	padding:0 7px;
+	box-sizing:border-box;
+	border:1px solid var(--git-graph-color);
+	border-radius:10px;
+	background-color:color-mix(in srgb, var(--git-graph-color) 20%, transparent);
+	font-size:11.5px;
+	white-space:nowrap;
+}
+.cdvBranch svg{
+	flex:0 0 auto;
+	width:11px;
+	height:11px;
+	fill:var(--git-graph-color);
+}
+.cdvBranch svg.refIcon{
+	stroke:var(--git-graph-color);
+}
+.cdvBranch.remote{
+	border-style:dashed;
+	background-color:transparent;
+}
+.cdvSummaryText{
+	margin:0;
+	word-wrap:break-word;
+}
+.cdvStats{
+	display:flex;
+	align-items:center;
+	gap:10px;
+	margin-top:12px;
+	font-size:12.5px;
+	white-space:nowrap;
+}
+.cdvStats .fileTreeFileAdd, .cdvStats .fileTreeFileDel{
+	padding:0;
+	font-family:var(--vscode-editor-font-family);
+	cursor:default;
+}
+.cdvStats .changeBar{
+	flex:1 1 auto;
+	min-width:24px;
+}
+.changeBar{
+	display:inline-flex;
+	flex:0 0 auto;
+	height:6px;
+	border-radius:3px;
+	overflow:hidden;
+	background-color:rgba(128,128,128,0.18);
+}
+.changeBar > span{
+	flex-shrink:1;
+	flex-basis:0;
+}
+.changeBarAdd{
+	background-color:var(--vscode-gitDecoration-addedResourceForeground);
+}
+.changeBarDel{
+	background-color:var(--vscode-gitDecoration-deletedResourceForeground);
+}
+
+/* Commit Details View (docked to the right): the changes to the file whose history is shown */
+#cdvFileFocus{
+	margin-top:12px;
+}
+.cdvFileFocusFile{
+	display:flex;
+	align-items:center;
+	gap:8px;
+	font-size:12.5px;
+}
+.cdvFileFocusFile .fileTreeFileBadge, .cdvFileFocusFile .fileTypeIcon{
+	margin-right:0;
+}
+.cdvFileFocusPath{
+	min-width:0;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+	font-family:var(--vscode-editor-font-family);
+}
+.cdvFileFocusFile .fileTreeFileAdd, .cdvFileFocusFile .fileTreeFileDel{
+	flex:0 0 auto;
+	font-family:var(--vscode-editor-font-family);
+	cursor:default;
+}
+.cdvFileFocusFile .changeBar{
+	flex:1 1 auto;
+	min-width:24px;
+}
+.cdvFileFocusRenamed{
+	margin-top:6px;
+	color:var(--vscode-descriptionForeground);
+	font-size:12px;
+}
+.cdvFileFocusActions{
+	display:flex;
+	flex-wrap:wrap;
+	gap:6px;
+	margin-top:12px;
+}
+#cdvFileDiff{
+	margin-top:12px;
+	border:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	border-radius:6px;
+	overflow:hidden;
+	font-family:var(--vscode-editor-font-family);
+	font-size:12px;
+	line-height:19px;
+	-webkit-user-select:text;
+	user-select:text;
+}
+.cdvFileDiffLines{
+	overflow-x:auto;
+}
+.cdvFileDiffHunk{
+	padding:2px 10px;
+	background-color:color-mix(in srgb, var(--vscode-textLink-foreground, #3794ff) 10%, transparent);
+	color:var(--vscode-textLink-foreground, #3794ff);
+	white-space:pre;
+}
+.cdvFileDiffLine{
+	display:grid;
+	grid-template-columns:40px 40px 16px max-content;
+	white-space:pre;
+}
+.cdvFileDiffLine > span:nth-child(1), .cdvFileDiffLine > span:nth-child(2){
+	padding-right:8px;
+	text-align:right;
+	color:var(--vscode-editorLineNumber-foreground, rgba(128,128,128,0.8));
+	-webkit-user-select:none;
+	user-select:none;
+}
+.cdvFileDiffLine > span:nth-child(3){
+	-webkit-user-select:none;
+	user-select:none;
+}
+.cdvFileDiffLine > span:nth-child(4){
+	padding-right:10px;
+}
+.cdvFileDiffLine.add{
+	background-color:var(--vscode-diffEditor-insertedLineBackground, rgba(115,201,145,0.12));
+}
+.cdvFileDiffLine.add > span:nth-child(3){
+	color:var(--vscode-gitDecoration-addedResourceForeground);
+}
+.cdvFileDiffLine.del{
+	background-color:var(--vscode-diffEditor-removedLineBackground, rgba(244,135,113,0.12));
+}
+.cdvFileDiffLine.del > span:nth-child(3){
+	color:var(--vscode-gitDecoration-deletedResourceForeground);
+}
+.cdvFileDiffMore, .cdvFileDiffMessage{
+	padding:6px 10px;
+	color:var(--vscode-descriptionForeground);
+	font-family:var(--vscode-font-family);
+}
+.cdvFileDiffMore{
+	border-top:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+}
+.cdvFileDiffOpen{
+	color:var(--vscode-textLink-foreground);
+	cursor:pointer;
+}
+.cdvFileDiffOpen:hover{
+	text-decoration:underline;
+}
+
+/* Commit Details View (docked to the right): Changed Files & Commit Message tabs */
+#cdvTabs{
+	position:sticky;
+	top:0;
+	z-index:1;
+	display:flex;
+	align-items:center;
+	gap:18px;
+	padding:0 8px 0 10px;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+	background-color:var(--vscode-sideBar-background, var(--vscode-editor-background));
+	font-size:12.5px;
+}
+#cdvTabs .cdvControlBtn{
+	width:24px;
+	height:24px;
+	border-radius:4px;
+}
+#cdvTabs .cdvControlBtn + .cdvControlBtn{
+	margin-left:-16px;
+}
+#cdvTabs .cdvControlBtn svg{
+	left:5px;
+	top:5px;
+}
+.cdvTab{
+	display:inline-flex;
+	align-items:center;
+	gap:5px;
+	padding:8px 0 6px;
+	border-bottom:2px solid transparent;
+	color:var(--vscode-descriptionForeground);
+	cursor:pointer;
+	white-space:nowrap;
+}
+.cdvTab svg.uiIcon{
+	flex:0 0 auto;
+	width:13px !important;
+	height:13px !important;
+	stroke:currentColor;
+}
+.cdvTab:hover{
+	color:var(--vscode-foreground);
+}
+.cdvTab.active{
+	border-bottom-color:var(--vscode-panelTitle-activeBorder, var(--vscode-focusBorder));
+	color:var(--vscode-foreground);
+	font-weight:600;
+}
+.cdvTabsSpacer{
+	flex:1 1 auto;
+}
+#cdvFileView{
+	padding:6px 8px 16px 0;
+}
+#cdvFileView.hidden, #cdvMessageView.hidden{
+	display:none;
+}
+#cdvMessageView{
+	padding:12px 16px 16px 10px;
+	-webkit-user-select:text;
+	user-select:text;
+}
+.cdvMessageText{
+	word-wrap:break-word;
+}
+#cdv.docked.right #cdvDivider{
+	left:0 !important;
+	right:0;
+	width:auto;
+	height:6px;
+	margin-top:-3px;
+	cursor:row-resize;
+}
+#cdv.docked.right #cdvControls{
+	border-left:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+}
+#cdv.docked.right .cdvHeightResize{
+	top:0;
+	bottom:0;
+	left:0;
+	right:auto;
+	width:6px;
+	height:auto;
+	border-top:none;
+	cursor:col-resize;
+}
+#cdv.docked.right .cdvHeightResize:hover{
+	background-color:var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
+}
+
+
+/* File Tree */
+
+.fileTreeFileRecord, .fileTreeFolder, .fileTreeRepo{
+	display:flex;
+	align-items:center;
+	min-height:22px;
+	padding:3px 6px;
+	border-radius:6px;
+}
+.fileTreeFileRecord:hover, .fileTreeFileRecord.contextMenuActive, .fileTreeFileRecord.dialogActive, .fileTreeFolder:hover, .fileTreeRepo:hover{
+	background-color:var(--vscode-list-hoverBackground);
+}
+.fileTreeFile{
+	flex:1 1 auto;
+	min-width:0;
+	display:flex;
+	align-items:center;
+}
+.fileTreeFileBadge{
+	flex:0 0 auto;
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	width:18px;
+	height:18px;
+	margin-right:8px;
+	border-radius:4px;
+	font-size:10.5px;
+	font-weight:700;
+	color:var(--vscode-gitDecoration-modifiedResourceForeground);
+	background-color:color-mix(in srgb, currentColor 15%, transparent);
+}
+.fileTreeFileBadge.A, .fileTreeFileBadge.U{
+	color:var(--vscode-gitDecoration-addedResourceForeground);
+}
+.fileTreeFileBadge.D{
+	color:var(--vscode-gitDecoration-deletedResourceForeground);
+}
+.fileTreeFileBadge.R{
+	color:var(--vscode-charts-blue, #6cb6ff);
+}
+/* The icons of files & folders (from the file icon theme of Visual Studio Code) */
+.fileTypeIcon{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	flex:0 0 auto;
+	width:16px;
+	height:16px;
+	margin-right:6px;
+	font-size:13px;
+	font-style:normal;
+	font-weight:normal;
+	line-height:1;
+	-webkit-font-smoothing:antialiased;
+	vertical-align:middle;
+}
+.fileTypeIcon.image{
+	background-position:center;
+	background-repeat:no-repeat;
+	background-size:16px 16px;
+}
+.fileTypeIcon.text{
+	font-family:var(--vscode-editor-font-family);
+	font-size:11px;
+	font-weight:700;
+	letter-spacing:-0.4px;
+}
+.fileTypeIcon.svg svg{
+	position:static;
+	width:15px;
+	height:15px !important;
+	fill:var(--vscode-editor-foreground);
+	fill-opacity:0.6;
+}
+.fileTreeFolder > .fileTreeFolderIcon{
+	display:inline-flex;
+	width:auto;
+	height:auto;
+	margin-right:2px;
+}
+
+.fileTreeFileText{
+	min-width:0;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+.gitFileDir{
+	display:block;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	color:var(--vscode-descriptionForeground);
+	font-size:11.5px;
+	line-height:15px;
+}
+.fileTreeFolderIcon, .fileTreeRepoIcon, .fileTreeFileAction, #cdvLastFileViewed{
+	position:relative;
+	display:inline-block;
+	width:13px;
+	height:18px;
+	vertical-align:top;
+}
+.fileTreeFolderIcon, .fileTreeRepoIcon{
+	margin-right:8px;
+}
+#cdvLastFileViewed{
+	flex:0 0 auto;
+	margin-left:8px;
+	cursor:help;
+}
+.fileTreeFileAction{
+	display:none;
+	flex:0 0 auto;
+	margin-left:8px;
+}
+.fileTreeFileAction.viewGitFileAtRevision, .fileTreeFileAction.openGitFile{
+	margin-left:6px;
+}
+.fileTreeFileRecord:hover .fileTreeFileAction, .fileTreeFileRecord.contextMenuActive .fileTreeFileAction, .fileTreeFileRecord.dialogActive .fileTreeFileAction{
+	display:inline-block;
+	cursor:pointer;
+}
+svg.openFolderIcon, svg.closedFolderIcon, svg.fileIcon, .fileTreeFileAction svg, #cdvLastFileViewed svg{
+	position:absolute;
+	top:2.5px;
+	height:13px !important;
+	fill:var(--vscode-editor-foreground);
+	fill-opacity:0.6;
+}
+.fileTreeFileAction.copyGitFile svg{
+	top:3px;
+}
+.fileTreeFileAction.viewGitFileAtRevision svg, .fileTreeFileAction.openGitFile svg{
+	top:4px;
+}
+.fileTreeFolder:hover svg.openFolderIcon, .fileTreeFolder:hover svg.closedFolderIcon, .fileTreeFileRecord:hover svg.fileIcon, .fileTreeFileRecord.contextMenuActive svg.fileIcon, .fileTreeFileRecord.dialogActive svg.fileIcon, .fileTreeFileRecord:hover #cdvLastFileViewed svg, .fileTreeFileRecord.contextMenuActive #cdvLastFileViewed svg, .fileTreeFileRecord.dialogActive #cdvLastFileViewed svg, .fileTreeRepo:hover svg, .fileTreeFileAction:hover svg{
+	fill-opacity:0.8;
+}
+svg.openFolderIcon, svg.closedFolderIcon, svg.fileIcon{
+	width:13px;
+}
+.fileTreeFolderContents.hidden{
+	display:none;
+}
+.fileTreeFolder, .fileTreeRepo{
+	cursor:pointer;
+}
+.fileTreeFile .gitFileRenamedFrom{
+	margin-left:6px;
+	opacity:0.7;
+	font-style:italic;
+}
+.fileTreeFile .gitFileName.D{
+	text-decoration:line-through;
+	opacity:0.8;
+}
+.fileTreeFile.gitDiffPossible{
+	cursor:pointer;
+}
+.fileTreeFileAddDel, .fileTreeFileType{
+	flex:0 0 auto;
+	margin-left:8px;
+}
+.fileTreeFileAddDel{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	font-family:var(--vscode-editor-font-family);
+	font-size:11.5px;
+}
+.fileTreeFileType{
+	cursor:help;
+}
+.fileTreeFileAdd, .fileTreeFileDel{
+	cursor:help;
+}
+.fileTreeFileAdd{
+	color:var(--vscode-gitDecoration-addedResourceForeground);
+}
+.fileTreeFileDel{
+	color:var(--vscode-gitDecoration-deletedResourceForeground);
+}
+
+.fileTreeFolder.pendingReview .gitFolderName, .fileTreeFile.pendingReview .gitFileName{
+	font-weight:700;
+}
+
+.commit .avatar > img{
+	display:inline-block;
+	width:18px;
+	height:18px;
+	border-radius:50%;
+	vertical-align:top;
+	margin-top:calc((var(--git-graph-rowHeight) - 18px) / 2);
+	margin-right:6px;
+}
+.authorInitial[data-initial]:after{
+	content:attr(data-initial);
+}
+.authorInitial{
+	display:inline-block;
+	width:18px;
+	height:18px;
+	margin-top:5px;
+	margin-right:6px;
+	border-radius:50%;
+	color:#ffffff;
+	font-size:10px;
+	font-weight:700;
+	line-height:18px;
+	text-align:center;
+	vertical-align:top;
+}
+
+
+/* Commit Emphasis */
+
+.commitHeadDot{
+	width:6px;
+	height:6px;
+	border:2px solid var(--git-graph-color);
+	display:inline-block;
+	border-radius:6px;
+	margin-right:6px;
+	vertical-align:top;
+	margin-top:calc((var(--git-graph-rowHeight) - 10px) / 2);
+	cursor:help;
+}
+.commit .authorInitial{
+	margin-top:calc((var(--git-graph-rowHeight) - 18px) / 2);
+}
+#commitTable tr.commit:hover, #commitTable tr.commit.contextMenuActive, #commitTable tr.commit.findCurrentCommit:hover, #commitTable tr.commit.graphVertexActive, #commitTable tr.commit.dialogActive{
+	background-color:var(--vscode-list-hoverBackground, rgba(128,128,128,0.15));
+}
+#commitTable tr.commit.commitDetailsOpen, #commitTable tr.commit.commitDetailsOpen:hover, #commitTable tr.commit.commitDetailsOpen.contextMenuActive, #commitTable tr.commit.commitDetailsOpen.dialogActive, #commitTable tr.commit.commitDetailsOpen.graphVertexActive{
+	background-color:var(--vscode-list-activeSelectionBackground, var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,0.25)));
+	color:var(--vscode-list-activeSelectionForeground, inherit);
+}
+
+/* The commits selected with Shift (+ Ctrl / Cmd) + click */
+#commitTable tr.commit.multiSelected, #commitTable tr.commit.multiSelected:hover{
+	background-color:var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,0.25));
+}
+#commitTable tr.commit.multiSelected td:first-child{
+	box-shadow:inset 3px 0 0 var(--vscode-list-highlightForeground, var(--vscode-focusBorder));
+}
+
+/* The buttons of the most common actions on the commit the mouse is over, at the end of its Description cell. Their background is the
+   row's background (opaque, as they cover the end of the description), fading in over the description. */
+#commitTable td.descriptionCol{
+	position:relative;
+}
+#rowActions{
+	--git-graph-rowActionsTint:var(--vscode-list-hoverBackground, rgba(128,128,128,0.15));
+	position:absolute;
+	top:0;
+	right:0;
+	bottom:0;
+	display:flex;
+	align-items:center;
+	gap:1px;
+	padding:0 4px 0 22px;
+	background:linear-gradient(var(--git-graph-rowActionsTint), var(--git-graph-rowActionsTint)), var(--vscode-editor-background);
+	-webkit-mask-image:linear-gradient(to right, transparent, #000 18px);
+	mask-image:linear-gradient(to right, transparent, #000 18px);
+}
+#commitTable tr.commit.multiSelected #rowActions{
+	--git-graph-rowActionsTint:var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,0.25));
+}
+#commitTable tr.commit.commitDetailsOpen #rowActions{
+	--git-graph-rowActionsTint:var(--vscode-list-activeSelectionBackground, var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,0.25)));
+}
+.rowAction{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	width:22px;
+	height:20px;
+	margin:0;
+	padding:0;
+	border:none;
+	border-radius:4px;
+	background-color:transparent;
+	color:var(--vscode-icon-foreground, var(--vscode-foreground));
+	cursor:pointer;
+	opacity:0.8;
+}
+.rowAction:hover{
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+	opacity:1;
+}
+
+/* When there are many commits, only the rows near the view are rendered: the other rows are replaced by spacers of the same height, and
+   the rows with the widest date & author are rendered collapsed (so that the widths of the columns don't change as the view is scrolled) */
+#commitTable tr.virtualSpacer td{
+	padding:0;
+	border:none;
+	line-height:0;
+}
+#commitTable tr.virtualSizer{
+	visibility:collapse;
+}
+
+/* The uncommitted changes */
+#commitTable tr.commit#uncommittedChanges span.description .text{
+	color:var(--vscode-descriptionForeground);
+	font-style:italic;
+	font-weight:normal;
+}
+/* The rows that match the Find Widget have a marker on their left edge */
+#commitTable tr.commit.findMatchRow td:first-child{
+	box-shadow:inset 3px 0 0 var(--vscode-editorOverviewRuler-findMatchForeground, #d18616);
+}
+#commitTable tr.commit.commitDetailsOpen td:first-child{
+	box-shadow:inset 3px 0 0 var(--vscode-focusBorder);
+}
+
+#commitTable tr.commit.findCurrentCommit {
+	background-image:linear-gradient(var(--git-graph-findMatchCommit), var(--git-graph-findMatchCommit));
+	outline:1px solid var(--vscode-editor-findMatchHighlightBorder, transparent);
+	outline-offset:-1px;
+}
+body.vscode-high-contrast #commitTable tr.commit.findCurrentCommit{
+	outline-style:dotted;
+}
+
+#commitTable tr.commit.mute.commitDetailsOpen td.text,
+#commitTable tr.commit.mute.commitDetailsOpen span.description .text,
+#commitTable tr.commit.mute.findCurrentCommit td.text,
+#commitTable tr.commit.mute.findCurrentCommit span.description .text{
+	opacity:1;
+}
+
+#commitTable tr.commit.flash{
+	animation:flash-commit 0.75s linear;
+}
+@keyframes flash-commit{
+	0%   {}
+	20%  {background-color:var(--git-graph-flashPrimary);}
+	35%  {background-color:var(--git-graph-flashSecondary);}
+	50%  {background-color:var(--git-graph-flashPrimary);}
+	65%  {background-color:var(--git-graph-flashPrimary);}
+	100% {}
+}
+
+
+/* Ref labels */
+
+.gitRef{
+	display:inline-flex;
+	align-items:center;
+	box-sizing:border-box;
+	height:20px;
+	line-height:18px;
+	margin-top:calc((var(--git-graph-rowHeight) - 20px) / 2);
+	margin-right:5px;
+	background-color:color-mix(in srgb, var(--git-graph-color) 22%, transparent);
+	border-radius:10px;
+	border:1px solid color-mix(in srgb, var(--git-graph-color) 75%, transparent);
+	vertical-align:top;
+	font-size:12px;
+	cursor:default;
+	overflow:hidden;
+}
+.gitRef.remote{
+	background-color:transparent;
+	border-style:dashed;
+}
+.gitRef.tag{
+	background-color:transparent;
+	border-color:color-mix(in srgb, var(--vscode-foreground) 45%, transparent);
+}
+.gitRef.active{
+	border-color:var(--git-graph-color);
+	box-shadow:inset 0 0 0 1px var(--git-graph-color);
+}
+.gitRef.active .gitRefName{
+	font-weight:bold;
+}
+.gitRef > svg{
+	flex:0 0 auto;
+	fill:var(--git-graph-color);
+	width:12px;
+	height:12px;
+	margin-left:6px;
+}
+.gitRef.tag > svg{
+	fill:var(--vscode-foreground);
+	opacity:0.75;
+}
+.gitRef svg.refIcon{
+	stroke:var(--git-graph-color);
+}
+.gitRefHeadRemote.icon{
+	display:inline-flex;
+	align-items:center;
+	padding:0 6px;
+	font-style:normal;
+}
+.gitRefHeadRemote.icon svg{
+	pointer-events:none;
+}
+.gitRefTrack{
+	padding-right:7px;
+	margin-left:-3px;
+	font-size:11px;
+	font-weight:600;
+	color:var(--git-graph-color);
+	filter:brightness(1.25);
+	white-space:nowrap;
+}
+
+/* The Branches / Tags column (on the left of the graph) */
+body{
+	--git-graph-refsColWidth:172px;
+}
+body.refsColumn #commitGraph{
+	left:var(--git-graph-refsColWidth);
+}
+#commitTable th.refsCol, #commitTable td.refsCol{
+	box-sizing:border-box;
+	width:var(--git-graph-refsColWidth);
+	min-width:var(--git-graph-refsColWidth);
+	max-width:var(--git-graph-refsColWidth);
+}
+#commitTable td.refsCol{
+	padding:0 8px 0 12px;
+}
+
+/* The handle to resize the Branches / Tags column, on the right edge of its header */
+#refsColResize{
+	position:absolute;
+	top:0;
+	right:0;
+	width:6px;
+	height:100%;
+	box-sizing:border-box;
+	border-right:1px solid rgba(128,128,128,0.25);
+	cursor:col-resize;
+}
+/* The labels that don't fit are truncated: the first (most important) label keeps at least 60% of the width, and the other labels can
+   be truncated to their icon (--git-graph-refs is the number of labels) */
+.refsColLabels{
+	display:flex;
+	align-items:center;
+	gap:4px;
+	height:var(--git-graph-rowHeight);
+	overflow:hidden;
+}
+.refsColLabels .gitRef{
+	flex:0 1 auto;
+	min-width:28px;
+	max-width:100%;
+	margin:0;
+}
+.refsColLabels .gitRef:first-child{
+	flex-shrink:0;
+	max-width:max(60%, calc(100% - (var(--git-graph-refs, 1) - 1) * 44px));
+}
+.refsColLabels.overflowing{
+	-webkit-mask-image:linear-gradient(to right, #000 calc(100% - 16px), transparent);
+	mask-image:linear-gradient(to right, #000 calc(100% - 16px), transparent);
+}
+.refsColLabels .gitRefName{
+	min-width:0;
+}
+
+.gitRefName, .gitRefHeadRemote{
+	display:inline-block;
+	height:18px;
+	line-height:18px;
+	padding:0 7px 0 4px;
+	overflow:hidden;
+	text-overflow:ellipsis;
+}
+.gitRefHeadRemote{
+	padding:0 7px;
+	border-left:1px solid color-mix(in srgb, var(--git-graph-color) 55%, transparent);
+	font-style:italic;
+	opacity:0.85;
+}
+
+.gitRef .contextMenuActive, .gitRef .dialogActive, .gitRef .gitRefName:hover, .gitRef .gitRefHeadRemote:hover{
+	background-color:rgba(128,128,128,0.15);
+}
+
+body.branchLabelsAlignedToGraph tr.commit td:first-child .gitRef:last-child{
+	margin-right:0;
+}
+body.tagLabelsRightAligned .gitRef.tag{
+	margin-left:5px;
+	margin-right:0;
+}
+
+
+/* Loader */
+
+#loadingHeader{
+	text-align:center;
+	line-height:32px;
+}
+#loadingHeader svg{
+	display:inline;
+	fill:var(--vscode-editor-foreground);
+	margin-right:10px;
+	vertical-align:top;
+	animation:loadingIconAnimation 2s linear infinite;
+}
+@keyframes loadingIconAnimation{
+	0%{ transform:rotate(0deg); opacity:0.7; }
+	25%{ opacity:1; }
+	50%{ opacity:0.7; }
+	75%{ opacity:1; }
+	100%{ transform:rotate(360deg); opacity:0.7; }
+}
+
+
+/* Controls */
+
+#controls{
+	display:flex;
+	flex-wrap:wrap;
+	align-items:center;
+	gap:6px 8px;
+	position:sticky;
+	top:0;
+	z-index:15;
+	padding:8px 12px;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	background-color:var(--vscode-sideBar-background, var(--vscode-editor-background));
+	font-size:13px;
+	-webkit-user-select:none;
+	user-select:none;
+}
+
+#repoControl, #branchControl, #authorControl{
+	display:inline-flex;
+	align-items:center;
+	white-space:nowrap;
+}
+#showRemoteBranchesControl{
+	display:inline-flex;
+	align-items:center;
+	height:28px;
+	padding:0 4px;
+	white-space:nowrap;
+}
+#showRemoteBranchesControl > .customCheckbox{
+	margin-top:0;
+	margin-right:6px;
+}
+
+.dropdownCurrentValue{
+	max-width:30vw;
+}
+#authorDropdown .dropdownCurrentValue{
+	max-width:20vw;
+}
+#repoDropdown .dropdownValue{
+	font-weight:600;
+}
+.dropdownCurrentValue .toolbarIcon{
+	margin-right:6px;
+	vertical-align:-2px;
+	opacity:0.85;
+}
+#controlsSpacer{
+	flex:1 1 24px;
+}
+
+/* Pill buttons in the control bar (Stashes, HEAD) */
+.controlPill, .syncBtn{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	flex:0 0 auto;
+	box-sizing:border-box;
+	height:28px;
+	padding:0 10px;
+	border:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+	border-radius:6px;
+	background-color:var(--vscode-dropdown-background, rgba(128,128,128,0.1));
+	color:var(--vscode-dropdown-foreground, inherit);
+	white-space:nowrap;
+	cursor:pointer;
+}
+.controlPill:hover{
+	border-color:var(--vscode-focusBorder);
+}
+.controlPill.hidden{
+	display:none;
+}
+.controlPill .pillLabel{
+	color:var(--vscode-descriptionForeground);
+}
+.controlPill .pillValue{
+	font-weight:600;
+}
+.toolbarIcon, svg.uiIcon{
+	flex:0 0 auto;
+	fill:none !important;
+	stroke:currentColor;
+}
+.toolbarIcon.chevron{
+	opacity:0.75;
+}
+
+/* Fetch, Pull & Push buttons */
+#syncControl{
+	display:none;
+	flex:0 0 auto;
+	height:28px;
+	box-sizing:border-box;
+	border:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+	border-radius:6px;
+	background-color:var(--vscode-dropdown-background, rgba(128,128,128,0.1));
+	overflow:hidden;
+}
+#controls.fetchSupported #syncControl{
+	display:inline-flex;
+}
+.syncBtn{
+	gap:5px;
+	height:100%;
+	padding:0 9px;
+	border:0;
+	border-radius:0;
+	background-color:transparent;
+}
+.syncBtn + .syncBtn{
+	border-left:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+}
+.syncBtn:hover{
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+.syncBtn.disabled{
+	opacity:0.5;
+	cursor:default;
+}
+.syncBtn.disabled:hover{
+	background-color:transparent;
+}
+#pushBtn.pending{
+	background-color:color-mix(in srgb, var(--vscode-focusBorder) 20%, transparent);
+}
+.syncCount{
+	font-weight:700;
+}
+
+/* The list of the stashes in the repository (shown by the Stashes button) */
+.controlPill.active{
+	border-color:var(--vscode-focusBorder);
+}
+#stashList, #worktreeList{
+	position:fixed;
+	z-index:20;
+	width:min(560px, calc(100vw - 16px));
+	box-sizing:border-box;
+	border:1px solid var(--vscode-menu-border, var(--vscode-widget-border, rgba(128,128,128,0.35)));
+	border-radius:8px;
+	background-color:var(--vscode-editorWidget-background, var(--vscode-menu-background));
+	color:var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+	box-shadow:0 10px 28px var(--vscode-widget-shadow, rgba(0,0,0,0.5));
+	font-size:13px;
+	overflow:hidden;
+	-webkit-user-select:none;
+	user-select:none;
+}
+.stashListHeader, .stashListFooter{
+	display:flex;
+	align-items:center;
+	gap:8px;
+	padding:9px 12px;
+	font-size:12px;
+	color:var(--vscode-descriptionForeground);
+}
+.stashListHeader{
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+}
+.stashListHeader b{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	color:var(--vscode-foreground);
+}
+.stashListItems{
+	max-height:min(60vh, 420px);
+	overflow-y:auto;
+}
+.stashListItem{
+	display:grid;
+	grid-template-columns:auto minmax(0, 1fr) auto;
+	column-gap:10px;
+	align-items:center;
+	padding:8px 12px;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.15));
+	cursor:pointer;
+}
+.stashListItem:hover{
+	background-color:var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground));
+	color:var(--vscode-list-activeSelectionForeground, inherit);
+}
+.stashListSelector{
+	grid-row:1 / span 2;
+	justify-self:start;
+	padding:2px 6px;
+	border-radius:4px;
+	background-color:rgba(128,128,128,0.15);
+	font-family:var(--vscode-editor-font-family);
+	font-size:12px;
+}
+.stashListMessage{
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+.stashListMeta{
+	grid-column:2;
+	display:flex;
+	flex-wrap:wrap;
+	gap:2px 8px;
+	margin-top:2px;
+	font-size:11.5px;
+	color:var(--vscode-descriptionForeground);
+}
+.stashListItem:hover .stashListMeta{
+	color:inherit;
+	opacity:0.8;
+}
+.stashListMeta .fileTreeFileAdd, .stashListMeta .fileTreeFileDel{
+	cursor:inherit;
+}
+.stashListNotLoaded{
+	color:var(--vscode-editorWarning-foreground, #cca700);
+}
+.stashListActions{
+	grid-column:3;
+	grid-row:1 / span 2;
+	display:flex;
+	gap:4px;
+	visibility:hidden;
+}
+.stashListItem:hover .stashListActions{
+	visibility:visible;
+}
+.stashListAction{
+	display:inline-flex;
+	align-items:center;
+	gap:5px;
+	height:24px;
+	padding:0 9px;
+	box-sizing:border-box;
+	border:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+	border-radius:5px;
+	background-color:var(--vscode-button-secondaryBackground, rgba(128,128,128,0.15));
+	color:var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+	font-family:inherit;
+	font-size:12px;
+	cursor:pointer;
+}
+.stashListAction svg.uiIcon{
+	width:12px !important;
+	height:12px !important;
+}
+.stashListAction:hover{
+	background-color:var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.25));
+}
+.stashListAction.primary{
+	border-color:var(--vscode-button-background);
+	background-color:var(--vscode-button-background);
+	color:var(--vscode-button-foreground);
+}
+.stashListAction.danger{
+	color:var(--vscode-errorForeground, #f48771);
+}
+.stashListAction.disabled{
+	opacity:0.5;
+	cursor:default;
+}
+/* The Rebase Editor of an interactive rebase */
+#rebaseEditor{
+	position:fixed;
+	inset:0;
+	z-index:40;
+	display:flex;
+	align-items:center;
+	justify-content:center;
+	background-color:rgba(0,0,0,0.35);
+}
+.rebaseEditorPanel{
+	display:flex;
+	flex-direction:column;
+	width:min(820px, calc(100vw - 32px));
+	max-height:calc(100vh - 48px);
+	box-sizing:border-box;
+	border:1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+	border-radius:8px;
+	background-color:var(--vscode-editorWidget-background, var(--vscode-editor-background));
+	color:var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+	box-shadow:0 10px 28px var(--vscode-widget-shadow, rgba(0,0,0,0.5));
+	font-size:13px;
+	overflow:hidden;
+}
+.rebaseEditorHeader{
+	display:flex;
+	align-items:baseline;
+	gap:12px;
+	padding:14px 16px 4px;
+}
+.rebaseEditorHeader h3{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	margin:0;
+	font-size:14px;
+}
+.rebaseEditorHeader span, .rebaseEditorHint{
+	color:var(--vscode-descriptionForeground);
+}
+.rebaseEditorHint{
+	padding:0 16px 10px;
+	font-size:12px;
+}
+.rebaseEditorItems{
+	flex:1 1 auto;
+	overflow-y:auto;
+	border-top:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+}
+.rebaseEditorItem{
+	display:grid;
+	grid-template-columns:16px 96px 72px minmax(0,1fr) auto auto;
+	align-items:center;
+	gap:10px;
+	padding:6px 16px 6px 10px;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.15));
+	-webkit-user-select:none;
+	user-select:none;
+}
+.rebaseEditorItem:last-child{
+	border-bottom:none;
+}
+.rebaseEditorItem:hover{
+	background-color:var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
+}
+.rebaseEditorItem.combined{
+	padding-left:30px;
+	grid-template-columns:16px 96px 72px minmax(0,1fr) auto auto;
+}
+.rebaseEditorItem.dropped .rebaseEditorHash, .rebaseEditorItem.dropped .rebaseEditorSubject, .rebaseEditorItem.dropped .rebaseEditorMeta{
+	text-decoration:line-through;
+	opacity:0.55;
+}
+.rebaseEditorItem.dragging{
+	opacity:0.4;
+}
+.rebaseEditorItem.dropBefore{
+	box-shadow:inset 0 2px 0 var(--vscode-focusBorder);
+}
+.rebaseEditorItem.dropAfter{
+	box-shadow:inset 0 -2px 0 var(--vscode-focusBorder);
+}
+.rebaseEditorGrip{
+	display:inline-flex;
+	color:var(--vscode-descriptionForeground);
+	cursor:grab;
+}
+.rebaseEditorAction{
+	height:24px;
+	padding:0 4px;
+	border:1px solid var(--vscode-dropdown-border, var(--vscode-input-border, rgba(128,128,128,0.35)));
+	border-radius:4px;
+	background-color:var(--vscode-dropdown-background, var(--vscode-input-background));
+	color:var(--vscode-dropdown-foreground, var(--vscode-foreground));
+	font:inherit;
+	font-size:12px;
+}
+.rebaseEditorHash{
+	color:var(--vscode-descriptionForeground);
+	font-family:var(--vscode-editor-font-family);
+	font-size:12px;
+}
+.rebaseEditorSubject{
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+.rebaseEditorMessageInput{
+	min-width:0;
+	padding:4px 6px;
+	border:1px solid var(--vscode-focusBorder);
+	border-radius:4px;
+	background-color:var(--vscode-input-background);
+	color:var(--vscode-input-foreground);
+	font:inherit;
+	resize:vertical;
+	-webkit-user-select:text;
+	user-select:text;
+}
+.rebaseEditorMeta{
+	color:var(--vscode-descriptionForeground);
+	font-size:12px;
+	white-space:nowrap;
+}
+.rebaseEditorMove{
+	display:inline-flex;
+	gap:2px;
+}
+.rebaseEditorMoveBtn{
+	display:inline-flex;
+	padding:2px;
+	border-radius:4px;
+	cursor:pointer;
+}
+.rebaseEditorMoveBtn:hover{
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+.rebaseEditorMoveBtn.disabled{
+	opacity:0.3;
+	cursor:default;
+	background-color:transparent;
+}
+.rebaseEditorMoveBtn svg{
+	width:12px;
+	height:12px;
+	fill:currentColor;
+}
+.rebaseEditorMessage{
+	display:flex;
+	align-items:center;
+	gap:8px;
+	padding:24px 16px;
+	color:var(--vscode-descriptionForeground);
+}
+.rebaseEditorMessage.error{
+	color:var(--vscode-errorForeground);
+}
+.rebaseEditorFooter{
+	display:flex;
+	align-items:center;
+	gap:10px;
+	padding:10px 16px;
+}
+.rebaseEditorLink{
+	display:inline-flex;
+	align-items:center;
+	gap:5px;
+	color:var(--vscode-textLink-foreground);
+	font-size:12px;
+	cursor:pointer;
+}
+.rebaseEditorProblem{
+	flex:1 1 auto;
+	color:var(--vscode-errorForeground);
+	font-size:12px;
+	text-align:right;
+}
+.rebaseEditorBtn{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	height:26px;
+	padding:0 14px;
+	border:1px solid var(--vscode-button-border, transparent);
+	border-radius:4px;
+	background-color:var(--vscode-button-secondaryBackground, rgba(128,128,128,0.2));
+	color:var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+	font:inherit;
+	cursor:pointer;
+}
+.rebaseEditorBtn svg.uiIcon, .rebaseEditorLink svg.uiIcon{
+	width:13px !important;
+	height:13px !important;
+}
+.rebaseEditorBtn.primary{
+	background-color:var(--vscode-button-background);
+	color:var(--vscode-button-foreground);
+}
+.rebaseEditorBtn.disabled{
+	opacity:0.5;
+	cursor:default;
+}
+
+/* The bar shown while an operation is in progress (e.g. a rebase that stopped because of conflicts) */
+#operationBar{
+	display:none;
+	flex:1 0 100%;
+	align-items:center;
+	gap:10px;
+	padding:6px 10px;
+	box-sizing:border-box;
+	border:1px solid var(--vscode-inputValidation-warningBorder, #b89500);
+	border-radius:6px;
+	background-color:color-mix(in srgb, var(--vscode-inputValidation-warningBorder, #b89500) 14%, transparent);
+	font-size:12.5px;
+}
+#operationBar.active{
+	display:flex;
+}
+#operationBar > svg{
+	flex:0 0 auto;
+	width:16px;
+	height:16px;
+	fill:var(--vscode-inputValidation-warningBorder, #b89500);
+}
+.operationBarSpacer{
+	flex:1 1 auto;
+}
+.operationBarBtn{
+	flex:0 0 auto;
+	padding:3px 10px;
+	border-radius:4px;
+	background-color:var(--vscode-button-secondaryBackground, rgba(128,128,128,0.2));
+	color:var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+	cursor:pointer;
+}
+.operationBarBtn.primary{
+	background-color:var(--vscode-button-background);
+	color:var(--vscode-button-foreground);
+}
+.operationBarBtn.danger{
+	color:var(--vscode-errorForeground);
+}
+
+/* The worktrees (in the list of the Worktrees button). The start of a long path is truncated (its end is the folder's name). */
+.worktreeListItem .stashListMeta{
+	flex-wrap:nowrap;
+}
+.worktreeListItem .stashListMeta > span:not(.worktreeListPath){
+	flex:0 0 auto;
+}
+.worktreeListPath{
+	flex:0 1 auto;
+	min-width:0;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+	direction:rtl;
+	text-align:left;
+}
+.worktreeListBadge{
+	padding:0 6px;
+	border:1px solid color-mix(in srgb, var(--vscode-foreground) 30%, transparent);
+	border-radius:8px;
+	font-size:11px;
+	line-height:15px;
+}
+/* The branches that are checked out in other worktrees */
+.gitRefWorktree{
+	display:inline-flex;
+	align-items:center;
+	margin:0 6px 0 -3px;
+	color:var(--git-graph-color);
+	filter:brightness(1.25);
+}
+.gitRefWorktree svg{
+	width:12px;
+	height:12px;
+}
+.stashListSpacer{
+	flex:1 1 auto;
+}
+
+.controlBtn{
+	position:relative;
+	flex:0 0 auto;
+	width:28px;
+	height:28px;
+	border-radius:6px;
+	cursor:pointer;
+	-webkit-user-select:none;
+	user-select:none;
+}
+.controlBtn:hover{
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+#refreshBtn.refreshing{
+	cursor:default;
+}
+#undoBtn.hidden{
+	display:none;
+}
+/* The notification that the last action can be undone (shown for a few seconds after it's run) */
+#undoToast{
+	position:fixed;
+	left:50%;
+	bottom:56px;
+	z-index:30;
+	display:flex;
+	align-items:center;
+	gap:12px;
+	max-width:calc(100% - 48px);
+	padding:7px 8px 7px 14px;
+	box-sizing:border-box;
+	border:1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border, rgba(128,128,128,0.35)));
+	border-radius:6px;
+	background-color:var(--vscode-notifications-background, var(--vscode-editorWidget-background));
+	color:var(--vscode-notifications-foreground, var(--vscode-foreground));
+	box-shadow:0 4px 16px var(--vscode-widget-shadow, rgba(0,0,0,0.35));
+	font-size:12.5px;
+	opacity:0;
+	transform:translate(-50%, 8px);
+	pointer-events:none;
+	transition:opacity .15s ease, transform .15s ease;
+}
+#undoToast.active{
+	opacity:1;
+	transform:translate(-50%, 0);
+	pointer-events:auto;
+}
+.undoToastText{
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+.undoToastAction{
+	flex:0 0 auto;
+	color:var(--vscode-textLink-foreground);
+	font-weight:600;
+	cursor:pointer;
+}
+.undoToastAction:hover{
+	text-decoration:underline;
+}
+.undoToastClose{
+	display:inline-flex;
+	flex:0 0 auto;
+	padding:2px;
+	border-radius:4px;
+	cursor:pointer;
+	opacity:0.7;
+}
+.undoToastClose:hover{
+	opacity:1;
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+.undoToastClose svg{
+	width:12px;
+	height:12px;
+	fill:currentColor;
+}
+.controlBtn svg{
+	position:absolute;
+	left:6px;
+	top:6px;
+	width:16px !important;
+	height:16px !important;
+	fill:var(--vscode-icon-foreground, var(--vscode-editor-foreground));
+	opacity:0.85;
+}
+.controlBtn:hover svg{
+	opacity:1;
+}
+#refreshBtn.refreshing svg{
+	left:7px;
+	width:13.5px !important;
+	height:16px !important;
+	animation:loadingIconAnimation 2s linear infinite;
+}
+
+#controls input:focus{
+	outline:none;
+}
+
+
+/* The bar shown below the control bar when the history of a file is shown */
+#fileHistoryBar{
+	display:none;
+	flex:1 0 100%;
+	align-items:center;
+	gap:10px;
+	box-sizing:border-box;
+	min-height:40px;
+	margin:0 -12px;
+	padding:6px 12px;
+	border-top:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+	background:linear-gradient(90deg, color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent), transparent 60%);
+	box-shadow:inset 3px 0 0 var(--vscode-focusBorder);
+	font-size:12.5px;
+}
+#fileHistoryBar.active{
+	display:flex;
+}
+#fileHistoryBar .fileTypeIcon{
+	margin-right:-4px;
+}
+.fileHistoryPath{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	min-width:0;
+	height:24px;
+	padding:0 4px 0 8px;
+	box-sizing:border-box;
+	border:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+	border-radius:4px;
+	background-color:var(--vscode-dropdown-background, rgba(128,128,128,0.1));
+	font-family:var(--vscode-editor-font-family);
+	font-size:12px;
+}
+.fileHistoryPath > span:first-child{
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+#fileHistoryCopy{
+	position:relative;
+	flex:0 0 auto;
+	width:18px;
+	height:18px;
+	border-radius:3px;
+	cursor:pointer;
+}
+#fileHistoryCopy:hover{
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+#fileHistoryCopy svg{
+	position:absolute;
+	left:3px;
+	top:2px;
+	width:12px;
+	height:14px;
+	fill:var(--vscode-foreground);
+	fill-opacity:0.7;
+}
+.fileHistorySummary{
+	color:var(--vscode-descriptionForeground);
+	white-space:nowrap;
+	overflow:hidden;
+	text-overflow:ellipsis;
+}
+.fileHistorySpacer{
+	flex:1 1 auto;
+}
+#fileHistoryBranches{
+	display:inline-flex;
+	flex:0 0 auto;
+	border:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+	border-radius:6px;
+	overflow:hidden;
+	font-size:12px;
+}
+.fileHistoryBranchesOption{
+	height:24px;
+	padding:0 10px;
+	line-height:24px;
+	white-space:nowrap;
+	cursor:pointer;
+}
+.fileHistoryBranchesOption + .fileHistoryBranchesOption{
+	border-left:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+}
+.fileHistoryBranchesOption.active{
+	background-color:color-mix(in srgb, var(--vscode-focusBorder) 25%, transparent);
+	cursor:default;
+}
+.fileHistoryBranchesOption.disabled{
+	opacity:0.5;
+	cursor:default;
+}
+.fileHistoryBtn{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	flex:0 0 auto;
+	height:26px;
+	padding:0 10px;
+	box-sizing:border-box;
+	border:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+	border-radius:6px;
+	background-color:var(--vscode-dropdown-background, rgba(128,128,128,0.1));
+	font-size:12px;
+	white-space:nowrap;
+	cursor:pointer;
+}
+.fileHistoryBtn:hover{
+	border-color:var(--vscode-focusBorder);
+}
+.fileHistoryBtn svg{
+	width:12px !important;
+	height:13px !important;
+	fill:currentColor;
+}
+.fileHistoryBtn.exit{
+	border-color:transparent;
+	background-color:transparent;
+	color:var(--vscode-descriptionForeground);
+}
+.fileHistoryBtn.exit:hover{
+	color:var(--vscode-foreground);
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+
+/* The changes to the file whose history is shown, in each commit */
+#commitTable th.fileChangesCol{
+	width:170px;
+}
+#commitTable td.fileChangesCol{
+	white-space:nowrap;
+	font-family:var(--vscode-editor-font-family);
+	font-size:11.5px;
+}
+#commitTable td.fileChangesCol .changeBar{
+	margin-right:6px;
+	vertical-align:middle;
+}
+#commitTable td.fileChangesCol .fileTreeFileAdd{
+	margin-right:6px;
+}
+#commitTable td.fileChangesCol .fileTreeFileAdd, #commitTable td.fileChangesCol .fileTreeFileDel{
+	cursor:inherit;
+}
+.fileChangesBinary{
+	color:var(--vscode-descriptionForeground);
+}
+.fileHistoryRenamed{
+	display:inline-flex;
+	align-items:center;
+	height:20px;
+	margin-right:6px;
+	padding:0 7px;
+	border-radius:4px;
+	background-color:color-mix(in srgb, var(--vscode-textLink-foreground, #6cb6ff) 14%, transparent);
+	color:var(--vscode-textLink-foreground, #6cb6ff);
+	font-size:11.5px;
+	vertical-align:middle;
+}
+
+/* Minimap */
+
+#minimap{
+	display:none;
+	position:relative;
+	flex:1 0 100%;
+	align-items:stretch;
+	gap:12px;
+	height:58px;
+	margin-top:2px;
+}
+#minimap.active{
+	display:flex;
+}
+.minimapTitle{
+	display:flex;
+	flex-direction:column;
+	justify-content:space-between;
+	flex:0 0 auto;
+	min-width:56px;
+	padding:6px 0 0;
+	color:var(--vscode-descriptionForeground);
+	font-size:11px;
+}
+.minimapTitleRow{
+	display:flex;
+	align-items:center;
+	gap:8px;
+	color:var(--vscode-foreground);
+	font-weight:600;
+}
+/* The buttons to zoom in & out, and to show all of the loaded commits */
+.minimapZoom{
+	display:inline-flex;
+	gap:1px;
+}
+.minimapZoomBtn{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	width:17px;
+	height:16px;
+	margin:0;
+	padding:0;
+	border:none;
+	border-radius:3px;
+	background-color:transparent;
+	color:var(--vscode-descriptionForeground);
+	font:inherit;
+	cursor:pointer;
+}
+.minimapZoomBtn:focus-visible{
+	outline:1px solid var(--vscode-focusBorder);
+	outline-offset:-1px;
+}
+.minimapZoomBtn:hover{
+	color:var(--vscode-foreground);
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+.minimapZoomBtn.disabled{
+	opacity:0.35;
+	cursor:default;
+	background-color:transparent;
+}
+/* The chart is a layout boundary, so that updating the box of the commits in view (as the view is scrolled) doesn't lay out the commits */
+.minimapChart{
+	position:relative;
+	flex:1 1 auto;
+	min-width:0;
+	contain:strict;
+}
+.minimapChart.zoomedIn{
+	cursor:grab;
+}
+#minimap.dragging .minimapBar{
+	cursor:inherit;
+}
+/* The handle to resize the minimap, along its bottom edge */
+.minimapResize{
+	position:absolute;
+	left:0;
+	right:0;
+	bottom:-5px;
+	height:6px;
+	cursor:row-resize;
+	z-index:1;
+}
+.minimapResize:hover{
+	box-shadow:inset 0 -2px 0 color-mix(in srgb, var(--vscode-focusBorder) 60%, transparent);
+}
+.minimapMarkers{
+	position:absolute;
+	left:0;
+	right:0;
+	top:0;
+	height:9px;
+}
+.minimapMarker{
+	position:absolute;
+	top:1px;
+	width:7px;
+	height:7px;
+	margin-left:-3.5px;
+	border-radius:1px;
+}
+.minimapMarker.head{
+	border-radius:50%;
+	z-index:1;
+}
+.minimapMarker.tag{
+	transform:rotate(45deg) scale(0.85);
+}
+.minimapBars{
+	position:absolute;
+	left:0;
+	right:0;
+	top:12px;
+	bottom:16px;
+	display:flex;
+	align-items:flex-end;
+	gap:2px;
+}
+.minimapBars.thin{
+	gap:1px;
+}
+.minimapBar{
+	flex:1 1 0;
+	min-width:1px;
+	border-radius:2px 2px 0 0;
+	background-color:color-mix(in srgb, var(--vscode-foreground) 30%, transparent);
+	cursor:pointer;
+}
+.minimapBar.empty{
+	background-color:color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	cursor:default;
+}
+.minimapBar.visible:not(.empty){
+	background-color:var(--vscode-focusBorder);
+}
+.minimapBar:not(.empty):hover{
+	background-color:color-mix(in srgb, var(--vscode-focusBorder) 70%, var(--vscode-foreground));
+}
+/* The box around the bars of the commits that are visible in the view (outlined, so it doesn't look like a selection) */
+#minimapViewport{
+	position:absolute;
+	top:10px;
+	bottom:14px;
+	box-sizing:border-box;
+	min-width:4px;
+	border:1px solid var(--vscode-focusBorder);
+	border-radius:3px;
+	background-color:transparent;
+	cursor:grab;
+}
+#minimapViewport:hover, #minimap.dragging #minimapViewport{
+	background-color:color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent);
+}
+/* The commits that match the Find Widget's criteria are marked below their bars */
+.minimapFindMatches{
+	position:absolute;
+	left:0;
+	right:0;
+	bottom:12px;
+	height:3px;
+	pointer-events:none;
+}
+.minimapFindMatch{
+	position:absolute;
+	top:0;
+	height:3px;
+	border-radius:1px;
+	background-color:var(--vscode-editorOverviewRuler-findMatchForeground, #d18616);
+	pointer-events:auto;
+}
+/* The labels of the axis (positioned below their bars) */
+.minimapAxis{
+	position:absolute;
+	left:0;
+	right:0;
+	bottom:0;
+	height:12px;
+	color:var(--vscode-descriptionForeground);
+	font-size:10.5px;
+	line-height:12px;
+	white-space:nowrap;
+	overflow:hidden;
+}
+.minimapAxis > span{
+	position:absolute;
+	top:0;
+}
+/* The legend of the minimap */
+/* The legend has at most 4 rows (another column is added for the Find Matches) */
+.minimapLegend{
+	display:grid;
+	grid-auto-flow:column;
+	grid-template-rows:repeat(4, auto);
+	align-content:center;
+	column-gap:12px;
+	row-gap:1px;
+	flex:0 0 auto;
+	color:var(--vscode-descriptionForeground);
+	font-size:10.5px;
+	line-height:13px;
+	white-space:nowrap;
+}
+.minimapLegend > span{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+}
+.minimapLegend i{
+	position:relative;
+	display:inline-block;
+	flex:0 0 auto;
+	top:auto;
+	margin:0 1px;
+}
+.minimapLegend i.viewport{
+	width:10px;
+	height:7px;
+	box-sizing:border-box;
+	border:1px solid var(--vscode-focusBorder);
+	border-radius:2px;
+	margin:0;
+}
+.minimapLegend .minimapMarker.head{
+	background-color:var(--vscode-focusBorder);
+}
+.minimapLegend .minimapMarker.tag{
+	background-color:var(--vscode-descriptionForeground);
+}
+.minimapLegend i.findMatch{
+	width:10px;
+	height:3px;
+	border-radius:1px;
+	margin:0;
+	background-color:var(--vscode-editorOverviewRuler-findMatchForeground, #d18616);
+}
+
+
+/* Scrollbar Markers */
+
+#scrollMarkers{
+	position:fixed;
+	width:6px;
+	margin-right:2px;
+	z-index:3;
+	pointer-events:none;
+}
+.scrollMarker{
+	position:absolute;
+	left:0;
+	right:0;
+	height:3px;
+	margin-top:-1px;
+	border-radius:1px;
+}
+.scrollMarker.tag, .scrollMarker.other{
+	left:2px;
+}
+.scrollMarker.findMatch{
+	left:-2px;
+	right:-2px;
+	z-index:1;
+}
+.scrollMarker.head{
+	height:4px;
+	z-index:2;
+}
+#controls label{
+	cursor:pointer;
+}
+
+
+/* Buttons */
+
+#loadMoreCommitsBtn, #rescanForReposBtn{
+	height:28px;
+	margin:12px auto;
+	border-radius:6px;
+	line-height:26px;
+}
+#loadMoreCommitsBtn{
+	width:180px;
+}
+
+/* The footer of the commits: the number of commits loaded, the legend of the markers alongside the scrollbar, and the Load More Commits button */
+#listFooter{
+	display:flex;
+	flex-wrap:wrap;
+	align-items:center;
+	gap:8px 20px;
+	min-height:44px;
+	padding:6px 24px 6px 16px;
+	box-sizing:border-box;
+	border-top:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+	color:var(--vscode-descriptionForeground);
+	font-size:12px;
+}
+.listFooterLegend{
+	display:inline-flex;
+	flex-wrap:wrap;
+	align-items:center;
+	gap:4px 12px;
+}
+.listFooterLegend > span{
+	display:inline-flex;
+	align-items:center;
+	gap:5px;
+}
+.listFooterLegend i{
+	display:inline-block;
+	width:10px;
+	height:3px;
+	border-radius:1px;
+}
+.listFooterSpacer{
+	flex:1 1 auto;
+}
+/* The number of selected commits, and the actions on them */
+#listFooterSelection{
+	display:none;
+	align-items:center;
+	gap:4px 12px;
+}
+#listFooterSelection.active{
+	display:inline-flex;
+}
+.listFooterSelectionCount{
+	color:var(--vscode-foreground);
+	font-weight:600;
+}
+.listFooterAction{
+	display:inline-flex;
+	align-items:center;
+	gap:4px;
+	color:var(--vscode-textLink-foreground);
+	cursor:pointer;
+}
+.listFooterAction svg.uiIcon{
+	width:12px !important;
+	height:12px !important;
+}
+.listFooterAction:hover{
+	text-decoration:underline;
+}
+#listFooter #loadMoreCommitsBtn{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	width:auto;
+	margin:0;
+	padding:0 14px;
+}
+#listFooter #loadMoreCommitsBtn svg.uiIcon{
+	width:13px !important;
+	height:13px !important;
+}
+
+/* The files & lines changed by each commit */
+#commitTable th.changesCol{
+	width:136px;
+}
+#commitTable td.changesCol{
+	white-space:nowrap;
+	font-family:var(--vscode-editor-font-family);
+	font-size:11.5px;
+}
+#commitTable td.changesCol .changeBar{
+	margin-right:6px;
+	vertical-align:middle;
+}
+#commitTable td.changesCol .fileTreeFileAdd{
+	margin-right:5px;
+}
+#commitTable td.changesCol .fileTreeFileAdd, #commitTable td.changesCol .fileTreeFileDel{
+	cursor:inherit;
+}
+
+/* The button to choose the columns that are shown, on the right of the last column header */
+#tableColHeaders .lastColHeaderName{
+	display:block;
+	margin-right:14px;
+	overflow:hidden;
+	text-overflow:ellipsis;
+}
+#columnSettingsBtn{
+	position:absolute;
+	right:4px;
+	top:50%;
+	width:20px;
+	height:18px;
+	margin-top:-9px;
+	border-radius:4px;
+	color:var(--vscode-descriptionForeground);
+	cursor:pointer;
+}
+#columnSettingsBtn:hover{
+	color:var(--vscode-foreground);
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+#columnSettingsBtn svg{
+	position:absolute;
+	left:3.5px;
+	top:2.5px;
+}
+#rescanForReposBtn{
+	width:350px;
+}
+
+.roundedBtn{
+	display:block;
+	box-sizing:border-box;
+	background-color:var(--vscode-button-secondaryBackground, rgba(128,128,128,0.1));
+	border:1px solid var(--vscode-button-border, rgba(128,128,128,0.35));
+	color:var(--vscode-button-secondaryForeground, inherit);
+	font-size:13px;
+	text-align:center;
+	cursor:pointer;
+}
+.roundedBtn:hover{
+	background-color:var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.2));
+}
+
+a, span.internalUrl{
+	color:var(--vscode-textLink-foreground);
+	cursor:pointer;
+	text-decoration:underline;
+}
+a:hover, span.internalUrl:hover {
+	color:var(--vscode-textLink-activeForeground);
+}
+a:focus, span.internalUrl:focus{
+	outline:1px solid var(--vscode-focusBorder);
+	outline-offset:-1px;
+	-webkit-user-select:none;
+	user-select:none;
+}
+
+
+/* Checkboxes & Radio Inputs */
+
+input[type=checkbox], input[type=radio]{
+	position:absolute;
+	width:0;
+	height:0;
+	opacity:0;
+}
+
+.customCheckbox, .customRadio{
+	display:inline-block;
+	background-color:rgba(128,128,128,0.1);
+	border:1px solid rgba(128,128,128,0.5);
+	vertical-align:middle;
+}
+
+label:hover > .customCheckbox, label:hover > .customRadio{
+	background-color:rgba(128,128,128,0.2);
+}
+
+.customCheckbox:after, .customRadio:after{
+	content:"";
+	display:none;
+}
+
+
+/* Checkboxes */
+
+.customCheckbox{
+	width:15px;
+	height:15px;
+	border-radius:3px;
+	margin-top:-2px;
+}
+
+label > input[type=checkbox]:checked ~ .customCheckbox:after{
+	position:relative;
+	display:block;
+	left:5px;
+	top:2px;
+	width:3px;
+	height:7px;
+	border:solid var(--vscode-editor-foreground);
+	border-width:0 2px 2px 0;
+	transform:rotate(45deg);
+}
+
+
+/* Radio Inputs */
+
+.customRadio{
+	width:13px;
+	height:13px;
+	border-radius:7.5px;
+	margin-top:-1px;
+}
+
+label > input[type=radio]:checked ~ .customRadio:after{
+	position:relative;
+	display:block;
+	left:4px;
+	top:4px;
+	width:5px;
+	height:5px;
+	background-color:var(--vscode-editor-foreground);
+	border-radius:2.5px;
+}
+
+
+/* General */
+
+#commitGraph, #commitTable th, #commitTable td, .gitRef, #loadingHeader, .roundedBtn, #controls label{
+	-webkit-user-select:none;
+	user-select:none;
+}
+
+/* Branch Comparison: the bar below the control bar, the commits of each branch, and the panel of the changed files */
+#compareBar{
+	display:none;
+	flex:1 0 100%;
+	flex-wrap:wrap;
+	align-items:center;
+	gap:8px 10px;
+	box-sizing:border-box;
+	min-height:40px;
+	margin:0 -12px;
+	padding:6px 12px;
+	border-top:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+	background:linear-gradient(90deg, color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent), transparent 60%);
+	box-shadow:inset 3px 0 0 var(--vscode-focusBorder);
+	font-size:12.5px;
+}
+#compareBar.active{
+	display:flex;
+}
+#compareBar > svg{
+	flex:0 0 auto;
+	width:16px;
+	height:16px;
+	fill:var(--vscode-focusBorder);
+}
+.compareTitle{
+	font-size:13px;
+}
+.compareBranch{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	max-width:220px;
+	height:24px;
+	padding:0 8px;
+	box-sizing:border-box;
+	border-radius:4px;
+	font-family:var(--vscode-editor-font-family);
+	font-size:12px;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+.compareBranch i{
+	flex:0 0 auto;
+	width:8px;
+	height:8px;
+	border-radius:50%;
+}
+.compareBranch.left{
+	border:1px solid color-mix(in srgb, var(--git-graph-color0) 60%, transparent);
+	background-color:color-mix(in srgb, var(--git-graph-color0) 18%, transparent);
+}
+.compareBranch.left i{
+	background-color:var(--git-graph-color0);
+}
+.compareBranch.right{
+	border:1px solid color-mix(in srgb, var(--git-graph-color3) 60%, transparent);
+	background-color:color-mix(in srgb, var(--git-graph-color3) 18%, transparent);
+}
+.compareBranch.right i{
+	background-color:var(--git-graph-color3);
+}
+.compareMuted{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	color:var(--vscode-descriptionForeground);
+}
+.compareMuted svg{
+	width:14px;
+	height:14px;
+	fill:currentColor;
+}
+.compareHash, .bisectHash{
+	font-family:var(--vscode-editor-font-family);
+	color:var(--vscode-foreground);
+}
+.compareSegments{
+	display:inline-flex;
+	border:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+	border-radius:6px;
+	overflow:hidden;
+}
+.compareSegment{
+	height:26px;
+	padding:0 10px;
+	border:0;
+	border-right:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+	background:transparent;
+	color:inherit;
+	font:inherit;
+	cursor:pointer;
+}
+.compareSegment:last-child{
+	border-right:0;
+}
+.compareSegment[aria-pressed="true"]{
+	background-color:var(--vscode-button-background);
+	color:var(--vscode-button-foreground);
+}
+.compareSpacer{
+	flex:1 1 auto;
+}
+.compareBtn, .compareIconBtn{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	height:26px;
+	padding:0 10px;
+	border:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+	border-radius:6px;
+	background-color:var(--vscode-dropdown-background, rgba(128,128,128,0.1));
+	color:inherit;
+	font:inherit;
+	cursor:pointer;
+}
+.compareIconBtn{
+	justify-content:center;
+	width:24px;
+	height:24px;
+	padding:0;
+}
+.compareBtn:hover, .compareIconBtn:hover, .compareBtn.active{
+	border-color:var(--vscode-focusBorder);
+}
+.compareBtn svg, .compareIconBtn svg{
+	width:12px;
+	height:12px;
+	fill:currentColor;
+}
+.compareIconBtn svg[fill="none"]{
+	fill:none;
+}
+.compareSegment:focus-visible, .compareBtn:focus-visible, .compareIconBtn:focus-visible{
+	outline:2px solid var(--vscode-focusBorder);
+	outline-offset:1px;
+}
+#commitTable tr.commit.compareLeft > td:first-child{
+	box-shadow:inset 3px 0 0 var(--git-graph-color0);
+}
+#commitTable tr.commit.compareRight > td:first-child{
+	box-shadow:inset 3px 0 0 var(--git-graph-color3);
+}
+#commitTable tr.commit.compareBase{
+	opacity:0.75;
+}
+.compareBaseLabel, .bisectLabel{
+	display:inline-block;
+	margin-right:6px;
+	padding:0 6px;
+	border-radius:4px;
+	line-height:18px;
+	font-size:11.5px;
+	font-weight:600;
+	vertical-align:baseline;
+}
+.compareBaseLabel{
+	background-color:rgba(128,128,128,0.25);
+}
+/* In the description of a commit (a row of flex items, as high as the row) */
+#commitTable tr.commit span.description .compareBaseLabel, #commitTable tr.commit span.description .bisectLabel{
+	flex-shrink:0;
+	align-self:center;
+}
+#comparePanel{
+	position:fixed;
+	top:0;
+	right:0;
+	bottom:0;
+	z-index:15;
+	box-sizing:border-box;
+	padding:14px 16px;
+	border-left:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	background-color:var(--vscode-sideBar-background, var(--vscode-editor-background));
+	overflow-y:auto;
+	display:flex;
+	flex-direction:column;
+	gap:12px;
+	font-size:13px;
+}
+.comparePanelHeader{
+	display:flex;
+	align-items:center;
+	gap:8px;
+	font-size:14px;
+}
+.comparePanelHeader b{
+	flex:1 1 auto;
+	min-width:0;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+.comparePanelText{
+	margin:0;
+	color:var(--vscode-descriptionForeground);
+	font-size:12px;
+	line-height:18px;
+}
+.comparePanelText b{
+	color:var(--vscode-foreground);
+}
+.comparePanelChips{
+	display:flex;
+	flex-wrap:wrap;
+	gap:6px;
+}
+.comparePanelChips > span{
+	padding:2px 8px;
+	border-radius:10px;
+	background-color:rgba(128,128,128,0.18);
+	font-size:12px;
+}
+.comparePanelFiles{
+	border:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+	border-radius:6px;
+	overflow:hidden;
+}
+.comparePanelFile{
+	display:grid;
+	grid-template-columns:20px minmax(0, 1fr) auto;
+	column-gap:8px;
+	align-items:center;
+	width:100%;
+	padding:6px 10px;
+	border:0;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.2));
+	background:transparent;
+	color:inherit;
+	font:inherit;
+	text-align:left;
+	cursor:pointer;
+}
+.comparePanelFile:last-child{
+	border-bottom:0;
+}
+.comparePanelFile:hover, .comparePanelFile:focus-visible{
+	background-color:var(--vscode-list-hoverBackground, rgba(128,128,128,0.15));
+	outline:none;
+}
+.comparePanelStatus{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	width:18px;
+	height:18px;
+	border-radius:4px;
+	font-size:11px;
+	font-weight:700;
+	background-color:rgba(128,128,128,0.2);
+}
+.comparePanelStatus.statusA{
+	color:var(--vscode-gitDecoration-addedResourceForeground, #3fb950);
+}
+.comparePanelStatus.statusM{
+	color:var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
+}
+.comparePanelStatus.statusD{
+	color:var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+}
+.comparePanelStatus.statusR{
+	color:var(--vscode-gitDecoration-renamedResourceForeground, #4daafc);
+}
+.comparePanelFileName{
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+.comparePanelFileName > span{
+	color:var(--vscode-descriptionForeground);
+	font-size:12px;
+}
+.comparePanelStats{
+	font-size:12px;
+	white-space:nowrap;
+}
+.comparePanelEmpty{
+	padding:10px;
+	color:var(--vscode-descriptionForeground);
+}
+.compareFromBase{
+	display:flex;
+	align-items:center;
+	gap:8px;
+	font-size:12.5px;
+	cursor:pointer;
+}
+.comparePanelActions{
+	display:flex;
+	flex-wrap:wrap;
+	gap:8px;
+}
+
+/* Clean Up Branches */
+#branchCleanup{
+	position:fixed;
+	z-index:20;
+	width:min(600px, calc(100vw - 16px));
+	box-sizing:border-box;
+	border:1px solid var(--vscode-menu-border, var(--vscode-widget-border, rgba(128,128,128,0.35)));
+	border-radius:8px;
+	background-color:var(--vscode-editorWidget-background, var(--vscode-menu-background));
+	color:var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+	box-shadow:0 10px 28px var(--vscode-widget-shadow, rgba(0,0,0,0.5));
+	font-size:13px;
+	overflow:hidden;
+}
+.branchCleanupMessage{
+	display:flex;
+	align-items:center;
+	gap:8px;
+	padding:16px 12px;
+	color:var(--vscode-descriptionForeground);
+}
+.branchCleanupMessage svg{
+	width:14px;
+	height:14px;
+	fill:currentColor;
+}
+.branchCleanupGroup{
+	padding:10px 12px 4px;
+	font-size:11.5px;
+	font-weight:600;
+	letter-spacing:0.04em;
+	text-transform:uppercase;
+	color:var(--vscode-descriptionForeground);
+}
+.branchCleanupItem{
+	display:grid;
+	grid-template-columns:16px minmax(0, 1fr) auto;
+	column-gap:10px;
+	align-items:center;
+	padding:8px 12px;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.15));
+	cursor:pointer;
+}
+.branchCleanupItem:hover{
+	background-color:var(--vscode-list-hoverBackground, rgba(128,128,128,0.12));
+}
+.branchCleanupItem > .customCheckbox, .branchCleanupRemote > .customCheckbox, .explainDontAsk > .customCheckbox, .compareFromBase > .customCheckbox{
+	margin-top:0;
+}
+.branchCleanupItem > .customCheckbox{
+	align-self:start;
+	margin-top:2px;
+}
+.branchCleanupName{
+	display:block;
+}
+.branchCleanupText{
+	min-width:0;
+}
+.branchCleanupName{
+	font-family:var(--vscode-editor-font-family);
+	font-size:12.5px;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+.branchCleanupWarning{
+	color:var(--vscode-editorWarning-foreground, #cca700);
+}
+.branchCleanupDate{
+	font-size:11.5px;
+	color:var(--vscode-descriptionForeground);
+}
+.branchCleanupFooter{
+	display:flex;
+	flex-wrap:wrap;
+	align-items:center;
+	gap:10px;
+	padding:12px;
+	border-top:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+}
+.branchCleanupRemote{
+	display:inline-flex;
+	align-items:center;
+	gap:8px;
+	font-size:12.5px;
+}
+.branchCleanupFooter .roundedBtn{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	height:30px;
+	padding:0 14px;
+	border-radius:6px;
+	font-family:inherit;
+}
+.branchCleanupFooter .roundedBtn svg.uiIcon{
+	width:13px !important;
+	height:13px !important;
+}
+.branchCleanupFooter .branchCleanupDelete{
+	border-color:transparent;
+	background-color:var(--vscode-statusBarItem-errorBackground, #c72e0f);
+	color:var(--vscode-statusBarItem-errorForeground, #ffffff);
+	font-weight:600;
+}
+.branchCleanupFooter .branchCleanupDelete.disabled{
+	opacity:0.5;
+	cursor:default;
+}
+
+/* Bisect: the operation bar while bisecting, and the labels of the marked commits */
+#operationBar.bisect{
+	border-color:var(--vscode-focusBorder);
+	background-color:color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent);
+}
+#operationBar.bisect > svg{
+	fill:var(--vscode-focusBorder);
+}
+#operationBar.bisectDone{
+	border-color:var(--vscode-errorForeground, #f85149);
+	background-color:color-mix(in srgb, var(--vscode-errorForeground, #f85149) 12%, transparent);
+}
+#operationBar.bisectDone > svg{
+	fill:var(--vscode-errorForeground, #f85149);
+}
+button.operationBarBtn{
+	display:inline-flex;
+	align-items:center;
+	gap:6px;
+	border:1px solid transparent;
+	font:inherit;
+}
+button.operationBarBtn svg{
+	width:12px;
+	height:12px;
+	fill:currentColor;
+}
+.operationBarBtn.good{
+	border-color:var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+}
+.operationBarBtn.bad{
+	border-color:var(--vscode-gitDecoration-deletedResourceForeground, #da3633);
+}
+.operationBarMuted{
+	color:var(--vscode-descriptionForeground);
+}
+#commitTable tr.commit.bisectExcluded{
+	opacity:0.45;
+}
+.bisectLabel.good{
+	background-color:color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #3fb950) 25%, transparent);
+}
+.bisectLabel.bad{
+	background-color:color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f85149) 25%, transparent);
+}
+.bisectLabel.testing{
+	background-color:color-mix(in srgb, var(--vscode-focusBorder) 25%, transparent);
+}
+.bisectLabel.skipped{
+	background-color:rgba(128,128,128,0.25);
+}
+
+/* The Explain tab of the Commit Details View */
+.cdvTab .explainIcon{
+	margin-right:4px;
+	vertical-align:-2px;
+}
+#cdvExplainView{
+	padding:12px 12px 16px 10px;
+	line-height:19px;
+}
+#cdvExplainView.hidden{
+	display:none;
+}
+.explainConsent{
+	padding:12px 14px;
+	border:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	border-radius:8px;
+}
+.explainConsent p{
+	margin:6px 0 0;
+	font-size:12.5px;
+}
+.explainConsentTitle{
+	font-weight:600;
+}
+.explainLabel{
+	display:block;
+	margin-top:12px;
+	font-size:12px;
+	color:var(--vscode-descriptionForeground);
+}
+#explainModel{
+	margin-top:6px;
+	min-width:220px;
+	height:28px;
+	padding:0 8px;
+	border:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+	border-radius:4px;
+	background-color:var(--vscode-dropdown-background);
+	color:var(--vscode-dropdown-foreground);
+	font:inherit;
+}
+.explainDontAsk{
+	display:flex;
+	align-items:center;
+	gap:8px;
+	margin-top:10px;
+	font-size:12.5px;
+}
+.explainButtons{
+	display:flex;
+	gap:8px;
+	margin-top:14px;
+}
+.explainText p{
+	margin:0 0 8px;
+}
+/* (inside #cdvFiles, whose lists are the file tree) */
+#cdvExplainView .explainText ul, #cdvExplainView .explainText ol{
+	margin:0 0 8px;
+	padding:0 0 0 18px;
+}
+#cdvExplainView .explainText ul{
+	list-style:disc;
+}
+#cdvExplainView .explainText ol{
+	list-style:decimal;
+}
+#cdvExplainView .explainText li{
+	margin-top:2px;
+	text-overflow:clip;
+	display:list-item;
+	overflow:visible;
+	white-space:normal;
+	overflow-wrap:anywhere;
+}
+.explainText code{
+	font-family:var(--vscode-editor-font-family);
+	font-size:12px;
+}
+.explainCode{
+	margin:6px 0 8px;
+	padding:8px 10px;
+	border:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+	border-radius:4px;
+	background-color:var(--vscode-textCodeBlock-background, rgba(128,128,128,0.1));
+	overflow-x:auto;
+	line-height:17px;
+}
+.explainHeading{
+	margin:10px 0 4px;
+	font-weight:600;
+}
+.explainLoading, .explainError{
+	display:flex;
+	align-items:center;
+	gap:8px;
+	margin-top:8px;
+	color:var(--vscode-descriptionForeground);
+}
+.explainError{
+	color:var(--vscode-errorForeground);
+}
+.explainLoading svg, .explainError svg{
+	flex:0 0 auto;
+	width:14px;
+	height:14px;
+	fill:currentColor;
+}
+.explainFooter{
+	display:flex;
+	flex-wrap:wrap;
+	align-items:center;
+	gap:8px;
+	margin-top:10px;
+	padding-top:10px;
+	border-top:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+	font-size:12px;
+	color:var(--vscode-descriptionForeground);
+}
+.explainSpacer{
+	flex:1 1 auto;
+}
+
+/* AI Commit Message Modal */
+#aiCommitModal{
+	display:none;
+	position:fixed;
+	inset:0;
+	z-index:40;
+	align-items:center;
+	justify-content:center;
+	padding:20px;
+	background-color:rgba(0,0,0,0.45);
+}
+#aiCommitModal.active{
+	display:flex;
+}
+.aiCommitCard{
+	display:flex;
+	flex-direction:column;
+	width:min(560px, calc(100vw - 40px));
+	max-height:calc(100vh - 48px);
+	border:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	border-radius:10px;
+	background-color:var(--vscode-editorWidget-background, var(--vscode-editor-background));
+	box-shadow:0 12px 32px var(--vscode-widget-shadow, rgba(0,0,0,0.4));
+	color:var(--vscode-foreground);
+	overflow:hidden;
+}
+.aiCommitHeader{
+	display:flex;
+	align-items:center;
+	justify-content:space-between;
+	gap:10px;
+	padding:12px 14px 12px 16px;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+}
+.aiCommitTitle{
+	display:inline-flex;
+	align-items:center;
+	gap:8px;
+	font-size:14px;
+	font-weight:600;
+}
+.aiCommitClose{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	width:26px;
+	height:26px;
+	padding:0;
+	border:none;
+	border-radius:6px;
+	background-color:transparent;
+	color:inherit;
+	fill:currentColor;
+	cursor:pointer;
+}
+.aiCommitClose:hover{
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+}
+.aiCommitClose svg{
+	width:14px !important;
+	height:14px !important;
+}
+.aiCommitBody{
+	display:flex;
+	flex-direction:column;
+	padding:14px 16px 16px;
+	font-size:13px;
+	line-height:1.45;
+	overflow-y:auto;
+}
+.aiCommitConsentText{
+	margin:0 0 10px;
+}
+.aiCommitSelect{
+	margin-top:6px;
+	min-width:220px;
+	height:28px;
+	padding:0 8px;
+	border:1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.45));
+	border-radius:4px;
+	background-color:var(--vscode-dropdown-background);
+	color:var(--vscode-dropdown-foreground);
+	font:inherit;
+}
+.aiCommitTextarea{
+	box-sizing:border-box;
+	width:100%;
+	min-height:130px;
+	padding:8px 10px;
+	border:1px solid var(--vscode-input-border, var(--vscode-panel-border, rgba(128,128,128,0.35)));
+	border-radius:6px;
+	background-color:var(--vscode-input-background, var(--vscode-editor-background));
+	color:var(--vscode-input-foreground, var(--vscode-foreground));
+	font-family:var(--vscode-editor-font-family);
+	font-size:12.5px;
+	line-height:1.45;
+	resize:vertical;
+	outline:none;
+	-webkit-user-select:text;
+	user-select:text;
+}
+.aiCommitTextarea:focus{
+	border-color:var(--vscode-focusBorder);
+}
+
+/* Customize Commit Action Buttons Modal */
+#cdvActionsModal{
+	position:fixed;
+	inset:0;
+	z-index:42;
+	display:flex;
+	align-items:center;
+	justify-content:center;
+	padding:20px;
+	background-color:rgba(0,0,0,0.45);
+}
+.cdvActionsModalPanel{
+	display:flex;
+	flex-direction:column;
+	width:min(520px, calc(100vw - 32px));
+	max-height:calc(100vh - 48px);
+	box-sizing:border-box;
+	border:1px solid var(--vscode-widget-border, var(--vscode-panel-border, rgba(128,128,128,0.35)));
+	border-radius:10px;
+	background-color:var(--vscode-editorWidget-background, var(--vscode-editor-background));
+	color:var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+	box-shadow:0 12px 32px var(--vscode-widget-shadow, rgba(0,0,0,0.5));
+	font-size:13px;
+	overflow:hidden;
+}
+.cdvActionsModalHint{
+	padding:10px 16px;
+	color:var(--vscode-descriptionForeground);
+	font-size:12px;
+	line-height:1.45;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+}
+.cdvActionsModalList{
+	flex:1 1 auto;
+	overflow-y:auto;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+}
+.cdvActionsModalItem{
+	display:grid;
+	grid-template-columns:16px minmax(0, 1fr) auto auto;
+	align-items:center;
+	gap:10px;
+	padding:7px 14px 7px 12px;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.12));
+	-webkit-user-select:none;
+	user-select:none;
+}
+.cdvActionsModalItem:last-child{
+	border-bottom:none;
+}
+.cdvActionsModalItem:hover{
+	background-color:var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
+}
+.cdvActionsModalItem.checked{
+	background-color:color-mix(in srgb, var(--vscode-focusBorder) 7%, transparent);
+}
+.cdvActionsModalItem.checked:hover{
+	background-color:color-mix(in srgb, var(--vscode-focusBorder) 14%, transparent);
+}
+.cdvActionsModalItem.dragging{
+	opacity:0.4;
+}
+.cdvActionsModalItem.dropBefore{
+	box-shadow:inset 0 2px 0 var(--vscode-focusBorder);
+}
+.cdvActionsModalItem.dropAfter{
+	box-shadow:inset 0 -2px 0 var(--vscode-focusBorder);
+}
+.cdvActionsModalLabel{
+	display:inline-flex;
+	align-items:center;
+	gap:8px;
+	min-width:0;
+	cursor:pointer;
+}
+.cdvActionsModalLabel > .customCheckbox{
+	flex:0 0 auto;
+	margin-top:0;
+}
+.cdvActionsModalIcon{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	width:15px;
+	height:15px;
+	opacity:0.85;
+}
+.cdvActionsModalIcon svg.uiIcon{
+	width:14px !important;
+	height:14px !important;
+}
+.cdvActionsModalTitle{
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+}
+.cdvActionsModalItem.checked .cdvActionsModalTitle{
+	font-weight:500;
+}
+.cdvActionsOrderBadge{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	min-width:24px;
+	height:18px;
+	padding:0 5px;
+	border-radius:9px;
+	background-color:rgba(128,128,128,0.18);
+	color:var(--vscode-descriptionForeground);
+	font-family:var(--vscode-editor-font-family);
+	font-size:11px;
+	font-weight:600;
+}
+.cdvActionsOrderBadge.primary{
+	background-color:var(--vscode-button-background);
+	color:var(--vscode-button-foreground);
+}
+.cdvActionsOrderBadge.empty{
+	visibility:hidden;
+}

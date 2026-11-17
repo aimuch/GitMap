@@ -1,0 +1,19 @@
+{
+	"compilerOptions": {
+		"lib": [
+			"es2017",
+			"dom"
+		],
+		"module": "none",
+		"moduleResolution": "node",
+		"noFallthroughCasesInSwitch": true,
+		"noImplicitAny": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"outDir": "../media",
+		"removeComments": true,
+		"strict": true,
+		"target": "es2017",
+		"types": []
+	}
+}

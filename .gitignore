@@ -1,0 +1,8 @@
+node_modules/
+dist/
+media/
+release/
+public/vendor/
+.DS_Store
+*.log
+.gitmap-dev/

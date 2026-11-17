@@ -1,0 +1,107 @@
+{
+  "name": "gitmap",
+  "productName": "GitMap",
+  "version": "1.0.0",
+  "description": "Standalone cross-platform Git graph & repository manager (Electron Desktop + Web Server) with Remote-SSH path browsing and Git operations.",
+  "author": {
+    "name": "Andy",
+    "email": "aimuch@users.noreply.github.com",
+    "url": "https://github.com/aimuch"
+  },
+  "license": "MIT",
+  "main": "dist/desktop/main.js",
+  "bin": {
+    "gitmap": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "tsc -p tsconfig.json && node scripts/postbuild.js",
+    "build:web": "tsc -p web/tsconfig.json && node scripts/build-web.js",
+    "build:web:debug": "tsc -p web/tsconfig.json && node scripts/build-web.js debug",
+    "start": "npm run build && electron .",
+    "desktop": "electron .",
+    "web": "node dist/cli.js --web",
+    "dev:web": "npm run build && node dist/cli.js --web",
+    "pack": "npm run build && node scripts/package-app.js --dir",
+    "dist": "npm run build && node scripts/package-app.js",
+    "dist:mac": "npm run build && node scripts/package-app.js --mac",
+    "dist:mac:all": "npm run build && node scripts/package-app.js --mac --arm64 --x64",
+    "dist:win": "npm run build && node scripts/package-app.js --win --x64",
+    "dist:linux": "npm run build && node scripts/package-app.js --linux --x64",
+    "test": "npm run build && node --test dist/tests/*.test.js"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "diff": "^7.0.0",
+    "iconv-lite": "^0.7.3",
+    "ssh2": "^1.16.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.0",
+    "@types/node": "^20.17.0",
+    "@types/ssh2": "^1.15.1",
+    "@types/ws": "^8.5.13",
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0",
+    "typescript": "^5.8.2",
+    "uglify-js": "^3.19.3"
+  },
+  "build": {
+    "appId": "dev.aimuch.gitmap",
+    "productName": "GitMap",
+    "npmRebuild": false,
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "asarUnpack": [
+      "dist/askpass/**/*"
+    ],
+    "files": [
+      "dist/**/*",
+      "!dist/tests/**/*",
+      "media/**/*",
+      "public/**/*",
+      "l10n/**/*",
+      "resources/**/*",
+      "!resources/demo.gif",
+      "licenses/**/*",
+      "LICENSE",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "resources/icon.png",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "resources/icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-${version}-win-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-win-${arch}-portable.${ext}"
+    },
+    "linux": {
+      "category": "Development",
+      "maintainer": "Andy <aimuch@users.noreply.github.com>",
+      "icon": "resources/icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
+  }
+}
