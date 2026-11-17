@@ -957,8 +957,32 @@ async function showQuickPick<T extends QuickPickItem>(
   return items[indices[0]];
 }
 
+/* Editor Tabs (GitMap has no VS Code editor tabs: these exist so code shared with vscode-git-map compiles unchanged) */
+
+export class TabInputText {
+  constructor(public readonly uri: Uri) {}
+}
+
+export class TabInputTextDiff {
+  constructor(public readonly original: Uri, public readonly modified: Uri) {}
+}
+
+export interface Tab {
+  readonly label: string;
+  readonly input: unknown;
+}
+
+export interface TabGroup {
+  readonly activeTab: Tab | undefined;
+  readonly tabs: ReadonlyArray<Tab>;
+}
+
 export const window = {
   activeTextEditor: undefined as any,
+  tabGroups: {
+    activeTabGroup: { activeTab: undefined, tabs: [] } as TabGroup,
+    all: [] as ReadonlyArray<TabGroup>
+  },
 
   createOutputChannel(name: string): OutputChannel {
     return {
