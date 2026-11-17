@@ -52,7 +52,7 @@ export const COMMIT_ACTION_IDS: ReadonlyArray<string> = [
 ];
 export const DEFAULT_CDV_COMMIT_ACTIONS: ReadonlyArray<string> = ['checkout', 'createBranch', 'cherrypick'];
 export const DEFAULT_ROW_COMMIT_ACTIONS: ReadonlyArray<string> = ['createBranch', 'checkout', 'cherrypick', 'copyHash'];
-export const ROW_ACTIONS_POSITIONS: ReadonlyArray<string> = ['Description', 'Row'];
+export const ROW_ACTIONS_POSITIONS: ReadonlyArray<string> = ['Pointer', 'Description', 'Row'];
 
 const SETTING_FALLBACK_KEY = 'settingFallbacks';
 let fallbackMemento: vscode.Memento | null = null;
@@ -150,13 +150,14 @@ class Config {
 
 	/**
 	 * Get the buttons shown on the row of the commit the mouse is over (`git-map.commitRow.actions`, the other actions are in its
-	 * "More Actions" menu), and where they're shown (`git-map.commitRow.actionsPosition`: at the end of the Description column, or of the row).
+	 * "More Actions" menu), and where they're shown (`git-map.commitRow.actionsPosition`: next to the pointer, or at the end of the
+	 * Description column / row).
 	 */
 	get rowActions(): RowActionsConfig {
-		const position = this.config.get<unknown>('commitRow.actionsPosition', 'Description');
+		const position = this.config.get<unknown>('commitRow.actionsPosition', 'Pointer');
 		return {
 			actions: this.getCommitActionList('commitRow.actions', DEFAULT_ROW_COMMIT_ACTIONS),
-			position: typeof position === 'string' && ROW_ACTIONS_POSITIONS.includes(position) ? <RowActionsConfig['position']>position : 'Description'
+			position: typeof position === 'string' && ROW_ACTIONS_POSITIONS.includes(position) ? <RowActionsConfig['position']>position : 'Pointer'
 		};
 	}
 

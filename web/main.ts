@@ -1054,7 +1054,7 @@ class GitGraphView {
 
 	public getRowActionsConfig(): GG.RowActionsConfig {
 		const config = this.config.rowActions;
-		return config && Array.isArray(config.actions) ? config : { actions: DEFAULT_ROW_COMMIT_ACTIONS, position: 'Description' };
+		return config && Array.isArray(config.actions) ? config : { actions: DEFAULT_ROW_COMMIT_ACTIONS, position: 'Pointer' };
 	}
 
 	public setHideUnchangedRegions(enabled: boolean, persist: boolean = true) {
@@ -2569,14 +2569,19 @@ class GitGraphView {
 		this.tableElem.addEventListener('mouseover', (e: MouseEvent) => {
 			const commitElem = e.target instanceof Element ? <HTMLElement | null>e.target.closest('.commit') : null;
 			highlightBranchOfCommit(commitElem !== null && typeof commitElem.dataset.id === 'string' ? parseInt(commitElem.dataset.id) : null);
-			// The buttons of the most common actions on the commit are shown at the end of its row
+			// The buttons of the most common actions on the commit are shown on its row (next to the pointer, by default)
 			if (commitElem !== null) {
-				this.rowActions.show(commitElem);
+				this.rowActions.show(commitElem, e.clientX);
 			} else {
 				this.rowActions.hide();
 			}
 		});
-		this.tableElem.addEventListener('mouseleave', () => {
+		this.tableElem.addEventListener('mousemove', (e: MouseEvent) => {
+			if (this.getRowActionsConfig().position === 'Pointer') this.rowActions.follow(e.clientX);
+		});
+		this.tableElem.addEventListener('mouseleave', (e: MouseEvent) => {
+			// The buttons float over the table (outside it), so moving onto them doesn't leave the row
+			if (this.rowActions.contains(e.relatedTarget)) return;
 			highlightBranchOfCommit(null);
 			this.rowActions.hide();
 		});
@@ -3522,7 +3527,7 @@ class GitGraphView {
 			let orderCounter = 0;
 			const positionHtml = isRow
 				? '<div class="cdvActionsModalPosition"><span class="cdvActionsModalPositionLabel">' + t('Position:') + '</span>' +
-					[['Description', t('End of the Description Column')], ['Row', t('End of the Row')]].map((option) =>
+					[['Pointer', t('Next to the Pointer')], ['Description', t('End of the Description Column')], ['Row', t('End of the Row')]].map((option) =>
 						'<span class="cdvActionsModalPositionOption' + (option[0] === position ? ' ' + CLASS_SELECTED : '') + '" data-position="' + option[0] + '" role="radio" aria-checked="' + (option[0] === position ? 'true' : 'false') + '">' + option[1] + '</span>'
 					).join('') + '</div>'
 				: '';
@@ -3587,7 +3592,8 @@ class GitGraphView {
 			if (!(e.target instanceof Element)) return;
 			const positionElem = <HTMLElement | null>e.target.closest('.cdvActionsModalPositionOption');
 			if (positionElem !== null) {
-				position = positionElem.dataset.position === 'Row' ? 'Row' : 'Description';
+				const value = positionElem.dataset.position;
+				position = value === 'Row' || value === 'Description' ? value : 'Pointer';
 				render();
 				return;
 			}
@@ -3605,7 +3611,7 @@ class GitGraphView {
 					break;
 				case 'reset': {
 					items.length = 0;
-					position = 'Description';
+					position = 'Pointer';
 					defaults.forEach((id) => {
 						const entry = catalog.find((item) => item.id === id);
 						if (typeof entry !== 'undefined') items.push({ id: entry.id, title: entry.title, icon: entry.icon, checked: true });

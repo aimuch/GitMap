@@ -1373,5 +1373,6 @@
 	"Position:": "位置：",
 	"End of the Description Column": "说明列末尾",
 	"End of the Row": "整行最右侧",
-	"Checked actions are buttons on the row the mouse is over; the others are folded into its \"More Actions\" menu. Drag or use the arrows to adjust their order.": "勾选的操作会显示为鼠标所在行上的按钮，其余的收进「更多操作」菜单。拖动或用箭头调整顺序。"
+	"Checked actions are buttons on the row the mouse is over; the others are folded into its \"More Actions\" menu. Drag or use the arrows to adjust their order.": "勾选的操作会显示为鼠标所在行上的按钮，其余的收进「更多操作」菜单。拖动或用箭头调整顺序。",
+	"Next to the Pointer": "跟随鼠标"
 }

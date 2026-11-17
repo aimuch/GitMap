@@ -585,7 +585,7 @@ export interface GitGraphViewWorkspaceState {
 
 export interface RowActionsConfig {
 	readonly actions: ReadonlyArray<string>; // The buttons shown, in order (the other actions are in the "More Actions" menu)
-	readonly position: 'Description' | 'Row'; // At the end of the Description column, or at the end of the row
+	readonly position: 'Pointer' | 'Description' | 'Row'; // Next to the pointer, at the end of the Description column, or at the end of the row
 }
 
 export interface CommitDetailsViewConfig {

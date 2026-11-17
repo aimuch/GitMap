@@ -1494,55 +1494,32 @@ svg.openFolderIcon, svg.closedFolderIcon, svg.fileIcon{
 	box-shadow:inset 3px 0 0 var(--vscode-list-highlightForeground, var(--vscode-focusBorder));
 }
 
-/* The buttons of the most common actions on the commit the mouse is over, at the end of its Description cell. Their background is the
-   row's background (opaque, as they cover the end of the description), fading in over the description. */
+/* The buttons of the most common actions on the commit the mouse is over: a raised pill floating over the table (in #content, so that
+   narrow columns never clip it), next to the pointer or at the end of the Description column / row. It's lighter than the row (mixed
+   with the text colour, so it works in dark & light themes), with an accent outline. */
 #commitTable td.descriptionCol{
 	position:relative;
 }
 #rowActions{
-	--git-graph-rowActionsTint:var(--vscode-list-hoverBackground, rgba(128,128,128,0.15));
 	position:absolute;
-	top:0;
-	right:0;
-	bottom:0;
+	z-index:3; /* Above the graph, below the frozen column headers */
 	display:flex;
 	align-items:center;
 	gap:1px;
-	padding:0 7px 0 25px;
-	background:linear-gradient(var(--git-graph-rowActionsTint), var(--git-graph-rowActionsTint)), var(--vscode-editor-background);
-	-webkit-mask-image:linear-gradient(to right, transparent, #000 18px);
-	mask-image:linear-gradient(to right, transparent, #000 18px);
-}
-/* A raised pill behind the buttons, so that they stand out from the row (whose background they otherwise share) */
-#rowActions::before{
-	content:'';
-	position:absolute;
-	top:max(1px, calc((var(--git-graph-rowHeight) - 26px) / 2));
-	bottom:max(1px, calc((var(--git-graph-rowHeight) - 26px) / 2));
-	left:20px;
-	right:3px;
+	height:min(28px, calc(var(--git-graph-rowHeight) - 2px));
+	padding:0 3px;
+	box-sizing:border-box;
 	border-radius:7px;
-	/* Lighter than the row (mixed with the text colour, so it works in dark & light themes), with an accent outline */
 	border:1px solid color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 70%, transparent);
 	background:color-mix(in srgb, var(--vscode-foreground, #ccc) 15%, var(--vscode-editor-background, #1e1e1e));
 	box-shadow:0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,0.45));
-	pointer-events:none;
 }
-/* The buttons can be at the end of the row (in its last cell, which doesn't clip them so that they can cover the cells before it) */
-#commitTable td.rowActionsHost{
-	position:relative;
+/* The row keeps its hover background while the mouse is over its buttons (which aren't inside it) */
+#commitTable tr.commit.rowActionsTarget{
+	background-color:var(--vscode-list-hoverBackground, rgba(128,128,128,0.15));
 }
-#commitTable td.rowActionsHostRow{
-	overflow:visible;
-}
-#rowActions > .rowAction{
-	position:relative;
-}
-#commitTable tr.commit.multiSelected #rowActions{
-	--git-graph-rowActionsTint:var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,0.25));
-}
-#commitTable tr.commit.commitDetailsOpen #rowActions{
-	--git-graph-rowActionsTint:var(--vscode-list-activeSelectionBackground, var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,0.25)));
+#commitTable tr.commit.commitDetailsOpen.rowActionsTarget{
+	background-color:var(--vscode-list-activeSelectionBackground, var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,0.25)));
 }
 .rowAction{
 	display:inline-flex;
