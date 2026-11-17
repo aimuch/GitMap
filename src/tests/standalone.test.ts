@@ -9,6 +9,7 @@ import { WebSocket } from 'ws';
 import { formatRemoteRepoUri, isRemoteRepo, joinRepoPath, parseRemoteRepo } from '../remote/repoTransport';
 import { parseUserSshConfig } from '../remote/sshConfigParser';
 import { GitMapServer } from '../server/appServer';
+import { __test as launcherTest, buildSshCommandLine } from '../server/launchers';
 import { CommitOrdering, GitFileStatus } from '../types';
 
 const STATUS_CODE = sshUtils.sftp.STATUS_CODE;
@@ -154,6 +155,30 @@ function startTestSshServer(homeRoot: string): Promise<{ server: SshServer; port
             if (!f) return sftp.status(reqid, STATUS_CODE.FAILURE);
             fs.writeSync(f.fd, data, 0, data.length, offset);
             sftp.status(reqid, STATUS_CODE.OK);
+          });
+
+          sftp.on('MKDIR', (reqid, p) => {
+            try {
+              fs.mkdirSync(p);
+              sftp.status(reqid, STATUS_CODE.OK);
+            } catch (_) {
+              sftp.status(reqid, STATUS_CODE.FAILURE);
+            }
+          });
+          sftp.on('SETSTAT', (reqid) => sftp.status(reqid, STATUS_CODE.OK));
+          sftp.on('FSETSTAT', (reqid) => sftp.status(reqid, STATUS_CODE.OK));
+          sftp.on('FSTAT', (reqid, handle) => {
+            const f = openFiles.get(handle.toString());
+            if (!f) return sftp.status(reqid, STATUS_CODE.FAILURE);
+            sftp.attrs(reqid, makeAttrs(fs.fstatSync(f.fd)));
+          });
+          sftp.on('REMOVE', (reqid, p) => {
+            try {
+              fs.unlinkSync(p);
+              sftp.status(reqid, STATUS_CODE.OK);
+            } catch (_) {
+              sftp.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+            }
           });
 
           sftp.on('CLOSE', (reqid, handle) => {
@@ -450,5 +475,100 @@ describe('GitMap Standalone & Remote-SSH Suite', () => {
     } finally {
       ws.close();
     }
+  });
+
+  it('rejects WebSocket connections from other origins and foreign Host names', async () => {
+    const wsUrl = serverUrl.replace('http://', 'ws://') + '/ws';
+    const tryConnect = (headers: { [k: string]: string }) =>
+      new Promise<boolean>((resolve) => {
+        const ws = new WebSocket(wsUrl, { headers });
+        ws.on('open', () => {
+          ws.close();
+          resolve(true);
+        });
+        ws.on('error', () => resolve(false));
+        ws.on('unexpected-response', () => resolve(false));
+      });
+    const host = new URL(serverUrl).host;
+    assert.equal(await tryConnect({ Origin: 'http://' + host }), true, 'same-origin page may connect');
+    assert.equal(await tryConnect({ Origin: 'https://evil.example' }), false, 'cross-origin page must be rejected');
+    assert.equal(await tryConnect({ Host: 'evil.example:' + new URL(serverUrl).port, Origin: 'http://evil.example:' + new URL(serverUrl).port }), false, 'DNS-rebound host must be rejected');
+  });
+
+  it('builds external terminal / editor launch commands with safely quoted values', () => {
+    const profile: any = { id: 'prod', name: 'prod', host: '10.0.0.5', port: 2222, user: 'deploy', authType: 'auto', source: 'saved', proxyJump: 'bastion' };
+    const line = buildSshCommandLine(profile, "/srv/it's here");
+    assert.ok(line.startsWith("ssh '-t' '-p' '2222' '-J' 'bastion' 'deploy@10.0.0.5' "), line);
+    assert.ok(line.includes(`'\\''`), 'single quotes in the path are escaped');
+    const cfgProfile: any = { id: 'work-api', name: 'work-api', host: 'h', port: 22, user: 'u', authType: 'auto', source: 'ssh-config' };
+    assert.deepEqual(launcherTest.sshArgs(cfgProfile), ['-t', 'work-api'], 'ssh-config hosts use their alias');
+    const filled = launcherTest.fillTemplate('open -a Hyper {path} && echo {host}', { isRemote: false, path: '/tmp/a b;rm -rf /', profile: null });
+    assert.equal(filled, "open -a Hyper '/tmp/a b;rm -rf /' && echo ''");
+  });
+
+  it('uploads & downloads files and folders over SFTP with undo / restore, never overwriting', async () => {
+    const { transferManager } = await import('../remote/transferManager');
+    const { sshManager } = await import('../remote/sshManager');
+    await sshManager.saveHost({ id: 'xfer-ssh', name: 'xfer', host: '127.0.0.1', port: sshPort, user: 'gituser', authType: 'key', privateKeyPath: clientKeyPath });
+    const waitFor = async (id: string, states: string[]) => {
+      for (let i = 0; i < 200; i++) {
+        const t = transferManager.list().find((x) => x.id === id)!;
+        if (states.includes(t.state)) return t;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      throw new Error('Timed out waiting for transfer ' + id);
+    };
+
+    // Upload a local folder (twice: the second one must get a " (1)" suffix)
+    const localSrc = path.join(tmpRoot, 'upload-src', 'site');
+    fs.mkdirSync(path.join(localSrc, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(localSrc, 'index.html'), '<h1>hi</h1>');
+    fs.writeFileSync(path.join(localSrc, 'assets', 'data.bin'), Buffer.alloc(300000, 7));
+    const remoteDest = path.join(remoteHome, 'uploads');
+    fs.mkdirSync(remoteDest, { recursive: true });
+
+    const up1 = transferManager.start('upload', 'xfer-ssh', [localSrc], remoteDest);
+    const done1 = await waitFor(up1.id, ['completed', 'failed']);
+    assert.equal(done1.state, 'completed', String(done1.error));
+    assert.equal(done1.totalFiles, 2);
+    assert.deepEqual(fs.readFileSync(path.join(remoteDest, 'site', 'assets', 'data.bin')), Buffer.alloc(300000, 7));
+
+    const up2 = transferManager.start('upload', 'xfer-ssh', [localSrc], remoteDest);
+    assert.equal((await waitFor(up2.id, ['completed', 'failed'])).state, 'completed');
+    assert.ok(fs.existsSync(path.join(remoteDest, 'site (1)', 'index.html')), 'existing folder is not overwritten');
+
+    // Undo moves the upload into the remote trash; restore moves it back
+    await transferManager.undo(up1.id);
+    assert.equal(fs.existsSync(path.join(remoteDest, 'site')), false);
+    assert.ok(fs.existsSync(path.join(remoteHome, '.gitmap-trash', up1.id, 'site', 'index.html')));
+    await transferManager.restore(up1.id);
+    assert.ok(fs.existsSync(path.join(remoteDest, 'site', 'index.html')));
+
+    // Download the folder back and compare
+    const localDest = path.join(tmpRoot, 'downloads');
+    const down = transferManager.start('download', 'xfer-ssh', [path.join(remoteDest, 'site')], localDest);
+    assert.equal((await waitFor(down.id, ['completed', 'failed'])).state, 'completed');
+    assert.deepEqual(fs.readFileSync(path.join(localDest, 'site', 'assets', 'data.bin')), Buffer.alloc(300000, 7));
+
+    // Undo a download (moved to GitMap's local trash), then remove the record (empties its trash)
+    await transferManager.undo(down.id);
+    assert.equal(fs.existsSync(path.join(localDest, 'site')), false);
+    await transferManager.remove(down.id);
+    assert.equal(transferManager.list().some((t) => t.id === down.id), false);
+  });
+
+  it('stores GitMap-only aliases & tags for SSH hosts without changing their ids', async () => {
+    const { sshManager, normaliseTags } = await import('../remote/sshManager');
+    assert.deepEqual(normaliseTags(' prod, #GPU，prod  上海 '), ['prod', 'GPU', '上海']);
+    await sshManager.saveHost({ id: 'meta-ssh', name: 'meta-ssh', host: '127.0.0.1', port: sshPort, user: 'gituser' });
+    await sshManager.updateHostMeta('meta-ssh', '  生产 API  ', ['prod', 'Prod', 'api']);
+    const host = sshManager.listHosts().find((h) => h.id === 'meta-ssh')!;
+    assert.equal(host.alias, '生产 API');
+    assert.deepEqual(host.tags, ['prod', 'api']);
+    assert.equal(host.name, 'meta-ssh', 'the saved name / id is unchanged');
+    assert.ok(sshManager.listTags().includes('api'));
+    await sshManager.updateHostMeta('meta-ssh', '', []);
+    assert.equal(sshManager.listHosts().find((h) => h.id === 'meta-ssh')!.alias, undefined);
+    await sshManager.removeHost('meta-ssh');
   });
 });

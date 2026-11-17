@@ -578,7 +578,8 @@ class StandaloneWebviewPanel implements WebviewPanel {
         self._html = val;
         if (self.viewType === 'git-map') {
           hostBridge.setGraphHtml(val);
-        } else if (self.viewType === 'git-map.visualFileHistory') {
+        } else {
+          // Auxiliary panels (Visual File History, File Time Machine, ...) are shown in their own workspace tab
           hostBridge.getHandlers().onVisualFileHistoryUpdated?.({
             title: self.title,
             html: val,
@@ -591,6 +592,8 @@ class StandaloneWebviewPanel implements WebviewPanel {
         if (self.disposed) return Promise.resolve(false);
         if (self.viewType === 'git-map') {
           hostBridge.getHandlers().onGraphPostMessage?.(message);
+        } else {
+          hostBridge.getHandlers().onPanelPostMessage?.(self.panelId, message);
         }
         return Promise.resolve(true);
       },
@@ -621,7 +624,7 @@ class StandaloneWebviewPanel implements WebviewPanel {
     if (!this.visible) {
       this.visible = true;
       this.viewStateEmitter.fire({ webviewPanel: this });
-    } else if (this.viewType === 'git-map.visualFileHistory' && this._html) {
+    } else if (this.viewType !== 'git-map' && this._html) {
       hostBridge.getHandlers().onVisualFileHistoryUpdated?.({
         title: this.title,
         html: this._html,

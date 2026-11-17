@@ -76,4 +76,19 @@ for (const [srcFile, destName] of xtermFiles) {
   }
 }
 
-console.log('Postbuild completed: dist vscode imports rewritten & xterm assets prepared.');
+// 4. Copy highlight.js (browser build + extra languages) for syntax highlighting in the Diff & File viewers
+const hljsRoot = path.join(ROOT, 'node_modules', '@highlightjs', 'cdn-assets');
+const hljsVendorDir = path.join(ROOT, 'public', 'vendor', 'hljs');
+const HLJS_EXTRA_LANGUAGES = ['dockerfile', 'cmake', 'protobuf', 'powershell', 'nginx', 'dart', 'scala', 'groovy', 'elixir', 'erlang', 'haskell', 'clojure', 'latex', 'elm', 'fsharp', 'vbnet', 'dos', 'julia', 'vim', 'properties', 'nim'];
+if (fs.existsSync(hljsRoot)) {
+  fs.mkdirSync(hljsVendorDir, { recursive: true });
+  let bundle = fs.readFileSync(path.join(hljsRoot, 'highlight.min.js'), 'utf8') + '\n';
+  for (const lang of HLJS_EXTRA_LANGUAGES) {
+    const file = path.join(hljsRoot, 'languages', lang + '.min.js');
+    if (fs.existsSync(file)) bundle += fs.readFileSync(file, 'utf8') + '\n';
+  }
+  fs.writeFileSync(path.join(hljsVendorDir, 'highlight.bundle.js'), bundle);
+  fs.copyFileSync(path.join(hljsRoot, 'LICENSE'), path.join(hljsVendorDir, 'LICENSE'));
+}
+
+console.log('Postbuild completed: dist vscode imports rewritten, xterm & highlight.js assets prepared.');

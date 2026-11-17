@@ -21,6 +21,10 @@ export interface SshHostProfile {
   proxyJump?: string;
   defaultPath?: string;
   source: 'ssh-config' | 'saved';
+  /** GitMap-only display name (doesn't change the host's id, so repositories on it keep working). */
+  alias?: string;
+  /** GitMap-only tags (e.g. prod, staging, gpu). */
+  tags?: string[];
   connected?: boolean;
   homeDir?: string;
   gitVersion?: string | null;
@@ -83,8 +87,30 @@ function expandTildeLocal(p: string): string {
   return p;
 }
 
+interface HostMeta {
+  alias?: string;
+  tags?: string[];
+}
+
+/** Normalise user-entered tags: trimmed, no '#', de-duplicated (case-insensitively), at most 12 of 32 chars each. */
+export function normaliseTags(input: unknown): string[] {
+  const raw = Array.isArray(input) ? input : typeof input === 'string' ? input.split(/[,，\s]+/) : [];
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const item of raw) {
+    const tag = String(item).trim().replace(/^#+/, '').slice(0, 32);
+    if (!tag || seen.has(tag.toLowerCase())) continue;
+    seen.add(tag.toLowerCase());
+    tags.push(tag);
+    if (tags.length >= 12) break;
+  }
+  return tags;
+}
+
 export class SshManager {
   private savedProfiles: SshHostProfile[] = [];
+  private hostMeta: { [hostId: string]: HostMeta } = {};
+  private metaFilePath: string = '';
   private readonly sessions = new Map<string, ActiveSshSession>();
   private readonly connecting = new Map<string, Promise<ActiveSshSession>>();
   private readonly sessionPasswords = new Map<string, string>();
@@ -93,8 +119,37 @@ export class SshManager {
 
   public init(dataDir: string, secrets: vscode.SecretStorage) {
     this.profilesFilePath = path.join(dataDir, 'ssh-hosts.json');
+    this.metaFilePath = path.join(dataDir, 'ssh-host-meta.json');
     this.secrets = secrets;
     this.loadSavedProfiles();
+    try {
+      const raw = fs.existsSync(this.metaFilePath) ? JSON.parse(fs.readFileSync(this.metaFilePath, 'utf8')) : {};
+      this.hostMeta = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    } catch (_) {
+      this.hostMeta = {};
+    }
+  }
+
+  /**
+   * Set the GitMap-only alias & tags of a host (works for ~/.ssh/config hosts too, without editing the config file).
+   */
+  public async updateHostMeta(hostId: string, alias: unknown, tags: unknown): Promise<void> {
+    const cleanAlias = typeof alias === 'string' ? alias.trim().slice(0, 64) : '';
+    const cleanTags = normaliseTags(tags);
+    if (!cleanAlias && cleanTags.length === 0) delete this.hostMeta[hostId];
+    else this.hostMeta[hostId] = { ...(cleanAlias ? { alias: cleanAlias } : {}), ...(cleanTags.length ? { tags: cleanTags } : {}) };
+    if (!this.metaFilePath) return;
+    await fs.promises.mkdir(path.dirname(this.metaFilePath), { recursive: true });
+    await fs.promises.writeFile(this.metaFilePath, JSON.stringify(this.hostMeta, null, 2), 'utf8');
+  }
+
+  /** All tags in use, for suggestions. */
+  public listTags(): string[] {
+    const all = new Map<string, string>();
+    for (const meta of Object.values(this.hostMeta)) {
+      for (const tag of meta.tags || []) if (!all.has(tag.toLowerCase())) all.set(tag.toLowerCase(), tag);
+    }
+    return Array.from(all.values()).sort((a, b) => a.localeCompare(b));
   }
 
   private loadSavedProfiles() {
@@ -138,6 +193,8 @@ export class SshManager {
         privateKeyPath: entry.identityFiles[0],
         proxyJump: entry.proxyJump,
         source: 'ssh-config',
+        alias: this.hostMeta[entry.alias]?.alias,
+        tags: this.hostMeta[entry.alias]?.tags || [],
         connected: !!active,
         homeDir: active?.homeDir,
         gitVersion: active?.gitVersion
@@ -149,13 +206,15 @@ export class SshManager {
       byId.set(saved.id, {
         ...saved,
         source: 'saved',
+        alias: this.hostMeta[saved.id]?.alias,
+        tags: this.hostMeta[saved.id]?.tags || [],
         connected: !!active,
         homeDir: active?.homeDir,
         gitVersion: active?.gitVersion
       });
     }
 
-    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(byId.values()).sort((a, b) => (a.alias || a.name).localeCompare(b.alias || b.name));
   }
 
   public async saveHost(
@@ -215,6 +274,7 @@ export class SshManager {
     const before = this.savedProfiles.length;
     this.savedProfiles = this.savedProfiles.filter((p) => p.id !== id);
     await this.persistSavedProfiles();
+    if (this.hostMeta[id]) await this.updateHostMeta(id, '', []);
     if (this.secrets) {
       await this.secrets.delete(`ssh.password.${id}`);
       await this.secrets.delete(`ssh.passphrase.${id}`);
@@ -465,7 +525,7 @@ export class SshManager {
     return session;
   }
 
-  private async getSftp(hostId: string): Promise<SFTPWrapper> {
+  public async getSftp(hostId: string): Promise<SFTPWrapper> {
     const session = await this.ensureConnected(hostId);
     if (session.sftp) return session.sftp;
     const sftp = await new Promise<SFTPWrapper>((resolve, reject) => {
@@ -535,6 +595,46 @@ export class SshManager {
         }
       });
     });
+  }
+
+  /**
+   * Run a shell command on the SSH host (outside any repository).
+   */
+  public async execRemote(hostId: string, shellCommand: string): Promise<{ code: number; stdout: string; stderr: string }> {
+    const session = await this.ensureConnected(hostId);
+    const res = await this.execRawOnClient(session.client, shellCommand);
+    return { code: res.code, stdout: res.stdout.toString('utf8'), stderr: res.stderr };
+  }
+
+  /**
+   * Complete a partially typed remote path (for Tab completion in the path browser).
+   * @returns The directory that was listed, and its entries whose names start with the typed prefix.
+   */
+  public async completeRemotePath(hostId: string, partial: string, showHidden: boolean): Promise<{ dir: string; prefix: string; entries: { name: string; path: string; isDirectory: boolean }[] }> {
+    const raw = partial.trim() === '' ? '~/' : partial;
+    const slash = raw.lastIndexOf('/');
+    const dirPart = slash === -1 ? '~' : raw.substring(0, slash + 1) || '/';
+    const prefix = slash === -1 ? (raw === '~' ? '' : raw) : raw.substring(slash + 1);
+    const dir = await this.resolveRemotePath(hostId, dirPart === '~/' ? '~' : dirPart);
+    const sftp = await this.getSftp(hostId);
+    const list = await new Promise<any[]>((resolve, reject) => {
+      sftp.readdir(dir, (err, items) => (err ? reject(err) : resolve(items || [])));
+    });
+    const matchCase = list.filter((it) => it.filename.startsWith(prefix));
+    const lower = prefix.toLowerCase();
+    const matched = (matchCase.length > 0 ? matchCase : list.filter((it) => it.filename.toLowerCase().startsWith(lower)))
+      .filter((it) => it.filename !== '.' && it.filename !== '..' && (showHidden || prefix.startsWith('.') || !it.filename.startsWith('.')));
+    const entries: { name: string; path: string; isDirectory: boolean }[] = [];
+    for (const it of matched.slice(0, 200)) {
+      const mode: number = it.attrs?.mode || 0;
+      let isDirectory = (mode & 0o170000) === 0o040000;
+      if ((mode & 0o170000) === 0o120000) {
+        isDirectory = await new Promise<boolean>((resolve) => sftp.stat(path.posix.join(dir, it.filename), (err, st) => resolve(!err && !!st && st.isDirectory())));
+      }
+      entries.push({ name: it.filename, path: path.posix.join(dir, it.filename), isDirectory });
+    }
+    entries.sort((a, b) => (a.isDirectory !== b.isDirectory ? (a.isDirectory ? -1 : 1) : a.name.localeCompare(b.name)));
+    return { dir, prefix, entries };
   }
 
   public async resolveRemotePath(hostId: string, rawPath?: string): Promise<string> {

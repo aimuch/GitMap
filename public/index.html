@@ -37,12 +37,14 @@
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M4.8 6l2.5 2-2.5 2"/><line x1="8.2" y1="10" x2="11.2" y2="10"/></svg>
           <span data-i18n="terminal">终端</span>
         </button>
-        <button id="btnAppSettings" class="icon-btn" title="Application Settings">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.3"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"/></svg>
+        <button id="btnTransfers" class="icon-btn hidden" title="Transfers" aria-label="Transfers">
+          <span class="icon-slot" data-icon="transfers"></span><span id="transfersBadge" class="icon-badge hidden">0</span>
         </button>
-        <button id="btnToggleLang" class="text-chip-btn" title="Switch Language">中文</button>
-        <button id="btnToggleTheme" class="icon-btn" title="Toggle Dark / Light Theme">
-          <span id="themeIcon">🌙</span>
+        <button id="btnToggleTheme" class="icon-btn" title="Toggle Dark / Light Theme" aria-label="Toggle Dark / Light Theme">
+          <span id="themeIcon" class="icon-slot"></span>
+        </button>
+        <button id="btnAppSettings" class="icon-btn" title="Settings (Cmd/Ctrl+,)" aria-label="Settings">
+          <span class="icon-slot" data-icon="settings"></span>
         </button>
       </div>
     </header>
@@ -59,22 +61,17 @@
           <div id="localRepoList" class="sidebar-list"></div>
         </section>
 
-        <!-- Remote (SSH) Repositories -->
+        <!-- Remote Servers (SSH): repositories grouped by host -->
         <section class="sidebar-section">
           <div class="sidebar-section-header">
-            <span data-i18n="remoteRepos">远程仓库 (SSH)</span>
-            <button id="sidebarAddRemoteBtn" class="mini-icon-btn" title="Browse Remote Repository Paths">+</button>
+            <span data-i18n="remoteServers">远程服务器 (SSH)</span>
+            <span class="sidebar-section-actions">
+              <button id="sidebarRefreshSshBtn" class="mini-icon-btn" title="Manage SSH Hosts"><span class="icon-slot" data-icon="settings"></span></button>
+              <button id="sidebarAddRemoteBtn" class="mini-icon-btn" title="Browse Remote Repository Paths"><span class="icon-slot" data-icon="plus"></span></button>
+            </span>
           </div>
-          <div id="remoteRepoList" class="sidebar-list"></div>
-        </section>
-
-        <!-- SSH Hosts (~/.ssh/config & Saved) -->
-        <section class="sidebar-section">
-          <div class="sidebar-section-header">
-            <span data-i18n="sshHosts">SSH 主机 (~/.ssh/config)</span>
-            <button id="sidebarRefreshSshBtn" class="mini-icon-btn" title="Manage / Refresh SSH Hosts">⇄</button>
-          </div>
-          <div id="sshHostList" class="sidebar-list"></div>
+          <div id="remoteTagFilter" class="tag-filter hidden"></div>
+          <div id="remoteRepoList" class="sidebar-list host-tree"></div>
         </section>
       </aside>
 
@@ -124,10 +121,15 @@
             <strong data-i18n="sshServers">SSH 服务器</strong>
             <button id="btnShowAddHostForm" class="mini-btn primary">+ <span data-i18n="newHost">新增主机</span></button>
           </div>
+          <label class="fb-filter host-search">
+            <span class="icon-slot" data-icon="search"></span>
+            <input type="text" id="sshHostSearch" class="fb-filter-input" spellcheck="false" placeholder="筛选主机、别名或 #标签" />
+          </label>
           <div id="modalSshHostList" class="modal-host-list"></div>
 
           <form id="sshHostForm" class="ssh-host-form hidden">
-            <h4 data-i18n="configureSshHost">配置 SSH 连接</h4>
+            <h4 id="sshFormTitle" data-i18n="configureSshHost">配置 SSH 连接</h4>
+            <input type="hidden" id="sshFormId" />
             <label><span data-i18n="aliasName">名称 / 别名</span><input type="text" id="sshFormName" placeholder="prod-server" required /></label>
             <div class="form-row-2">
               <label><span data-i18n="hostIp">主机 / IP</span><input type="text" id="sshFormHost" placeholder="192.168.1.10" required /></label>
@@ -150,6 +152,7 @@
               <label><span>ProxyJump (可选)</span><input type="text" id="sshFormJump" placeholder="bastion-host" /></label>
               <label><span data-i18n="defaultRemoteDir">默认远程目录</span><input type="text" id="sshFormDefaultPath" placeholder="~" /></label>
             </div>
+            <label><span data-i18n="hostTags">标签 (可选，逗号分隔)</span><input type="text" id="sshFormTags" placeholder="prod, gpu, 上海" list="gmTagSuggestions" /></label>
             <div class="form-actions">
               <button type="button" id="btnCancelHostForm" class="mini-btn" data-i18n="cancel">取消</button>
               <button type="submit" class="mini-btn primary" data-i18n="saveAndBrowse">保存并浏览路径</button>
@@ -162,37 +165,7 @@
           <div id="sshBrowserEmpty" class="browser-empty-state">
             <p data-i18n="selectHostHint">← 请在左侧选择一台 ~/.ssh/config 主机或新增 SSH 服务器，即可浏览远程目录路径并打开 Git 仓库。</p>
           </div>
-
-          <div id="sshBrowserContent" class="ssh-browser-content hidden">
-            <div class="remote-status-strip">
-              <span id="sshConnSummary" class="conn-summary"></span>
-              <div class="remote-strip-actions">
-                <label class="inline-check"><input type="checkbox" id="sshShowHidden" /> <span data-i18n="showHidden">显示隐藏目录</span></label>
-                <button id="btnScanRemoteRepos" class="mini-btn" data-i18n="scanSubfolders">扫描子目录 Git 仓库</button>
-              </div>
-            </div>
-
-            <div class="path-nav-bar">
-              <button id="btnSshUp" class="icon-btn" title="Parent Directory">↑</button>
-              <button id="btnSshHome" class="icon-btn" title="Home Directory (~)">⌂</button>
-              <input type="text" id="sshPathInput" class="path-input" placeholder="/home/user/projects" />
-              <button id="btnSshGo" class="mini-btn primary" data-i18n="goPath">跳转</button>
-              <button id="btnSshRefresh" class="icon-btn" title="Refresh">↻</button>
-            </div>
-
-            <div id="sshBreadcrumbs" class="breadcrumbs-bar"></div>
-
-            <div id="sshCurrentRepoBanner" class="current-repo-banner hidden">
-              <div class="banner-info">
-                <span class="git-badge">Git Repo</span>
-                <strong id="sshCurrentRepoPath"></strong>
-                <span id="sshCurrentRepoBranch" class="branch-pill"></span>
-              </div>
-              <button id="btnOpenCurrentRemoteRepo" class="mini-btn primary" data-i18n="openCurrentRepo">打开此远程仓库</button>
-            </div>
-
-            <div id="sshDirList" class="dir-browser-list"></div>
-          </div>
+          <div id="sshBrowserContent" class="fb-root hidden"></div>
         </div>
       </div>
     </div>
@@ -208,107 +181,131 @@
         <button class="icon-btn modal-close" data-close="localModal">✕</button>
       </div>
       <div class="local-modal-body">
-        <div class="path-nav-bar">
-          <button id="btnLocalUp" class="icon-btn" title="Parent Directory">↑</button>
-          <button id="btnLocalHome" class="icon-btn" title="Home Directory (~)">⌂</button>
-          <input type="text" id="localPathInput" class="path-input" placeholder="/Users/..." />
-          <button id="btnLocalGo" class="mini-btn" data-i18n="goPath">跳转</button>
-          <button id="btnNativePicker" class="mini-btn hidden" data-i18n="osFolderPicker">系统文件夹选择…</button>
-          <button id="btnLocalScan" class="mini-btn" data-i18n="scanSubfolders">扫描子目录仓库</button>
-        </div>
-        <div class="local-filter-row">
-          <div id="localBreadcrumbs" class="breadcrumbs-bar"></div>
-          <label class="inline-check"><input type="checkbox" id="localShowHidden" /> <span data-i18n="showHidden">显示隐藏目录</span></label>
-        </div>
-        <div id="localCurrentRepoBanner" class="current-repo-banner hidden">
-          <div class="banner-info">
-            <span class="git-badge">Git Repo</span>
-            <strong id="localCurrentRepoPath"></strong>
-            <span id="localCurrentRepoBranch" class="branch-pill"></span>
-          </div>
-          <button id="btnOpenCurrentLocalRepo" class="mini-btn primary" data-i18n="openCurrentLocalRepo">添加并打开此仓库</button>
-        </div>
-        <div id="localDirList" class="dir-browser-list"></div>
+        <div id="localBrowserRoot" class="fb-root"></div>
       </div>
     </div>
   </div>
 
   <!-- Application Settings Modal -->
   <div id="appSettingsModal" class="modal-backdrop hidden">
-    <div class="modal-window modal-md">
+    <div class="modal-window modal-settings" role="dialog" aria-modal="true" aria-labelledby="appSettingsTitle">
       <div class="modal-header">
-        <h3 data-i18n="appSettingsTitle">GitMap 全局与 AI 设置</h3>
-        <button class="icon-btn modal-close" data-close="appSettingsModal">✕</button>
+        <h3 id="appSettingsTitle" data-i18n="appSettingsTitle">设置</h3>
+        <button class="icon-btn modal-close" data-close="appSettingsModal" aria-label="Close"><span class="icon-slot" data-icon="close"></span></button>
       </div>
-      <div class="settings-modal-body">
-        <div class="settings-group">
-          <h4 data-i18n="appearanceAndGraph">界面与图形</h4>
-          <div class="form-row-2">
-            <label><span data-i18n="displayLang">界面语言</span>
-              <select id="cfgLanguage">
-                <option value="Auto">Auto</option>
-                <option value="Simplified Chinese">简体中文</option>
-                <option value="English">English</option>
-              </select>
-            </label>
-            <label><span data-i18n="colourPreset">图形配色预设</span>
-              <select id="cfgColourPreset">
-                <option value="Default">Default</option>
-                <option value="Pastel">Pastel</option>
-                <option value="Vivid">Vivid</option>
-                <option value="High Contrast">High Contrast</option>
-                <option value="Colour Blind Safe">Colour Blind Safe</option>
-                <option value="Tokyo Subway">Tokyo Subway</option>
-              </select>
-            </label>
-          </div>
-          <div class="form-row-2">
-            <label><span data-i18n="graphStyle">连线样式</span>
-              <select id="cfgGraphStyle">
-                <option value="rounded">Rounded (圆角)</option>
-                <option value="angular">Angular (折线)</option>
-              </select>
-            </label>
-            <label><span data-i18n="nodeStyle">节点样式</span>
-              <select id="cfgNodeStyle">
-                <option value="Dot">Dot (圆点)</option>
-                <option value="Avatar">Avatar (头像)</option>
-              </select>
-            </label>
-          </div>
-        </div>
+      <div class="settings-layout">
+        <nav class="settings-nav" role="tablist">
+          <button type="button" class="settings-nav-item active" data-section="appearance"><span class="icon-slot" data-icon="sun"></span><span data-i18n="navAppearance">外观</span></button>
+          <button type="button" class="settings-nav-item" data-section="tools"><span class="icon-slot" data-icon="terminal"></span><span data-i18n="navTools">终端与编辑器</span></button>
+          <button type="button" class="settings-nav-item" data-section="ai"><span class="icon-slot" data-icon="editor"></span><span data-i18n="navAi">AI</span></button>
+        </nav>
+        <div class="settings-modal-body">
+          <section class="settings-section active" data-section="appearance">
+            <h4 data-i18n="appearanceAndGraph">界面与图形</h4>
+            <div class="form-row-2">
+              <label><span data-i18n="displayLang">界面语言</span>
+                <select id="cfgLanguage">
+                  <option value="Auto">Auto</option>
+                  <option value="Simplified Chinese">简体中文</option>
+                  <option value="English">English</option>
+                </select>
+              </label>
+              <label><span data-i18n="themeLabel">主题</span>
+                <select id="cfgTheme">
+                  <option value="dark" data-i18n="themeDark">深色</option>
+                  <option value="light" data-i18n="themeLight">浅色</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-row-2">
+              <label><span data-i18n="colourPreset">图形配色预设</span>
+                <select id="cfgColourPreset">
+                  <option value="Default">Default</option>
+                  <option value="Pastel">Pastel</option>
+                  <option value="Vivid">Vivid</option>
+                  <option value="High Contrast">High Contrast</option>
+                  <option value="Colour Blind Safe">Colour Blind Safe</option>
+                  <option value="Tokyo Subway">Tokyo Subway</option>
+                </select>
+              </label>
+              <label><span data-i18n="graphStyle">连线样式</span>
+                <select id="cfgGraphStyle">
+                  <option value="rounded">Rounded</option>
+                  <option value="angular">Angular</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-row-2">
+              <label><span data-i18n="nodeStyle">节点样式</span>
+                <select id="cfgNodeStyle">
+                  <option value="Dot">Dot</option>
+                  <option value="Avatar">Avatar</option>
+                </select>
+              </label>
+              <label><span data-i18n="diffSyntax">Diff 语法高亮</span>
+                <select id="cfgSyntaxHighlight">
+                  <option value="on" data-i18n="optOn">开启</option>
+                  <option value="off" data-i18n="optOff">关闭</option>
+                </select>
+              </label>
+            </div>
+          </section>
 
-        <div class="settings-group">
-          <h4 data-i18n="aiSettingsHeader">AI 提交说明与提交解释</h4>
-          <div class="form-row-2">
-            <label><span>AI Provider</span>
-              <select id="cfgAiProvider">
-                <option value="DeepSeek">DeepSeek</option>
-                <option value="Qwen">Qwen (通义千问)</option>
-                <option value="Kimi">Kimi (Moonshot)</option>
-                <option value="Doubao">Doubao (豆包)</option>
-                <option value="OpenAI">OpenAI</option>
-                <option value="Ollama">Ollama (Local)</option>
-                <option value="OpenAI Compatible">OpenAI Compatible</option>
-              </select>
+          <section class="settings-section" data-section="tools">
+            <h4 data-i18n="externalTerminal">外部终端</h4>
+            <p class="settings-hint" data-i18n="externalTerminalHint">“在终端中打开”会在本地仓库目录打开；远程仓库会通过 SSH 登录并进入远程仓库目录。</p>
+            <label><span data-i18n="terminalApp">终端应用</span>
+              <select id="cfgTerminalApp"></select>
             </label>
-            <label><span>Model</span>
-              <input type="text" id="cfgAiModel" placeholder="deepseek-chat / qwen-plus / gpt-4o-mini" />
+            <label id="cfgTerminalCustomRow" class="hidden"><span data-i18n="customCommand">自定义命令</span>
+              <input type="text" id="cfgTerminalCustom" spellcheck="false" placeholder="open -a Hyper {path}" />
             </label>
-          </div>
-          <label><span>API Base URL (可选)</span>
-            <input type="text" id="cfgAiBaseUrl" placeholder="https://api.deepseek.com" />
-          </label>
-          <div class="checkbox-row">
-            <label class="inline-check"><input type="checkbox" id="cfgAiExplain" /> <span>启用 AI 解释提交 (Explain Commit)</span></label>
-            <label class="inline-check"><input type="checkbox" id="cfgAiCommitMsg" /> <span>启用 AI 生成提交信息</span></label>
-          </div>
-        </div>
 
-        <div class="form-actions">
-          <button type="button" class="mini-btn modal-close" data-close="appSettingsModal" data-i18n="close">关闭</button>
-          <button type="button" id="btnSaveAppSettings" class="mini-btn primary" data-i18n="saveSettings">保存设置</button>
+            <h4 data-i18n="codeEditor">代码编辑器</h4>
+            <label><span data-i18n="editorApp">编辑器</span>
+              <select id="cfgEditorApp"></select>
+            </label>
+            <label id="cfgEditorCustomRow" class="hidden"><span data-i18n="customCommand">自定义命令</span>
+              <input type="text" id="cfgEditorCustom" spellcheck="false" placeholder="code --remote ssh-remote+{host} {path}" />
+            </label>
+            <p class="settings-hint" data-i18n="placeholderHint">自定义命令占位符：{path} 路径，{host} SSH 主机，{sshCommand} 完整 ssh 登录命令，{sshUri} ssh:// 地址。</p>
+            <div class="settings-inline-actions">
+              <button type="button" id="btnTestTerminal" class="mini-btn"><span class="icon-slot" data-icon="externalTerminal"></span><span data-i18n="testTerminal">在当前仓库测试终端</span></button>
+              <button type="button" id="btnTestEditor" class="mini-btn"><span class="icon-slot" data-icon="editor"></span><span data-i18n="testEditor">在当前仓库测试编辑器</span></button>
+              <button type="button" id="btnRedetectApps" class="mini-btn"><span class="icon-slot" data-icon="refresh"></span><span data-i18n="redetect">重新检测</span></button>
+            </div>
+          </section>
+
+          <section class="settings-section" data-section="ai">
+            <h4 data-i18n="aiSettingsHeader">AI 提交说明与提交解释</h4>
+            <div class="form-row-2">
+              <label><span data-i18n="aiProvider">AI 服务</span>
+                <select id="cfgAiProvider"></select>
+              </label>
+              <label><span data-i18n="aiModel">模型</span>
+                <input type="text" id="cfgAiModel" spellcheck="false" />
+              </label>
+            </div>
+            <p id="cfgAiProviderHint" class="settings-hint hidden"></p>
+            <label><span data-i18n="aiBaseUrl">API 地址（可选）</span>
+              <input type="text" id="cfgAiBaseUrl" spellcheck="false" />
+            </label>
+            <div id="cfgAiKeyRow" class="ai-key-row">
+              <label><span data-i18n="aiApiKey">API Key</span>
+                <input type="password" id="cfgAiKey" autocomplete="off" spellcheck="false" />
+              </label>
+              <button type="button" id="btnClearAiKey" class="mini-btn hidden" data-i18n="clearKey">清除已保存的 Key</button>
+            </div>
+            <div class="checkbox-row">
+              <label class="inline-check"><input type="checkbox" id="cfgAiExplain" /> <span data-i18n="aiExplainToggle">启用 AI 解释提交 (Explain Commit)</span></label>
+              <label class="inline-check"><input type="checkbox" id="cfgAiCommitMsg" /> <span data-i18n="aiCommitToggle">启用 AI 生成提交信息</span></label>
+            </div>
+          </section>
         </div>
+      </div>
+      <div class="form-actions settings-footer">
+        <button type="button" class="mini-btn modal-close" data-close="appSettingsModal" data-i18n="cancel">取消</button>
+        <button type="button" id="btnSaveAppSettings" class="mini-btn primary" data-i18n="saveSettings">保存设置</button>
       </div>
     </div>
   </div>
@@ -325,9 +322,29 @@
     </div>
   </div>
 
+  <!-- File Transfers Panel -->
+  <section id="transferPanel" class="transfer-panel hidden" aria-label="Transfers">
+    <header class="transfer-panel-header">
+      <strong data-i18n="transfersTitle">传输</strong>
+      <span id="transferSummary" class="transfer-summary"></span>
+      <span class="transfer-panel-actions">
+        <button type="button" id="btnTransfersPauseAll" class="mini-icon-btn" title="Pause All"><span class="icon-slot" data-icon="pause"></span></button>
+        <button type="button" id="btnTransfersResumeAll" class="mini-icon-btn" title="Resume All"><span class="icon-slot" data-icon="play"></span></button>
+        <button type="button" id="btnTransfersClear" class="mini-icon-btn" title="Clear Finished"><span class="icon-slot" data-icon="check"></span></button>
+        <button type="button" id="btnTransfersClose" class="mini-icon-btn" title="Hide"><span class="icon-slot" data-icon="chevronDown"></span></button>
+      </span>
+    </header>
+    <div id="transferList" class="transfer-list"></div>
+  </section>
+
+  <datalist id="gmTagSuggestions"></datalist>
+
   <!-- Toast Container -->
   <div id="toastContainer"></div>
 
+  <script src="/icons.js"></script>
+  <script src="/vendor/hljs/highlight.bundle.js"></script>
+  <script src="/syntax.js"></script>
   <script src="/vendor/xterm/xterm.js"></script>
   <script src="/vendor/xterm/addon-fit.js"></script>
   <script src="/app.js"></script>

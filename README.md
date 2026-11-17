@@ -27,6 +27,21 @@
 - **内置可视化文件演进（Visual File History）**：按作者与时间轴可视化展示单文件的历史演进轨迹。
 - **内置交互式终端 + 系统终端联动**：底部抽屉内置 `xterm.js` 交互式终端，本地仓库自动进入本地目录，**远程 SSH 仓库自动开启远程 PTY 终端并 `cd` 到远程仓库路径**；同时支持一键唤起系统原生终端。
 
+### 5. 远程文件管理与传输
+- **路径浏览器**：面包屑 / 可编辑路径（`Tab` 补全、再按 `Tab` 循环候选、`⌘L` / `Ctrl+L` 编辑）、前进 / 后退历史、按名称 / 大小 / 修改时间排序、即时筛选、多选、键盘导航（↑↓ / Enter / Backspace），记住每台主机上次浏览的目录。
+- **文件操作**：新建文件夹、重命名、删除（二次确认）、复制路径、在外部终端 / 编辑器中打开任意目录。
+- **上传 / 下载**：文件与文件夹（桌面版支持拖拽上传），带进度条、速度与剩余时间；支持 **暂停（中断）/ 继续（断点续传）/ 取消（删除未完成文件）/ 重试 / 撤销（移入回收站）/ 恢复**。同名目标自动改名为 `name (1)`，绝不覆盖。
+
+### 6. 外部终端与编辑器
+- 设置 → 终端与编辑器：可选 Terminal、iTerm2、Ghostty、WezTerm、kitty、Alacritty、Warp、Windows Terminal、PowerShell、GNOME Terminal、Konsole 等，以及 VS Code、Cursor、Windsurf、VSCodium、Zed、Sublime Text、JetBrains IDE，或自定义命令（占位符 `{path}` `{host}` `{sshCommand}` `{sshUri}`）。
+- 本地仓库在仓库目录打开；远程仓库通过 SSH 登录并 `cd` 到远程仓库路径（VS Code 系编辑器使用 Remote-SSH，Zed 使用 `ssh://`）。
+
+### 7. AI 服务
+- 支持 DeepSeek、Kimi、豆包、通义千问、OpenAI、Ollama、**Magpie（本地网关）**、**CC Switch（本地路由）** 与任意 OpenAI 兼容接口；API Key 在设置中保存，Magpie / CC Switch / Ollama 无需 Key。
+
+### 8. 安全
+- 内置服务只接受来自 GitMap 页面本身的 WebSocket 连接（校验 Origin 与 Host），防止其它网页或 DNS 重绑定驱动终端与 SSH。
+
 ---
 
 ## 快速开始

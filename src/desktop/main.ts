@@ -5,6 +5,16 @@ import { GitMapServer } from '../server/appServer';
 let mainWindow: BrowserWindow | null = null;
 let gitMapServer: GitMapServer | null = null;
 
+// Last-resort safety net: an unexpected error in a background task (a failed spawn, a dropped SSH socket, ...)
+// is logged instead of taking down the whole app with a modal "JavaScript error in the main process" dialog.
+process.on('uncaughtException', (err) => {
+  console.error('[GitMap] Uncaught exception:', err);
+  mainWindow?.webContents.send('gitmap:mainError', err instanceof Error ? err.message : String(err));
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[GitMap] Unhandled rejection:', reason);
+});
+
 async function createWindow(serverUrl: string) {
   const iconPath = path.resolve(__dirname, '..', '..', 'resources', 'icon.png');
 
@@ -175,9 +185,10 @@ app.whenReady().then(async () => {
     initialRepos: cliRepos,
     desktopHooks: {
       showOpenDialog: async (req) => {
-        const props: Array<'openFile' | 'openDirectory' | 'multiSelections'> = [];
+        const props: Array<'openFile' | 'openDirectory' | 'multiSelections' | 'createDirectory'> = ['createDirectory'];
         if (req.canSelectFolders) props.push('openDirectory');
-        else props.push('openFile');
+        // macOS can pick files & folders in the same dialog; elsewhere a dialog picks one or the other
+        if (req.canSelectFiles !== false && (!req.canSelectFolders || process.platform === 'darwin')) props.push('openFile');
         if (req.canSelectMany) props.push('multiSelections');
         const filters = req.filters
           ? Object.entries(req.filters).map(([name, extensions]) => ({ name, extensions }))

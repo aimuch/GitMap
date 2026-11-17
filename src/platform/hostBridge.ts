@@ -96,6 +96,7 @@ export interface SaveDialogRequest {
 export interface HostBridgeHandlers {
   onGraphHtmlUpdated?: (html: string) => void;
   onGraphPostMessage?: (msg: unknown) => void;
+  onPanelPostMessage?: (panelId: string, msg: unknown) => void;
   onVisualFileHistoryUpdated?: (payload: VisualFileHistoryOpenPayload) => void;
   onOpenDiff?: (payload: DiffOpenPayload) => void;
   onOpenMultiDiff?: (payload: MultiDiffOpenPayload) => void;

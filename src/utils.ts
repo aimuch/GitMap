@@ -377,16 +377,24 @@ const UPDATABLE_EXTENSION_SETTINGS: { readonly [key: string]: ReadonlyArray<stri
 
 function updateConfigResilient(config: vscode.WorkspaceConfiguration, key: string, value: unknown, allowWorkspaceFallback: boolean): Promise<boolean> {
 	if (!config || typeof config.update !== 'function') return Promise.resolve(false);
-	const primaryTarget = getSettingTarget(config, key);
-	return Promise.resolve(config.update(key, value, primaryTarget)).then(
-		() => true,
-		() => {
-			if (allowWorkspaceFallback && primaryTarget === vscode.ConfigurationTarget.Global && Array.isArray(vscode.workspace.workspaceFolders) && vscode.workspace.workspaceFolders.length > 0) {
-				return Promise.resolve(config.update(key, value, vscode.ConfigurationTarget.Workspace)).then(() => true, () => false);
+	try {
+		const primaryTarget = getSettingTarget(config, key);
+		return Promise.resolve(config.update(key, value, primaryTarget)).then(
+			() => true,
+			() => {
+				if (allowWorkspaceFallback && primaryTarget === vscode.ConfigurationTarget.Global && Array.isArray(vscode.workspace.workspaceFolders) && vscode.workspace.workspaceFolders.length > 0) {
+					try {
+						return Promise.resolve(config.update(key, value, vscode.ConfigurationTarget.Workspace)).then(() => true, () => false);
+					} catch (_) {
+						return false;
+					}
+				}
+				return false;
 			}
-			return false;
-		}
-	);
+		);
+	} catch (_) {
+		return Promise.resolve(false);
+	}
 }
 
 function syncEditorHideUnchangedRegions(enabled: boolean): Promise<void> {
@@ -397,11 +405,23 @@ function syncEditorHideUnchangedRegions(enabled: boolean): Promise<void> {
 	return updateConfigResilient(diffConfig, 'hideUnchangedRegions.enabled', enabled, true).then(() => { });
 }
 
+let syncingHideUnchangedDepth = 0;
+export function isInternalHideUnchangedWrite() {
+	return syncingHideUnchangedDepth > 0;
+}
+
 export async function setDiffHideUnchangedRegions(enabled: boolean): Promise<void> {
-	const gitMapConfig = vscode.workspace.getConfiguration('git-map');
-	const wrote = await updateConfigResilient(gitMapConfig, 'diff.hideUnchangedRegions', enabled, true);
-	await saveSettingFallback('diff.hideUnchangedRegions', wrote ? undefined : enabled);
-	await syncEditorHideUnchangedRegions(enabled);
+	syncingHideUnchangedDepth++;
+	try {
+		const gitMapConfig = vscode.workspace.getConfiguration('git-map');
+		const wrote = await updateConfigResilient(gitMapConfig, 'diff.hideUnchangedRegions', enabled, true);
+		await saveSettingFallback('diff.hideUnchangedRegions', wrote ? undefined : enabled);
+		await syncEditorHideUnchangedRegions(enabled);
+	} finally {
+		setTimeout(() => {
+			if (syncingHideUnchangedDepth > 0) syncingHideUnchangedDepth--;
+		}, 50);
+	}
 }
 
 export async function syncDiffHideUnchanged(onlyChanges?: boolean): Promise<void> {
@@ -571,7 +591,7 @@ export function viewDiff(repo: string, fromHash: string, toHash: string, oldFile
 		);
 		const gitMapConfig = vscode.workspace.getConfiguration('git-map');
 		const inspected = gitMapConfig && typeof gitMapConfig.inspect === 'function' ? gitMapConfig.inspect<boolean>('diff.hideUnchangedRegions') : undefined;
-		const hasExplicitSetting = typeof inspected !== 'undefined' && (typeof inspected.workspaceFolderValue === 'boolean' || typeof inspected.workspaceValue === 'boolean' || typeof inspected.globalValue === 'boolean');
+		const hasExplicitSetting = typeof getSettingFallback<boolean>('diff.hideUnchangedRegions') === 'boolean' || (typeof inspected !== 'undefined' && (typeof inspected.workspaceFolderValue === 'boolean' || typeof inspected.workspaceValue === 'boolean' || typeof inspected.globalValue === 'boolean'));
 		if (typeof onlyChanges === 'boolean' || hasExplicitSetting) {
 			return syncDiffHideUnchanged(onlyChanges).then(openDiff);
 		}

@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { ClientChannel } from 'ssh2';
 import { parseRemoteRepo } from '../remote/repoTransport';
-import { quotePosixArg, sshManager } from '../remote/sshManager';
+import { sshManager } from '../remote/sshManager';
 
 export interface TerminalSessionInfo {
   id: string;
@@ -34,10 +34,34 @@ function findPython3(): string | null {
  * Manages built-in interactive terminal sessions (Local PTY/Shell & Remote SSH PTY)
  * as well as launching external system terminals.
  */
+/** Upper bound on concurrent built-in terminal sessions, so a runaway client can't exhaust the process table (EAGAIN). */
+const MAX_TERMINAL_SESSIONS = 12;
+
 export class TerminalManager {
   private readonly sessions = new Map<string, ActiveTerminal>();
+  private pendingCreates = 0;
 
   public async createSession(
+    repo: string,
+    name: string | undefined,
+    cols: number,
+    rows: number,
+    initialCommand: string | null | undefined,
+    onData: (id: string, chunk: string) => void,
+    onExit: (id: string, code: number) => void
+  ): Promise<TerminalSessionInfo> {
+    if (this.sessions.size + this.pendingCreates >= MAX_TERMINAL_SESSIONS) {
+      throw new Error(`Too many open terminals (limit ${MAX_TERMINAL_SESSIONS}). Close some terminal tabs first.`);
+    }
+    this.pendingCreates++;
+    try {
+      return await this.createSessionInner(repo, name, cols, rows, initialCommand, onData, onExit);
+    } finally {
+      this.pendingCreates--;
+    }
+  }
+
+  private async createSessionInner(
     repo: string,
     name: string | undefined,
     cols: number,
@@ -65,8 +89,11 @@ export class TerminalManager {
         cwd: remote.remotePath
       };
 
-      channel.on('data', (chunk: Buffer) => onData(id, chunk.toString('utf8')));
-      channel.stderr.on('data', (chunk: Buffer) => onData(id, chunk.toString('utf8')));
+      channel.setEncoding('utf8');
+      channel.stderr.setEncoding('utf8');
+      channel.on('data', (chunk: string) => onData(id, chunk));
+      channel.stderr.on('data', (chunk: string) => onData(id, chunk));
+      channel.on('error', (err: Error) => onData(id, `\r\n\x1b[31m[${err.message}]\x1b[0m\r\n`));
       channel.on('close', (code?: number) => {
         this.sessions.delete(id);
         onExit(id, typeof code === 'number' ? code : 0);
@@ -181,12 +208,25 @@ export class TerminalManager {
       cwd
     };
 
-    proc.stdout?.on('data', (chunk: Buffer) => onData(id, chunk.toString('utf8')));
-    proc.stderr?.on('data', (chunk: Buffer) => onData(id, chunk.toString('utf8')));
-    proc.on('close', (code) => {
+    // Decode as streams so multi-byte UTF-8 characters split across chunks aren't mangled
+    proc.stdout?.setEncoding('utf8');
+    proc.stderr?.setEncoding('utf8');
+    proc.stdout?.on('data', (chunk: string) => onData(id, chunk));
+    proc.stderr?.on('data', (chunk: string) => onData(id, chunk));
+    proc.stdin?.on('error', () => {});
+    let exited = false;
+    const finish = (code: number) => {
+      if (exited) return;
+      exited = true;
       this.sessions.delete(id);
-      onExit(id, typeof code === 'number' ? code : 0);
+      onExit(id, code);
+    };
+    // Without an 'error' listener a failed spawn (EAGAIN, ENOENT, ...) is an uncaught exception that takes down the whole process
+    proc.on('error', (err) => {
+      onData(id, `\r\n\x1b[31m[Unable to start the shell: ${err.message}]\x1b[0m\r\n`);
+      finish(1);
     });
+    proc.on('close', (code) => finish(typeof code === 'number' ? code : 0));
 
     if (initialCommand && proc.stdin) {
       setTimeout(() => {
@@ -197,10 +237,10 @@ export class TerminalManager {
     this.sessions.set(id, {
       info,
       write: (data: string) => {
-        proc.stdin?.write(data);
+        if (proc.stdin && !proc.stdin.destroyed) proc.stdin.write(data);
       },
       resize: (c: number, r: number) => {
-        if (isPyPty && proc.stdin) {
+        if (isPyPty && proc.stdin && !proc.stdin.destroyed) {
           proc.stdin.write(`\x00RESIZE:${c}x${r}\x00`);
         }
       },
@@ -230,56 +270,6 @@ export class TerminalManager {
   public closeAll() {
     for (const id of Array.from(this.sessions.keys())) {
       this.close(id);
-    }
-  }
-
-  /**
-   * Open the repository path in the user's native OS system terminal (Terminal.app, Windows Terminal/cmd, or Linux terminal).
-   */
-  public openExternalSystemTerminal(repo: string): string | null {
-    const remote = parseRemoteRepo(repo);
-    try {
-      if (process.platform === 'darwin') {
-        if (remote !== null) {
-          const profile = sshManager.resolveProfile(remote.hostId);
-          const sshTarget = profile.source === 'ssh-config'
-            ? profile.id
-            : `${profile.user}@${profile.host}`;
-          const portFlag = profile.source !== 'ssh-config' && profile.port !== 22 ? `-p ${profile.port} ` : '';
-          const remoteCmd = `ssh -t ${portFlag}${quotePosixArg(sshTarget)} "cd ${remote.remotePath.replace(/"/g, '\\"')} && exec \\$SHELL -l"`;
-          const appleScript = `tell application "Terminal"\nactivate\ndo script ${JSON.stringify(remoteCmd)}\nend tell`;
-          cp.spawn('osascript', ['-e', appleScript], { detached: true, stdio: 'ignore' }).unref();
-        } else {
-          cp.spawn('open', ['-a', 'Terminal', repo], { detached: true, stdio: 'ignore' }).unref();
-        }
-        return null;
-      } else if (process.platform === 'win32') {
-        if (remote !== null) {
-          const profile = sshManager.resolveProfile(remote.hostId);
-          const target = profile.source === 'ssh-config' ? profile.id : `${profile.user}@${profile.host}`;
-          cp.spawn('cmd.exe', ['/c', 'start', 'cmd.exe', '/k', `ssh -t ${target} "cd '${remote.remotePath}' && exec $SHELL -l"`], {
-            detached: true,
-            stdio: 'ignore'
-          }).unref();
-        } else {
-          cp.spawn('cmd.exe', ['/c', 'start', 'cmd.exe', '/k', `cd /d "${repo}"`], {
-            detached: true,
-            stdio: 'ignore'
-          }).unref();
-        }
-        return null;
-      } else {
-        const terms = ['x-terminal-emulator', 'gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'];
-        for (const term of terms) {
-          try {
-            cp.spawn(term, [], { cwd: remote ? os.homedir() : repo, detached: true, stdio: 'ignore' }).unref();
-            return null;
-          } catch (_) {}
-        }
-        return 'No supported external terminal emulator found.';
-      }
-    } catch (err) {
-      return String(err);
     }
   }
 }

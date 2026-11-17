@@ -37,7 +37,7 @@
       openCurrentLocalRepo: '添加并打开此仓库',
       localModalTitle: '添加本地 Git 仓库',
       osFolderPicker: '系统文件夹选择…',
-      appSettingsTitle: 'GitMap 全局与 AI 设置',
+      appSettingsTitle: '设置',
       appearanceAndGraph: '界面与图形',
       displayLang: '界面语言',
       colourPreset: '图形配色预设',
@@ -62,7 +62,51 @@
       visualHistory: '可视化文件演进',
       toggleBlame: 'Git Blame',
       expandLines: '展开 {0} 行未变更代码',
-      binaryFileNotice: '二进制文件，无法直接显示文本差异。'
+      binaryFileNotice: '二进制文件，无法直接显示文本差异。',
+      transfersTitle: '传输',
+      remoteServers: '远程服务器 (SSH)',
+      hostTags: '标签 (可选，逗号分隔)',
+      navAppearance: '外观',
+      navTools: '终端与编辑器',
+      navAi: 'AI',
+      themeLabel: '主题',
+      themeDark: '深色',
+      themeLight: '浅色',
+      diffSyntax: 'Diff 语法高亮',
+      optOn: '开启',
+      optOff: '关闭',
+      externalTerminal: '外部终端',
+      externalTerminalHint: '“在终端中打开”会在本地仓库目录打开；远程仓库会通过 SSH 登录并进入远程仓库目录。',
+      terminalApp: '终端应用',
+      customCommand: '自定义命令',
+      codeEditor: '代码编辑器',
+      editorApp: '编辑器',
+      placeholderHint: '自定义命令占位符：{path} 路径，{host} SSH 主机，{sshCommand} 完整 ssh 登录命令，{sshUri} ssh:// 地址。',
+      testTerminal: '在当前仓库测试终端',
+      testEditor: '在当前仓库测试编辑器',
+      redetect: '重新检测',
+      systemDefault: '系统默认',
+      autoDetect: '自动（第一个已安装的）',
+      customOption: '自定义命令…',
+      notInstalled: '未安装',
+      localOnly: '仅本地',
+      aiProvider: 'AI 服务',
+      aiModel: '模型',
+      aiBaseUrl: 'API 地址（可选）',
+      aiApiKey: 'API Key',
+      clearKey: '清除已保存的 Key',
+      keySaved: '已保存（留空保持不变）',
+      keyNotNeeded: '该服务无需 API Key',
+      aiExplainToggle: '启用 AI 解释提交 (Explain Commit)',
+      aiCommitToggle: '启用 AI 生成提交信息',
+      hintMagpie: '请求经由本机 Magpie 网关转发到其中已登录的模型服务。请保持 Magpie 运行，并填写它提供的模型名；无需 API Key。默认地址读取 ~/.config/magpie/gateway.json。',
+      hintCcSwitch: '请求经由 CC Switch 本地路由转发到当前为 Codex 选中的服务商。请在 CC Switch 中开启本地路由，并填写该服务商的模型名；无需 API Key。',
+      hintOllama: '使用本机 Ollama 服务，无需 API Key。',
+      openedIn: '已在 {0} 中打开',
+      openInTerminal: '在外部终端中打开',
+      openInEditor: '在编辑器中打开',
+      settingsSaved: '设置已保存',
+      noActiveRepo: '请先选择一个仓库'
     },
     en: {
       addLocal: 'Local Repo',
@@ -98,7 +142,7 @@
       openCurrentLocalRepo: 'Add & Open Repo',
       localModalTitle: 'Add Local Git Repository',
       osFolderPicker: 'OS Folder Picker…',
-      appSettingsTitle: 'GitMap Global & AI Settings',
+      appSettingsTitle: 'Settings',
       appearanceAndGraph: 'Appearance & Graph',
       displayLang: 'Display Language',
       colourPreset: 'Graph Colour Preset',
@@ -123,9 +167,55 @@
       visualHistory: 'Visual History',
       toggleBlame: 'Git Blame',
       expandLines: 'Expand {0} unchanged lines',
-      binaryFileNotice: 'Binary file — text diff cannot be shown.'
+      binaryFileNotice: 'Binary file — text diff cannot be shown.',
+      transfersTitle: 'Transfers',
+      remoteServers: 'Remote Servers (SSH)',
+      hostTags: 'Tags (optional, comma separated)',
+      navAppearance: 'Appearance',
+      navTools: 'Terminal & Editor',
+      navAi: 'AI',
+      themeLabel: 'Theme',
+      themeDark: 'Dark',
+      themeLight: 'Light',
+      diffSyntax: 'Diff Syntax Highlighting',
+      optOn: 'On',
+      optOff: 'Off',
+      externalTerminal: 'External Terminal',
+      externalTerminalHint: '"Open in Terminal" opens local repositories in their folder; remote repositories log in over SSH and change to the repository folder.',
+      terminalApp: 'Terminal App',
+      customCommand: 'Custom Command',
+      codeEditor: 'Code Editor',
+      editorApp: 'Editor',
+      placeholderHint: 'Custom command placeholders: {path} path, {host} SSH host, {sshCommand} full ssh login command, {sshUri} ssh:// URI.',
+      testTerminal: 'Try Terminal on Current Repo',
+      testEditor: 'Try Editor on Current Repo',
+      redetect: 'Detect Again',
+      systemDefault: 'System Default',
+      autoDetect: 'Auto (first installed)',
+      customOption: 'Custom Command…',
+      notInstalled: 'not installed',
+      localOnly: 'local only',
+      aiProvider: 'AI Provider',
+      aiModel: 'Model',
+      aiBaseUrl: 'API Base URL (Optional)',
+      aiApiKey: 'API Key',
+      clearKey: 'Clear Saved Key',
+      keySaved: 'Saved (leave blank to keep)',
+      keyNotNeeded: 'No API key needed',
+      aiExplainToggle: 'Enable AI Explain Commit',
+      aiCommitToggle: 'Enable AI Commit Message Generation',
+      hintMagpie: 'Requests go through the local Magpie gateway to the providers signed in to it. Keep Magpie running and set a model it serves; no API key needed. The default address is read from ~/.config/magpie/gateway.json.',
+      hintCcSwitch: 'Requests go through the CC Switch local routing to the provider currently selected for Codex. Turn on local routing in CC Switch and set a model that provider serves; no API key needed.',
+      hintOllama: 'Uses the local Ollama server; no API key needed.',
+      openedIn: 'Opened in {0}',
+      openInTerminal: 'Open in External Terminal',
+      openInEditor: 'Open in Editor',
+      settingsSaved: 'Settings saved',
+      noActiveRepo: 'Select a repository first'
     }
   };
+
+  const ICONS = window.GITMAP_ICONS || {};
 
   /* ==================== State ==================== */
   const state = {
@@ -177,7 +267,7 @@
       return {
         isRemote: true,
         name: customName || base,
-        fullDisplay: `${hostId}:${remotePath}`,
+        fullDisplay: `${(state.sshHosts || []).find((h) => h.id === hostId)?.alias || hostId}:${remotePath}`,
         hostId,
         remotePath
       };
@@ -200,8 +290,9 @@
     if (desktopApi.platform === 'darwin') {
       document.body.classList.add('darwin-desktop');
     }
-    const nativeBtn = document.getElementById('btnNativePicker');
-    if (nativeBtn) nativeBtn.classList.remove('hidden');
+    if (desktopApi.onMainError) {
+      desktopApi.onMainError((message) => showToast(message, 'error'));
+    }
     desktopApi.onMenuAction((action) => {
       if (action === 'open-local-modal') openLocalModal();
       else if (action === 'open-ssh-modal') openSshModal();
@@ -219,7 +310,16 @@
     document.body.classList.remove('vscode-dark', 'vscode-light', 'theme-dark', 'theme-light');
     document.body.classList.add(state.theme === 'light' ? 'vscode-light' : 'vscode-dark');
     document.body.classList.add(state.theme === 'light' ? 'theme-light' : 'theme-dark');
-    document.getElementById('themeIcon').textContent = state.theme === 'light' ? '☀️' : '🌙';
+    // Show the theme the button switches to
+    document.getElementById('themeIcon').innerHTML = state.theme === 'light' ? ICONS.moon : ICONS.sun;
+    document.getElementById('btnToggleTheme').title = state.theme === 'light'
+      ? (state.lang === 'zh' ? '切换到深色主题' : 'Switch to Dark Theme')
+      : (state.lang === 'zh' ? '切换到浅色主题' : 'Switch to Light Theme');
+    state.terminals.forEach((t) => {
+      try {
+        t.term.options.theme = TERMINAL_THEMES[state.theme];
+      } catch (_) {}
+    });
 
     document.querySelectorAll('iframe').forEach((frame) => {
       try {
@@ -234,7 +334,9 @@
 
   function applyLanguageUI() {
     localStorage.setItem('gitmap.lang', state.lang);
-    document.getElementById('btnToggleLang').textContent = state.lang === 'zh' ? '中文' : 'EN';
+    document.documentElement.lang = state.lang === 'zh' ? 'zh-CN' : 'en';
+    const hostSearch = document.getElementById('sshHostSearch');
+    if (hostSearch) hostSearch.placeholder = state.lang === 'zh' ? '筛选主机、别名或 #标签' : 'Filter hosts, aliases or #tags';
     document.querySelectorAll('[data-i18n]').forEach((el) => {
       const k = el.getAttribute('data-i18n');
       if (k) el.textContent = tr(k);
@@ -298,6 +400,13 @@
         state.sshHosts = msg.sshHosts || [];
         state.settings = msg.settings || {};
         state.homeDir = msg.homeDir || '~';
+        if (state.settings['git-map.language'] === 'Simplified Chinese' || state.settings['git-map.language'] === 'English') {
+          const lang = state.settings['git-map.language'] === 'English' ? 'en' : 'zh';
+          if (lang !== state.lang) {
+            state.lang = lang;
+            applyLanguageUI();
+          }
+        }
         renderSidebar();
         renderActiveRepoBadge();
         break;
@@ -363,6 +472,12 @@
         openVfhTab(msg.payload);
         break;
 
+      case 'panel:message': {
+        const frame = document.querySelector('#panel-vfh-' + CSS.escape(String(msg.panelId)) + ' iframe');
+        if (frame && frame.contentWindow) frame.contentWindow.postMessage(msg.payload, '*');
+        break;
+      }
+
       case 'terminal:requestOpen':
         openTerminalSession(msg.payload.repo, msg.payload.name, msg.payload.initialCommand);
         break;
@@ -376,10 +491,23 @@
       case 'term:exit': {
         const t = state.terminals.get(msg.id);
         if (t) {
+          t.exited = true;
+          t.tabEl.classList.add('exited');
           t.term.writeln(`\r\n\x1b[90m[Process exited with code ${msg.code}]\x1b[0m`);
         }
         break;
       }
+
+      case 'ssh:hostsChanged':
+        state.sshHosts = msg.hosts || state.sshHosts;
+        renderSidebar();
+        renderActiveRepoBadge();
+        if (!document.getElementById('sshModal').classList.contains('hidden')) renderModalSshHosts();
+        break;
+
+      case 'transfers:update':
+        onTransfersUpdate(msg.transfers);
+        break;
 
       case 'clipboard:write':
         navigator.clipboard?.writeText(msg.text).catch(() => {});
@@ -431,6 +559,76 @@
     }, level === 'error' ? 7000 : 4000);
   }
 
+  /* ==================== Host labels & tags ==================== */
+  function findHost(hostId) {
+    return (state.sshHosts || []).find((h) => h.id === hostId) || null;
+  }
+
+  /** The name a host is shown with: its GitMap alias, else its ~/.ssh/config alias / saved name, else its id. */
+  function hostLabel(hostId) {
+    const h = findHost(hostId);
+    return h ? h.alias || h.name || h.id : hostId;
+  }
+
+  function hostAddress(h) {
+    return h ? `${h.user}@${h.host}${h.port && h.port !== 22 ? ':' + h.port : ''}` : '';
+  }
+
+  /** A stable hue per tag, so a tag has the same colour everywhere. */
+  function tagHue(tag) {
+    let hash = 0;
+    const s = String(tag).toLowerCase();
+    for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+    return hash % 360;
+  }
+
+  function tagChipsHtml(tags, extraCls) {
+    return (tags || []).map((t) => `<span class="tag-chip ${extraCls || ''}" style="--tag-hue:${tagHue(t)}" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('');
+  }
+
+  function allHostTags() {
+    const map = new Map();
+    (state.sshHosts || []).forEach((h) => (h.tags || []).forEach((t) => {
+      if (!map.has(t.toLowerCase())) map.set(t.toLowerCase(), t);
+    }));
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+  }
+
+  function refreshTagSuggestions() {
+    const dl = document.getElementById('gmTagSuggestions');
+    if (dl) dl.innerHTML = allHostTags().map((t) => `<option value="${escapeHtml(t)}"></option>`).join('');
+  }
+
+  function loadUiSet(key) {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+    } catch (_) {
+      return new Set();
+    }
+  }
+
+  function saveUiSet(key, set) {
+    try {
+      localStorage.setItem(key, JSON.stringify(Array.from(set)));
+    } catch (_) {}
+  }
+
+  state.collapsedHosts = loadUiSet('gitmap.sidebar.collapsedHosts');
+  state.remoteTagFilter = (() => {
+    try {
+      return localStorage.getItem('gitmap.sidebar.tagFilter') || '';
+    } catch (_) {
+      return '';
+    }
+  })();
+  state.showIdleHosts = (() => {
+    try {
+      return localStorage.getItem('gitmap.sidebar.showIdleHosts') === '1';
+    } catch (_) {
+      return false;
+    }
+  })();
+
   /* ==================== Sidebar & Active Badge ==================== */
   function renderActiveRepoBadge() {
     const badge = document.getElementById('activeRepoBadge');
@@ -442,8 +640,9 @@
     badge.classList.remove('hidden');
     badge.classList.toggle('is-remote', info.isRemote);
     badge.innerHTML = info.isRemote
-      ? `<strong>⇄ SSH</strong> <span>${escapeHtml(info.fullDisplay)}</span>`
-      : `<strong>📁</strong> <span>${escapeHtml(info.fullDisplay)}</span>`;
+      ? `<span class="icon-slot">${ICONS.remote}</span><strong>${escapeHtml(hostLabel(info.hostId))}</strong><span>${escapeHtml(info.remotePath)}</span>`
+      : `<span class="icon-slot">${ICONS.folder}</span><span>${escapeHtml(info.fullDisplay)}</span>`;
+    badge.title = (state.lang === 'zh' ? '点击复制路径：' : 'Click to copy the path: ') + info.fullDisplay;
     badge.onclick = () => {
       const textToCopy = info.isRemote ? info.remotePath : info.fullDisplay;
       navigator.clipboard?.writeText(textToCopy).catch(() => {});
@@ -453,76 +652,303 @@
 
   function renderSidebar() {
     const localContainer = document.getElementById('localRepoList');
-    const remoteContainer = document.getElementById('remoteRepoList');
-    const hostContainer = document.getElementById('sshHostList');
-
     const repoKeys = Object.keys(state.repos);
     const localKeys = repoKeys.filter((k) => !k.startsWith('ssh://')).sort();
-    const remoteKeys = repoKeys.filter((k) => k.startsWith('ssh://')).sort();
 
     // Local Repos
     if (localKeys.length === 0) {
       localContainer.innerHTML = `<div class="sidebar-empty">${escapeHtml(tr('noLocalRepos'))}</div>`;
     } else {
       localContainer.innerHTML = '';
+      const dupNames = duplicateNames(localKeys);
       localKeys.forEach((repoKey) => {
-        localContainer.appendChild(buildRepoSidebarItem(repoKey));
+        localContainer.appendChild(buildRepoSidebarItem(repoKey, { disambiguate: dupNames }));
       });
     }
 
-    // Remote SSH Repos
-    if (remoteKeys.length === 0) {
-      remoteContainer.innerHTML = `<div class="sidebar-empty">${escapeHtml(tr('noRemoteRepos'))}</div>`;
-    } else {
-      remoteContainer.innerHTML = '';
-      remoteKeys.forEach((repoKey) => {
-        remoteContainer.appendChild(buildRepoSidebarItem(repoKey));
-      });
-    }
+    renderRemoteTree(repoKeys.filter((k) => k.startsWith('ssh://')));
+    refreshTagSuggestions();
+  }
 
-    // SSH Hosts
-    if (!state.sshHosts || state.sshHosts.length === 0) {
-      hostContainer.innerHTML = `<div class="sidebar-empty">${escapeHtml(tr('noSshHosts'))}</div>`;
+  /** Names shared by more than one repository (those get their parent folder added to tell them apart). */
+  function duplicateNames(keys) {
+    const counts = new Map();
+    keys.forEach((k) => {
+      const n = parseRepoDisplay(k).name.toLowerCase();
+      counts.set(n, (counts.get(n) || 0) + 1);
+    });
+    return new Set(Array.from(counts.entries()).filter(([, c]) => c > 1).map(([n]) => n));
+  }
+
+  function renderRemoteTree(remoteKeys) {
+    const container = document.getElementById('remoteRepoList');
+    const filterEl = document.getElementById('remoteTagFilter');
+    const zh = state.lang === 'zh';
+
+    // Group repositories by host (hosts that no longer exist in the host list still get a group)
+    const byHost = new Map();
+    remoteKeys.forEach((k) => {
+      const hostId = parseRepoDisplay(k).hostId;
+      if (!byHost.has(hostId)) byHost.set(hostId, []);
+      byHost.get(hostId).push(k);
+    });
+    const hosts = (state.sshHosts || []).slice();
+    byHost.forEach((_keys, hostId) => {
+      if (!hosts.some((h) => h.id === hostId)) hosts.push({ id: hostId, name: hostId, host: hostId, user: '', port: 22, tags: [], source: 'unknown', connected: false });
+    });
+
+    // Tag filter chips
+    const tags = allHostTags();
+    if (state.remoteTagFilter && !tags.some((t) => t.toLowerCase() === state.remoteTagFilter.toLowerCase())) state.remoteTagFilter = '';
+    if (tags.length === 0) {
+      filterEl.classList.add('hidden');
+      filterEl.innerHTML = '';
     } else {
-      hostContainer.innerHTML = '';
-      state.sshHosts.forEach((host) => {
-        const item = document.createElement('div');
-        item.className = 'repo-item';
-        item.innerHTML = `
-          <div class="repo-item-top">
-            <span class="repo-item-name">
-              <i class="status-dot ${host.connected ? 'connected' : ''}"></i>
-              ${escapeHtml(host.name)}
-            </span>
-            <button class="mini-btn" style="height:21px;padding:0 7px;font-size:11px;">${escapeHtml(tr('browsePathsBtn'))}</button>
-          </div>
-          <div class="repo-item-path">${escapeHtml(host.user + '@' + host.host + (host.port !== 22 ? ':' + host.port : ''))}</div>
-        `;
-        item.addEventListener('click', () => {
-          openSshModal(host.id);
+      filterEl.classList.remove('hidden');
+      filterEl.innerHTML = `<button type="button" class="tag-chip tag-all ${state.remoteTagFilter ? '' : 'selected'}" data-tag="">${escapeHtml(zh ? '全部' : 'All')}</button>` +
+        tags.map((t) => `<button type="button" class="tag-chip ${state.remoteTagFilter.toLowerCase() === t.toLowerCase() ? 'selected' : ''}" style="--tag-hue:${tagHue(t)}" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('');
+      filterEl.querySelectorAll('.tag-chip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          const tag = chip.getAttribute('data-tag') || '';
+          state.remoteTagFilter = state.remoteTagFilter.toLowerCase() === tag.toLowerCase() ? '' : tag;
+          try {
+            localStorage.setItem('gitmap.sidebar.tagFilter', state.remoteTagFilter);
+          } catch (_) {}
+          renderSidebar();
         });
-        hostContainer.appendChild(item);
       });
+    }
+    const matchesTag = (h) => !state.remoteTagFilter || (h.tags || []).some((t) => t.toLowerCase() === state.remoteTagFilter.toLowerCase());
+
+    const withRepos = hosts.filter((h) => byHost.has(h.id) && matchesTag(h)).sort((a, b) => hostLabel(a.id).localeCompare(hostLabel(b.id)));
+    const idle = hosts.filter((h) => !byHost.has(h.id) && matchesTag(h)).sort((a, b) => hostLabel(a.id).localeCompare(hostLabel(b.id)));
+    const dupNames = duplicateNames(remoteKeys);
+
+    container.innerHTML = '';
+    if (withRepos.length === 0 && idle.length === 0) {
+      container.innerHTML = `<div class="sidebar-empty">${escapeHtml(state.remoteTagFilter ? (zh ? '没有带此标签的服务器' : 'No servers with this tag') : tr('noSshHosts'))}</div>`;
+      return;
+    }
+    if (withRepos.length === 0 && !state.remoteTagFilter) {
+      const hint = document.createElement('div');
+      hint.className = 'sidebar-empty';
+      hint.textContent = tr('noRemoteRepos');
+      container.appendChild(hint);
+    }
+
+    withRepos.forEach((h) => {
+      const keys = byHost.get(h.id).slice().sort((a, b) => parseRepoDisplay(a).remotePath.localeCompare(parseRepoDisplay(b).remotePath));
+      const collapsed = state.collapsedHosts.has(h.id);
+      const group = document.createElement('div');
+      group.className = 'host-group' + (collapsed ? ' collapsed' : '') + (keys.includes(state.activeRepo) ? ' has-active' : '');
+      group.appendChild(buildHostHeader(h, keys.length, collapsed));
+      if (!collapsed) {
+        const list = document.createElement('div');
+        list.className = 'host-group-repos';
+        keys.forEach((k) => list.appendChild(buildRepoSidebarItem(k, { disambiguate: dupNames, homeDir: h.homeDir })));
+        group.appendChild(list);
+      }
+      container.appendChild(group);
+    });
+
+    if (idle.length > 0) {
+      const others = document.createElement('div');
+      others.className = 'host-idle' + (state.showIdleHosts ? ' expanded' : '');
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'host-idle-toggle';
+      toggle.innerHTML = `<span class="chev">${state.showIdleHosts ? ICONS.chevronDown : ICONS.arrowRight}</span><span>${escapeHtml(withRepos.length > 0 ? (zh ? `其他主机 (${idle.length})` : `Other hosts (${idle.length})`) : (zh ? `SSH 主机 (${idle.length})` : `SSH hosts (${idle.length})`))}</span>`;
+      toggle.addEventListener('click', () => {
+        state.showIdleHosts = !state.showIdleHosts;
+        try {
+          localStorage.setItem('gitmap.sidebar.showIdleHosts', state.showIdleHosts ? '1' : '0');
+        } catch (_) {}
+        renderSidebar();
+      });
+      others.appendChild(toggle);
+      if (state.showIdleHosts) {
+        idle.forEach((h) => others.appendChild(buildHostHeader(h, 0, true, true)));
+      }
+      container.appendChild(others);
     }
   }
 
-  function buildRepoSidebarItem(repoKey) {
+  function buildHostHeader(h, repoCount, collapsed, idle) {
+    const zh = state.lang === 'zh';
+    const header = document.createElement('div');
+    header.className = 'host-group-header' + (idle ? ' idle' : '');
+    header.title = [h.alias ? h.name : '', hostAddress(h), h.proxyJump ? 'via ' + h.proxyJump : ''].filter(Boolean).join(' · ');
+    header.innerHTML = `
+      ${idle ? '' : `<span class="chev">${collapsed ? ICONS.arrowRight : ICONS.chevronDown}</span>`}
+      <i class="status-dot ${h.connected ? 'connected' : ''}"></i>
+      <span class="host-group-name">${escapeHtml(hostLabel(h.id))}</span>
+      <span class="host-group-tags">${tagChipsHtml(h.tags, 'small')}</span>
+      ${repoCount > 0 ? `<span class="host-group-count">${repoCount}</span>` : ''}
+      <span class="host-group-actions">
+        <button type="button" class="mini-icon-btn act-browse" title="${escapeHtml(zh ? '浏览路径 / 添加仓库' : 'Browse Paths / Add Repository')}">${ICONS.folderPlus}</button>
+        ${h.source !== 'unknown' ? `<button type="button" class="mini-icon-btn act-host-term" title="${escapeHtml(zh ? '在外部终端中登录此主机' : 'Log In to This Host in External Terminal')}">${ICONS.externalTerminal}</button>
+        <button type="button" class="mini-icon-btn act-host-edit" title="${escapeHtml(zh ? '别名与标签' : 'Alias & Tags')}">${ICONS.pencil}</button>` : ''}
+        ${h.connected ? `<button type="button" class="mini-icon-btn act-host-disconnect" title="${escapeHtml(zh ? '断开连接' : 'Disconnect')}">${ICONS.close}</button>` : ''}
+      </span>
+    `;
+    header.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (btn) {
+        e.stopPropagation();
+        if (btn.classList.contains('act-browse')) openSshModal(h.id);
+        else if (btn.classList.contains('act-host-term')) openExternalTerminal('ssh://' + encodeURIComponent(h.id) + (h.homeDir || '/~')).catch((err) => showToast(err.message, 'error'));
+        else if (btn.classList.contains('act-host-edit')) openHostMetaDialog(h.id);
+        else if (btn.classList.contains('act-host-disconnect')) {
+          rpc('ssh:disconnect', { hostId: h.id }).then((res) => {
+            state.sshHosts = res.hosts || state.sshHosts;
+            renderSidebar();
+          }).catch((err) => showToast(err.message, 'error'));
+        }
+        return;
+      }
+      if (e.target.closest('.tag-chip')) {
+        state.remoteTagFilter = e.target.closest('.tag-chip').getAttribute('data-tag') || '';
+        renderSidebar();
+        return;
+      }
+      if (idle) {
+        openSshModal(h.id);
+        return;
+      }
+      if (state.collapsedHosts.has(h.id)) state.collapsedHosts.delete(h.id);
+      else state.collapsedHosts.add(h.id);
+      saveUiSet('gitmap.sidebar.collapsedHosts', state.collapsedHosts);
+      renderSidebar();
+    });
+    return header;
+  }
+
+  /** Edit the GitMap alias & tags of a host (both ~/.ssh/config and saved hosts). */
+  function openHostMetaDialog(hostId) {
+    const h = findHost(hostId);
+    if (!h) return;
+    const zh = state.lang === 'zh';
+    const modal = document.getElementById('promptModal');
+    document.getElementById('promptTitle').textContent = (zh ? '服务器别名与标签：' : 'Server Alias & Tags: ') + h.name;
+    const bodyEl = document.getElementById('promptBody');
+    const footerEl = document.getElementById('promptFooter');
+    const suggestions = allHostTags().filter((t) => !(h.tags || []).some((x) => x.toLowerCase() === t.toLowerCase()));
+    bodyEl.innerHTML = `
+      <label><span>${escapeHtml(zh ? '显示名称（别名）' : 'Display Name (Alias)')}</span>
+        <input type="text" id="hostMetaAlias" spellcheck="false" maxlength="64" placeholder="${escapeHtml(h.name)}" value="${escapeHtml(h.alias || '')}" /></label>
+      <label><span>${escapeHtml(zh ? '标签（逗号或空格分隔）' : 'Tags (comma or space separated)')}</span>
+        <input type="text" id="hostMetaTags" spellcheck="false" list="gmTagSuggestions" placeholder="prod, staging, gpu" value="${escapeHtml((h.tags || []).join(', '))}" /></label>
+      <div id="hostMetaPreview" class="tag-preview"></div>
+      ${suggestions.length ? `<div class="tag-suggest"><span>${escapeHtml(zh ? '已有标签：' : 'Existing tags:')}</span>${tagChipsHtml(suggestions, 'small clickable')}</div>` : ''}
+      <p class="settings-hint">${escapeHtml(h.source === 'ssh-config'
+        ? (zh ? `连接信息 ${hostAddress(h)} 来自 ~/.ssh/config（别名 “${h.id}”）。别名和标签只保存在 GitMap 中，不会修改 ~/.ssh/config，已添加的仓库不受影响。` : `The connection (${hostAddress(h)}) comes from ~/.ssh/config (Host "${h.id}"). The alias & tags are only stored in GitMap: ~/.ssh/config isn't changed, and repositories on this host keep working.`)
+        : (zh ? `连接：${hostAddress(h)}。别名只改变显示名称，已添加的仓库不受影响。` : `Connection: ${hostAddress(h)}. The alias only changes the name shown; repositories on this host keep working.`))}</p>
+    `;
+    footerEl.innerHTML = `${h.source === 'saved' ? `<button type="button" class="mini-btn act-edit-conn">${escapeHtml(zh ? '修改连接设置…' : 'Edit Connection…')}</button><span style="flex:1"></span>` : ''}
+      <button type="button" class="mini-btn act-cancel">${escapeHtml(tr('cancel'))}</button>
+      <button type="button" class="mini-btn primary act-ok">${escapeHtml(zh ? '保存' : 'Save')}</button>`;
+    modal.classList.remove('hidden');
+
+    const aliasInput = document.getElementById('hostMetaAlias');
+    const tagsInput = document.getElementById('hostMetaTags');
+    const preview = document.getElementById('hostMetaPreview');
+    const parseTags = () => tagsInput.value.split(/[,，\s]+/).map((t) => t.trim().replace(/^#+/, '')).filter(Boolean);
+    const updatePreview = () => {
+      preview.innerHTML = tagChipsHtml(parseTags());
+    };
+    tagsInput.addEventListener('input', updatePreview);
+    bodyEl.querySelectorAll('.tag-suggest .tag-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const current = parseTags();
+        const tag = chip.getAttribute('data-tag');
+        if (!current.some((t) => t.toLowerCase() === tag.toLowerCase())) current.push(tag);
+        tagsInput.value = current.join(', ');
+        chip.remove();
+        updatePreview();
+      });
+    });
+    updatePreview();
+
+    const close = () => modal.classList.add('hidden');
+    const save = async () => {
+      try {
+        const res = await rpc('ssh:updateHostMeta', { id: h.id, alias: aliasInput.value, tags: parseTags() });
+        state.sshHosts = res.hosts || state.sshHosts;
+        close();
+        renderSidebar();
+        renderModalSshHosts();
+        renderActiveRepoBadge();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    };
+    [aliasInput, tagsInput].forEach((el) => el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') save();
+    }));
+    footerEl.querySelector('.act-ok').onclick = save;
+    footerEl.querySelector('.act-cancel').onclick = close;
+    document.getElementById('promptCloseBtn').onclick = close;
+    const editConn = footerEl.querySelector('.act-edit-conn');
+    if (editConn) {
+      editConn.onclick = () => {
+        close();
+        openSshModal().then(() => openHostForm(h));
+      };
+    }
+    setTimeout(() => aliasInput.focus(), 30);
+  }
+
+  /** Show the SSH host form, empty (new host) or filled in (editing a saved host). */
+  function openHostForm(h) {
+    const form = document.getElementById('sshHostForm');
+    const zh = state.lang === 'zh';
+    form.classList.remove('hidden');
+    document.getElementById('sshFormTitle').textContent = h ? (zh ? '编辑 SSH 连接：' : 'Edit SSH Connection: ') + h.name : tr('configureSshHost');
+    document.getElementById('sshFormId').value = h ? h.id : '';
+    document.getElementById('sshFormName').value = h ? h.name : '';
+    document.getElementById('sshFormHost').value = h ? h.host : '';
+    document.getElementById('sshFormPort').value = h ? String(h.port || 22) : '22';
+    document.getElementById('sshFormUser').value = h ? h.user : '';
+    document.getElementById('sshFormAuth').value = h ? h.authType || 'auto' : 'auto';
+    document.getElementById('sshFormKey').value = h && h.privateKeyPath ? h.privateKeyPath : '';
+    document.getElementById('sshFormPassword').value = '';
+    document.getElementById('sshFormPassword').placeholder = h ? (zh ? '留空保持不变' : 'Leave blank to keep') : '••••••••';
+    document.getElementById('sshFormJump').value = h && h.proxyJump ? h.proxyJump : '';
+    document.getElementById('sshFormDefaultPath').value = h && h.defaultPath ? h.defaultPath : '';
+    document.getElementById('sshFormTags').value = h && h.tags ? h.tags.join(', ') : '';
+    form.scrollIntoView({ block: 'nearest' });
+    document.getElementById('sshFormName').focus();
+  }
+
+  function buildRepoSidebarItem(repoKey, opts) {
     const info = parseRepoDisplay(repoKey);
+    const options = opts || {};
+    let label = info.name;
+    const pathForLabel = info.isRemote ? info.remotePath : info.fullDisplay;
+    if (options.disambiguate && options.disambiguate.has(info.name.toLowerCase()) && !(state.repos[repoKey] && state.repos[repoKey].name)) {
+      const parts = pathForLabel.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean);
+      if (parts.length >= 2) label = parts[parts.length - 2] + '/' + parts[parts.length - 1];
+    }
+    let pathLine = info.fullDisplay;
+    if (info.isRemote) {
+      pathLine = options.homeDir && (info.remotePath === options.homeDir || info.remotePath.startsWith(options.homeDir + '/'))
+        ? '~' + info.remotePath.substring(options.homeDir.length)
+        : info.remotePath;
+    }
     const el = document.createElement('div');
-    el.className = 'repo-item' + (state.activeRepo === repoKey ? ' active' : '');
-    el.title = info.fullDisplay;
+    el.className = 'repo-item' + (info.isRemote ? ' is-remote' : '') + (state.activeRepo === repoKey ? ' active' : '');
+    el.title = info.isRemote ? `${hostLabel(info.hostId)}:${info.remotePath}` : info.fullDisplay;
     el.innerHTML = `
       <div class="repo-item-top">
-        <span class="repo-item-name">
-          ${info.isRemote ? '<span class="ssh-chip">SSH</span>' : ''}
-          ${escapeHtml(info.name)}
-        </span>
+        <span class="repo-item-name">${escapeHtml(label)}</span>
         <span class="repo-item-actions">
-          <button class="mini-icon-btn act-term" title="Open Terminal">›_</button>
-          <button class="mini-icon-btn act-remove" title="Remove Repository">✕</button>
+          <button class="mini-icon-btn act-term" title="${escapeHtml(state.lang === 'zh' ? '内置终端' : 'Integrated Terminal')}">${ICONS.terminal}</button>
+          <button class="mini-icon-btn act-ext-term" title="${escapeHtml(tr('openInTerminal'))}">${ICONS.externalTerminal}</button>
+          <button class="mini-icon-btn act-editor" title="${escapeHtml(tr('openInEditor'))}">${ICONS.editor}</button>
+          <button class="mini-icon-btn act-remove" title="${escapeHtml(state.lang === 'zh' ? '从列表移除' : 'Remove from List')}">${ICONS.close}</button>
         </span>
       </div>
-      <div class="repo-item-path">${escapeHtml(info.fullDisplay)}</div>
+      <div class="repo-item-path">${escapeHtml(pathLine)}</div>
     `;
     el.addEventListener('click', (e) => {
       if (e.target.closest('.repo-item-actions')) return;
@@ -534,7 +960,15 @@
     });
     el.querySelector('.act-term').addEventListener('click', (e) => {
       e.stopPropagation();
-      openTerminalSession(repoKey, info.isRemote ? `SSH: ${info.name}` : info.name, null);
+      openTerminalSession(repoKey, info.isRemote ? `${hostLabel(info.hostId)}: ${label}` : label, null);
+    });
+    el.querySelector('.act-ext-term').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openExternalTerminal(repoKey).catch((err) => showToast(err.message, 'error'));
+    });
+    el.querySelector('.act-editor').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openInEditor(repoKey).catch((err) => showToast(err.message, 'error'));
     });
     el.querySelector('.act-remove').addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -610,6 +1044,17 @@
     }
     activateTab(tabId);
     return panelEl;
+  }
+
+  /* ==================== Syntax Highlighting ==================== */
+  /**
+   * Get a highlighter for a file path (NULL when highlighting is turned off, the language is unknown, or highlight.js didn't load).
+   */
+  function getSyntaxHighlighter(filePath) {
+    if (state.settings['gitmap.diff.syntaxHighlight'] === false || !window.GitMapSyntax) return null;
+    const language = window.GitMapSyntax.languageForPath(filePath);
+    if (language === null) return null;
+    return { language, highlight: (text) => window.GitMapSyntax.highlightToLines(text, language) };
   }
 
   /* ==================== Built-in Diff Viewer ==================== */
@@ -697,12 +1142,26 @@
     let hunkRowElements = [];
     let currentHunkIdx = -1;
 
-    function formatSegments(text, segs, cls) {
+    // Syntax highlighting: highlight each side of the file as a whole, then look lines up by their line number
+    const syntax = getSyntaxHighlighter(diffData.newFilePath || diffData.oldFilePath);
+    let oldSyntaxLines = null;
+    let newSyntaxLines = null;
+    if (syntax !== null && !diffData.isBinary && !diffData.error && Array.isArray(diffData.rows)) {
+      const oldArr = [];
+      const newArr = [];
+      diffData.rows.forEach((r) => {
+        if (r.oldLineNumber != null) oldArr[r.oldLineNumber - 1] = r.oldText == null ? '' : r.oldText;
+        if (r.newLineNumber != null) newArr[r.newLineNumber - 1] = r.newText == null ? '' : r.newText;
+      });
+      oldSyntaxLines = syntax.highlight(Array.from(oldArr, (l) => (l == null ? '' : l)).join('\n'));
+      newSyntaxLines = syntax.highlight(Array.from(newArr, (l) => (l == null ? '' : l)).join('\n'));
+    }
+
+    function formatSide(isOld, lineNumber, text, segs, cls) {
       if (text == null) return '';
-      if (!segs || segs.length === 0) return escapeHtml(text);
-      return segs
-        .map((s) => (s.changed ? `<span class="${cls}">${escapeHtml(s.text)}</span>` : escapeHtml(s.text)))
-        .join('');
+      const lines = isOld ? oldSyntaxLines : newSyntaxLines;
+      const runs = lines && lineNumber != null ? lines[lineNumber - 1] || null : null;
+      return window.GitMapSyntax ? window.GitMapSyntax.renderLine(runs, text, segs, cls) : escapeHtml(text);
     }
 
     function computeDisplayChunks(rows) {
@@ -789,9 +1248,9 @@
             const rightCls = r.kind === 'added' || r.kind === 'change' ? 'diff-cell-add' : r.newLineNumber == null ? 'diff-cell-empty' : '';
             trEl.innerHTML = `
               <td class="diff-gutter ${leftCls}">${r.oldLineNumber ?? ''}</td>
-              <td class="diff-code diff-side-left ${leftCls}">${formatSegments(r.oldText, r.oldSegments, 'word-del')}</td>
+              <td class="diff-code diff-side-left ${leftCls}">${formatSide(true, r.oldLineNumber, r.oldText, r.oldSegments, 'word-del')}</td>
               <td class="diff-gutter ${rightCls}">${r.newLineNumber ?? ''}</td>
-              <td class="diff-code diff-side-right ${rightCls}">${formatSegments(r.newText, r.newSegments, 'word-add')}</td>
+              <td class="diff-code diff-side-right ${rightCls}">${formatSide(false, r.newLineNumber, r.newText, r.newSegments, 'word-add')}</td>
             `;
             if (isChange && !prevWasChange) hunkRowElements.push(trEl);
             prevWasChange = isChange;
@@ -803,13 +1262,13 @@
               trDel.innerHTML = `
                 <td class="diff-gutter diff-cell-del">${r.oldLineNumber ?? ''}</td>
                 <td class="diff-gutter diff-cell-del"></td>
-                <td class="diff-code diff-cell-del">- ${formatSegments(r.oldText, r.oldSegments, 'word-del')}</td>
+                <td class="diff-code diff-cell-del"><span class="diff-sign">-</span>${formatSide(true, r.oldLineNumber, r.oldText, r.oldSegments, 'word-del')}</td>
               `;
               const trAdd = document.createElement('tr');
               trAdd.innerHTML = `
                 <td class="diff-gutter diff-cell-add"></td>
                 <td class="diff-gutter diff-cell-add">${r.newLineNumber ?? ''}</td>
-                <td class="diff-code diff-cell-add">+ ${formatSegments(r.newText, r.newSegments, 'word-add')}</td>
+                <td class="diff-code diff-cell-add"><span class="diff-sign">+</span>${formatSide(false, r.newLineNumber, r.newText, r.newSegments, 'word-add')}</td>
               `;
               if (!prevWasChange) hunkRowElements.push(trDel);
               prevWasChange = true;
@@ -818,12 +1277,14 @@
             } else {
               const trEl = document.createElement('tr');
               const cls = r.kind === 'added' ? 'diff-cell-add' : r.kind === 'deleted' ? 'diff-cell-del' : '';
-              const prefix = r.kind === 'added' ? '+ ' : r.kind === 'deleted' ? '- ' : '  ';
-              const text = r.kind === 'deleted' ? r.oldText : r.newText;
+              const sign = r.kind === 'added' ? '+' : r.kind === 'deleted' ? '-' : ' ';
+              const codeHtml = r.kind === 'deleted'
+                ? formatSide(true, r.oldLineNumber, r.oldText ?? '', null, '')
+                : formatSide(false, r.newLineNumber, r.newText ?? '', null, '');
               trEl.innerHTML = `
                 <td class="diff-gutter ${cls}">${r.oldLineNumber ?? ''}</td>
                 <td class="diff-gutter ${cls}">${r.newLineNumber ?? ''}</td>
-                <td class="diff-code ${cls}">${prefix}${escapeHtml(text ?? '')}</td>
+                <td class="diff-code ${cls}"><span class="diff-sign">${sign}</span>${codeHtml}</td>
               `;
               if (isChange && !prevWasChange) hunkRowElements.push(trEl);
               prevWasChange = isChange;
@@ -936,6 +1397,7 @@
         <div class="viewer-toolbar">
           <div class="viewer-toolbar-left">
             <span class="viewer-path">${escapeHtml(fileRes.filePath)}${fileRes.commit ? ' @ ' + escapeHtml(fileRes.commit.slice(0, 8)) : ''}</span>
+            ${fileRes.truncated ? `<span class="diff-stat-del">${escapeHtml(state.lang === 'zh' ? '文件较大，仅显示前 5 MB' : 'Large file: showing the first 5 MB')}</span>` : ''}
           </div>
           <div class="viewer-toolbar-right">
             ${hasRepo ? `
@@ -950,7 +1412,10 @@
       `;
 
       const scrollArea = panel.querySelector('.diff-scroll-area');
-      const lines = fileRes.content.replace(/\r\n/g, '\n').split('\n');
+      const normalizedContent = fileRes.content.replace(/\r\n/g, '\n');
+      const lines = normalizedContent.split('\n');
+      const fileSyntax = getSyntaxHighlighter(fileRes.filePath);
+      const syntaxLines = fileSyntax !== null ? fileSyntax.highlight(normalizedContent) : null;
 
       const renderFileLines = () => {
         const table = document.createElement('table');
@@ -983,7 +1448,7 @@
           trEl.innerHTML = `
             ${blameHtml}
             <td class="file-line-num" data-line="${lineNo}">${lineNo}</td>
-            <td class="diff-code">${escapeHtml(lineText)}</td>
+            <td class="diff-code">${syntaxLines && window.GitMapSyntax ? window.GitMapSyntax.renderLine(syntaxLines[idx] || null, lineText, null, '') : escapeHtml(lineText)}</td>
           `;
           tbody.appendChild(trEl);
         });
@@ -991,37 +1456,36 @@
         table.appendChild(tbody);
         scrollArea.innerHTML = '';
         scrollArea.appendChild(table);
-
-        scrollArea.querySelectorAll('.file-line-num').forEach((numEl) => {
-          numEl.addEventListener('click', (ev) => {
-            const clicked = Number(numEl.getAttribute('data-line'));
-            if (ev.shiftKey && selStart !== null) {
-              const a = Math.min(selStart, clicked);
-              const b = Math.max(selStart, clicked);
-              selStart = a;
-              selEnd = b;
-            } else {
-              selStart = clicked;
-              selEnd = clicked;
-            }
-            renderFileLines();
-          });
-        });
-
-        scrollArea.querySelectorAll('.blame-gutter[data-hash]').forEach((bg) => {
-          const h = bg.getAttribute('data-hash');
-          if (h) {
-            bg.addEventListener('click', () => {
-              sendWs({
-                type: 'graph:request',
-                payload: { command: 'commitDetails', repo: fileRes.repo, commitHash: h, hasParents: true, stash: null, avatarEmail: null, refresh: false }
-              });
-              rpc('repos:select', { repo: fileRes.repo });
-              activateTab('graph');
-            });
-          }
-        });
       };
+
+      // One delegated listener for line-number selection & blame clicks (instead of one per line on every render)
+      scrollArea.addEventListener('click', (ev) => {
+        const numEl = ev.target.closest('.file-line-num');
+        if (numEl) {
+          const clicked = Number(numEl.getAttribute('data-line'));
+          if (ev.shiftKey && selStart !== null) {
+            selStart = Math.min(selStart, clicked);
+            selEnd = Math.max(selEnd || selStart, clicked);
+          } else {
+            selStart = clicked;
+            selEnd = clicked;
+          }
+          scrollArea.querySelectorAll('tr.file-line-row').forEach((row, idx) => {
+            row.classList.toggle('selected-line', idx + 1 >= selStart && idx + 1 <= selEnd);
+          });
+          return;
+        }
+        const bg = ev.target.closest('.blame-gutter[data-hash]');
+        const h = bg && bg.getAttribute('data-hash');
+        if (h) {
+          sendWs({
+            type: 'graph:request',
+            payload: { command: 'commitDetails', repo: fileRes.repo, commitHash: h, hasParents: true, stash: null, avatarEmail: null, refresh: false }
+          });
+          rpc('repos:select', { repo: fileRes.repo });
+          activateTab('graph');
+        }
+      });
 
       if (hasRepo) {
         panel.querySelector('.act-blame').addEventListener('click', async (e) => {
@@ -1065,21 +1529,46 @@
   }
 
   /* ==================== Integrated Terminal (xterm.js) ==================== */
+  const TERMINAL_THEMES = {
+    dark: { background: '#141414', foreground: '#d4d4d4', cursor: '#d4d4d4', selectionBackground: '#264f78' },
+    light: { background: '#ffffff', foreground: '#1f2328', cursor: '#1f2328', selectionBackground: '#add6ff' }
+  };
+  let terminalCreateInFlight = null;
+
+  function setTerminalDrawerVisible(visible) {
+    const drawer = document.getElementById('terminalDrawer');
+    drawer.classList.toggle('hidden', !visible);
+    document.getElementById('btnToggleTerminal').classList.toggle('active', visible);
+    if (visible && state.activeTermId) setTimeout(fitActiveTerminal, 30);
+  }
+
+  /**
+   * Show / hide the terminal drawer. Showing it with no open session creates one for the active repository.
+   * (Showing the drawer and creating a session are deliberately separate steps: creating a session must never
+   * re-enter this function, otherwise a pending session request recursively spawns more of them.)
+   */
   function toggleTerminalDrawer(forceShow) {
     const drawer = document.getElementById('terminalDrawer');
     const willShow = typeof forceShow === 'boolean' ? forceShow : drawer.classList.contains('hidden');
-    drawer.classList.toggle('hidden', !willShow);
-    if (willShow) {
-      if (state.terminals.size === 0) {
-        openTerminalSession(state.activeRepo || state.homeDir, undefined, null);
-      } else if (state.activeTermId) {
-        fitActiveTerminal();
-      }
+    setTerminalDrawerVisible(willShow);
+    if (willShow && state.terminals.size === 0 && terminalCreateInFlight === null) {
+      openTerminalSession(state.activeRepo || state.homeDir, undefined, null);
     }
   }
 
-  async function openTerminalSession(repo, name, initialCommand) {
-    toggleTerminalDrawer(true);
+  function openTerminalSession(repo, name, initialCommand) {
+    setTerminalDrawerVisible(true);
+    // Serialise creation so rapid clicks / repeated requests queue up rather than racing
+    const previous = terminalCreateInFlight || Promise.resolve();
+    const task = previous.then(() => createTerminalSession(repo, name, initialCommand));
+    terminalCreateInFlight = task;
+    task.finally(() => {
+      if (terminalCreateInFlight === task) terminalCreateInFlight = null;
+    });
+    return task;
+  }
+
+  async function createTerminalSession(repo, name, initialCommand) {
     try {
       const res = await rpc('term:create', {
         repo: repo || state.activeRepo || state.homeDir,
@@ -1097,11 +1586,9 @@
       const term = new window.Terminal({
         cursorBlink: true,
         fontSize: 12.5,
-        fontFamily: 'SF Mono, Menlo, Monaco, Consolas, monospace',
-        theme: {
-          background: '#141414',
-          foreground: '#d4d4d4'
-        }
+        fontFamily: '"MesloLGS NF", "MesloLGS Nerd Font", "JetBrainsMono Nerd Font", "Hack Nerd Font", "FiraCode Nerd Font", "SF Mono", Menlo, Monaco, Consolas, monospace',
+        scrollback: 5000,
+        theme: TERMINAL_THEMES[state.theme] || TERMINAL_THEMES.dark
       });
       const fitAddon = new window.FitAddon.FitAddon();
       term.loadAddon(fitAddon);
@@ -1113,10 +1600,14 @@
 
       const tabEl = document.createElement('div');
       tabEl.className = 'term-tab';
-      tabEl.innerHTML = `<span>${info.isRemote ? '⇄ ' : '›_ '}${escapeHtml(info.title)}</span><button class="ws-tab-close">✕</button>`;
+      tabEl.title = info.isRemote ? `${info.hostId}:${info.cwd}` : info.cwd;
+      tabEl.innerHTML = `<span class="term-tab-icon">${info.isRemote ? ICONS.remote : ICONS.terminal}</span><span class="term-tab-title">${escapeHtml(info.title)}</span><button class="ws-tab-close" title="${escapeHtml(tr('close'))}">${ICONS.close}</button>`;
       tabEl.addEventListener('click', (e) => {
         if (e.target.closest('.ws-tab-close')) return;
         activateTerminal(info.id);
+      });
+      tabEl.addEventListener('auxclick', (e) => {
+        if (e.button === 1) closeTerminalSession(info.id);
       });
       tabEl.querySelector('.ws-tab-close').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1124,10 +1615,11 @@
       });
       document.getElementById('terminalTabs').appendChild(tabEl);
 
-      state.terminals.set(info.id, { info, term, fitAddon, containerEl, tabEl });
+      state.terminals.set(info.id, { info, term, fitAddon, containerEl, tabEl, exited: false });
       activateTerminal(info.id);
     } catch (err) {
       showToast(err.message, 'error');
+      if (state.terminals.size === 0) setTerminalDrawerVisible(false);
     }
   }
 
@@ -1162,7 +1654,7 @@
     state.terminals.delete(id);
     if (state.terminals.size === 0) {
       state.activeTermId = null;
-      document.getElementById('terminalDrawer').classList.add('hidden');
+      setTerminalDrawerVisible(false);
     } else if (state.activeTermId === id) {
       const firstId = state.terminals.keys().next().value;
       activateTerminal(firstId);
@@ -1215,35 +1707,63 @@
 
   function renderModalSshHosts() {
     const listEl = document.getElementById('modalSshHostList');
+    const zh = state.lang === 'zh';
     if (state.sshHosts.length === 0) {
       listEl.innerHTML = `<div class="sidebar-empty">${escapeHtml(tr('noSshHosts'))}</div>`;
       return;
     }
+    // Search by alias, name, address or tag ("#prod" matches the tag exactly)
+    const q = (document.getElementById('sshHostSearch').value || '').trim().toLowerCase();
+    const matches = (h) => {
+      if (!q) return true;
+      if (q.startsWith('#')) return (h.tags || []).some((t) => t.toLowerCase() === q.slice(1));
+      return [h.alias, h.name, h.host, h.user, ...(h.tags || [])].some((v) => v && String(v).toLowerCase().includes(q));
+    };
+    const shown = state.sshHosts.filter(matches);
+    if (shown.length === 0) {
+      listEl.innerHTML = `<div class="sidebar-empty">${escapeHtml(zh ? '没有匹配的主机' : 'No matching hosts')}</div>`;
+      return;
+    }
     listEl.innerHTML = '';
-    state.sshHosts.forEach((h) => {
+    shown.forEach((h) => {
       const card = document.createElement('div');
       card.className = 'host-card' + (state.selectedSshHostId === h.id ? ' selected' : '');
       card.innerHTML = `
         <div class="host-card-top">
-          <span style="font-weight:600;display:flex;align-items:center;gap:6px;">
+          <span class="host-card-title">
             <i class="status-dot ${h.connected ? 'connected' : ''}"></i>
-            ${escapeHtml(h.name)}
+            <span class="host-card-name">${escapeHtml(h.alias || h.name)}</span>
+            ${h.alias ? `<span class="host-card-orig">${escapeHtml(h.name)}</span>` : ''}
           </span>
-          <span style="display:flex;align-items:center;gap:4px;">
+          <span class="host-card-actions">
             <span class="ssh-chip">${h.source === 'ssh-config' ? 'ssh-config' : 'saved'}</span>
-            ${h.source === 'saved' ? '<button class="mini-icon-btn del-host" title="Delete Host">✕</button>' : ''}
+            <button class="mini-icon-btn edit-host" title="${escapeHtml(zh ? '别名与标签' : 'Alias & Tags')}">${ICONS.pencil}</button>
+            ${h.source === 'saved' ? `<button class="mini-icon-btn danger del-host" title="${escapeHtml(zh ? '删除主机' : 'Delete Host')}">${ICONS.trash}</button>` : ''}
           </span>
         </div>
-        <div class="host-card-meta">${escapeHtml(h.user + '@' + h.host + ':' + h.port)}${h.proxyJump ? ' (via ' + escapeHtml(h.proxyJump) + ')' : ''}</div>
+        <div class="host-card-meta">${escapeHtml(hostAddress(h))}${h.proxyJump ? ' (via ' + escapeHtml(h.proxyJump) + ')' : ''}</div>
+        ${(h.tags || []).length ? `<div class="host-card-tags">${tagChipsHtml(h.tags, 'small')}</div>` : ''}
       `;
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.del-host')) return;
+        if (e.target.closest('button')) return;
+        const chip = e.target.closest('.tag-chip');
+        if (chip) {
+          document.getElementById('sshHostSearch').value = '#' + chip.getAttribute('data-tag');
+          renderModalSshHosts();
+          return;
+        }
         selectAndBrowseSshHost(h.id);
+      });
+      card.querySelector('.edit-host').addEventListener('click', (e) => {
+        e.stopPropagation();
+        openHostMetaDialog(h.id);
       });
       const delBtn = card.querySelector('.del-host');
       if (delBtn) {
         delBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
+          const ok = await confirmDialog(zh ? '删除 SSH 主机' : 'Delete SSH Host', zh ? `从 GitMap 删除主机“${h.alias || h.name}”（${hostAddress(h)}）及其保存的密码？其上的仓库会保留在列表中。` : `Delete the host "${h.alias || h.name}" (${hostAddress(h)}) and its saved password from GitMap? Repositories on it stay in the list.`, zh ? '删除' : 'Delete', true);
+          if (!ok) return;
           const res = await rpc('ssh:removeHost', { id: h.id });
           state.sshHosts = res.hosts || [];
           if (state.selectedSshHostId === h.id) {
@@ -1260,59 +1780,19 @@
   }
 
   async function selectAndBrowseSshHost(hostId, targetPath) {
+    const changedHost = state.selectedSshHostId !== hostId;
     state.selectedSshHostId = hostId;
     renderModalSshHosts();
     document.getElementById('sshBrowserEmpty').classList.add('hidden');
     document.getElementById('sshBrowserContent').classList.remove('hidden');
-    const dirList = document.getElementById('sshDirList');
-    dirList.innerHTML = `<div class="browser-empty-state">${escapeHtml(tr('connecting'))}</div>`;
-
-    try {
-      const showHidden = document.getElementById('sshShowHidden').checked;
-      const listing = await rpc('ssh:browsePath', {
-        hostId,
-        path: targetPath || undefined,
-        showHidden
-      });
-      state.sshHosts = listing.hosts || state.sshHosts;
-      state.sshCurrentPath = listing.currentPath;
-      state.sshParentPath = listing.parentPath;
-      renderModalSshHosts();
-      renderSidebar();
-
-      const hostObj = state.sshHosts.find((x) => x.id === hostId);
-      document.getElementById('sshConnSummary').textContent =
-        `● ${hostObj ? hostObj.user + '@' + hostObj.host : hostId}` +
-        (hostObj && hostObj.gitVersion ? ` · Git ${hostObj.gitVersion}` : '');
-
-      document.getElementById('sshPathInput').value = listing.currentPath;
-      renderBreadcrumbs(document.getElementById('sshBreadcrumbs'), listing.currentPath, (p) => {
-        selectAndBrowseSshHost(hostId, p);
-      });
-
-      // Current Repo Banner
-      const banner = document.getElementById('sshCurrentRepoBanner');
-      if (listing.currentRepoRoot) {
-        banner.classList.remove('hidden');
-        document.getElementById('sshCurrentRepoPath').textContent = `${hostId}:${listing.currentRepoRoot}`;
-        const brEl = document.getElementById('sshCurrentRepoBranch');
-        brEl.textContent = listing.currentRepoBranch || 'HEAD';
-        document.getElementById('btnOpenCurrentRemoteRepo').onclick = () => {
-          openRemoteRepoAndCloseModal(hostId, listing.currentRepoRoot);
-        };
-      } else {
-        banner.classList.add('hidden');
-      }
-
-      renderDirectoryEntries(
-        dirList,
-        listing.entries,
-        (dirPath) => selectAndBrowseSshHost(hostId, dirPath),
-        (repoPath) => openRemoteRepoAndCloseModal(hostId, repoPath)
-      );
-    } catch (err) {
-      dirList.innerHTML = `<div class="browser-empty-state" style="color:var(--vscode-errorForeground);">${escapeHtml(err.message)}</div>`;
+    if (changedHost) sshBrowser.reset();
+    let startPath = targetPath || null;
+    if (!startPath && changedHost) {
+      try {
+        startPath = localStorage.getItem('gitmap.ssh.lastPath.' + hostId) || null;
+      } catch (_) {}
     }
+    await sshBrowser.navigate(startPath, { push: true });
   }
 
   async function openRemoteRepoAndCloseModal(hostId, remotePath) {
@@ -1329,159 +1809,981 @@
     }
   }
 
-  function renderBreadcrumbs(container, fullPath, onNavigate) {
-    container.innerHTML = '';
-    const isWinDrive = /^[a-zA-Z]:/.test(fullPath);
-    const parts = fullPath.split('/').filter(Boolean);
-
-    const rootBtn = document.createElement('button');
-    rootBtn.className = 'crumb-btn';
-    rootBtn.textContent = isWinDrive ? parts[0] : '/';
-    rootBtn.addEventListener('click', () => onNavigate(isWinDrive ? parts[0] + '/' : '/'));
-    container.appendChild(rootBtn);
-
-    const startIdx = isWinDrive ? 1 : 0;
-    let accum = isWinDrive ? parts[0] : '';
-    for (let i = startIdx; i < parts.length; i++) {
-      const sep = document.createElement('span');
-      sep.textContent = '/';
-      container.appendChild(sep);
-      accum += '/' + parts[i];
-      const target = accum;
-      const btn = document.createElement('button');
-      btn.className = 'crumb-btn';
-      btn.textContent = parts[i];
-      btn.addEventListener('click', () => onNavigate(target));
-      container.appendChild(btn);
+  /* ==================== File Browser Component (Remote SSH & Local) ==================== */
+  function formatBytes(bytes) {
+    if (!bytes) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let v = bytes;
+    let u = 0;
+    while (v >= 1024 && u < units.length - 1) {
+      v /= 1024;
+      u++;
     }
+    return (u === 0 ? String(v) : v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)) + ' ' + units[u];
   }
 
-  function renderDirectoryEntries(container, entries, onEnterDir, onOpenRepo) {
-    if (!entries || entries.length === 0) {
-      container.innerHTML = `<div class="browser-empty-state">Empty directory</div>`;
-      return;
+  function formatMtime(seconds) {
+    if (!seconds) return { short: '—', full: '' };
+    const d = new Date(seconds * 1000);
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const time = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    const date = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    const sameDay = d.toDateString() === now.toDateString();
+    const yesterday = new Date(now.getTime() - 86400000).toDateString() === d.toDateString();
+    const short = sameDay
+      ? (state.lang === 'zh' ? '今天 ' : 'Today ') + time
+      : yesterday
+        ? (state.lang === 'zh' ? '昨天 ' : 'Yesterday ') + time
+        : d.getFullYear() === now.getFullYear()
+          ? pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + time
+          : date;
+    return { short, full: date + ' ' + time + ':' + pad(d.getSeconds()) };
+  }
+
+  function fileIconFor(entry) {
+    if (entry.isGitRepo) return { svg: ICONS.gitRepo, cls: 'is-git' };
+    if (entry.isDirectory) return { svg: ICONS.folder, cls: 'is-dir' };
+    const ext = (entry.name.split('.').pop() || '').toLowerCase();
+    if (/^(png|jpe?g|gif|webp|svg|bmp|ico|tiff?|heic)$/.test(ext)) return { svg: ICONS.fileImage, cls: 'is-image' };
+    if (/^(zip|tar|gz|tgz|bz2|xz|7z|rar|zst|jar|whl|deb|rpm|dmg)$/.test(ext)) return { svg: ICONS.fileArchive, cls: 'is-archive' };
+    if (window.GitMapSyntax && window.GitMapSyntax.languageForPath(entry.name)) return { svg: ICONS.fileCode, cls: 'is-code' };
+    return { svg: ICONS.file, cls: 'is-file' };
+  }
+
+  function joinPath(dir, name) {
+    if (/[\\/]$/.test(dir)) return dir + name;
+    return dir + '/' + name;
+  }
+
+  /**
+   * A file browser: path field with Tab completion & history, sortable Name / Size / Modified table, filtering,
+   * multi-selection and per-row actions. Used by the Remote - SSH browser and the local repository picker.
+   */
+  function createFileBrowser(root, opts) {
+    const fb = {
+      currentPath: null,
+      parentPath: null,
+      entries: [],
+      history: [],
+      historyIdx: -1,
+      sort: (() => {
+        try {
+          return JSON.parse(localStorage.getItem('gitmap.fb.sort.' + opts.kind)) || { key: 'name', dir: 1 };
+        } catch (_) {
+          return { key: 'name', dir: 1 };
+        }
+      })(),
+      showHidden: localStorage.getItem('gitmap.fb.hidden.' + opts.kind) === '1',
+      filter: '',
+      selected: new Set(),
+      lastClicked: -1,
+      focusIdx: -1,
+      visible: [],
+      loadSeq: 0,
+      suggest: { items: [], idx: -1, base: '' }
+    };
+    const T = (zh, en) => (state.lang === 'zh' ? zh : en);
+    const features = opts.features || {};
+
+    root.innerHTML = `
+      <div class="fb-conn">
+        <span class="fb-conn-summary"></span>
+        <span class="fb-conn-actions">
+          ${features.scan ? `<button type="button" class="mini-btn act-scan" title="${escapeHtml(T('扫描当前目录下（最多 3 层）的 Git 仓库', 'Find Git repositories up to 3 levels below this folder'))}">${ICONS.scan}<span>${escapeHtml(tr('scanSubfolders'))}</span></button>` : ''}
+          ${features.launch ? `<button type="button" class="mini-icon-btn act-here-term" title="${escapeHtml(T('在外部终端中打开当前目录', 'Open This Folder in External Terminal'))}">${ICONS.externalTerminal}</button>
+          <button type="button" class="mini-icon-btn act-here-editor" title="${escapeHtml(T('在编辑器中打开当前目录', 'Open This Folder in Editor'))}">${ICONS.editor}</button>` : ''}
+          ${features.nativePicker ? `<button type="button" class="mini-btn act-native">${ICONS.folderOpen}<span>${escapeHtml(tr('osFolderPicker'))}</span></button>` : ''}
+        </span>
+      </div>
+      <div class="fb-toolbar">
+        <button type="button" class="icon-btn act-back" title="${escapeHtml(T('后退', 'Back'))} (Alt+←)">${ICONS.arrowLeft}</button>
+        <button type="button" class="icon-btn act-forward" title="${escapeHtml(T('前进', 'Forward'))} (Alt+→)">${ICONS.arrowRight}</button>
+        <button type="button" class="icon-btn act-up" title="${escapeHtml(T('上级目录', 'Parent Folder'))} (Alt+↑)">${ICONS.arrowUp}</button>
+        <button type="button" class="icon-btn act-home" title="${escapeHtml(T('主目录', 'Home Folder'))} (~)">${ICONS.home}</button>
+        <div class="fb-path">
+          <div class="fb-crumbs" tabindex="0" title="${escapeHtml(T('点击空白处或按 ⌘L / Ctrl+L 编辑路径', 'Click the empty space or press Cmd/Ctrl+L to edit the path'))}"></div>
+          <button type="button" class="fb-path-edit mini-icon-btn" title="${escapeHtml(T('编辑路径（Tab 补全）', 'Edit Path (Tab completes)'))} ⌘L">${ICONS.pencil}</button>
+          <input type="text" class="fb-path-input hidden" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(T('输入路径，Tab 补全，Enter 跳转', 'Type a path — Tab to complete, Enter to go'))}" />
+          <div class="fb-suggest hidden" role="listbox"></div>
+        </div>
+        <button type="button" class="icon-btn act-refresh" title="${escapeHtml(T('刷新', 'Refresh'))}">${ICONS.refresh}</button>
+      </div>
+      <div class="fb-actions">
+        <label class="fb-filter">${ICONS.search}<input type="text" class="fb-filter-input" spellcheck="false" placeholder="${escapeHtml(T('筛选当前目录…', 'Filter this folder…'))}" /></label>
+        <button type="button" class="mini-icon-btn act-hidden" title="${escapeHtml(tr('showHidden'))}">${ICONS.eyeOff}</button>
+        <span class="fb-actions-spacer"></span>
+        ${features.mkdir ? `<button type="button" class="mini-btn act-mkdir">${ICONS.folderPlus}<span>${escapeHtml(T('新建文件夹', 'New Folder'))}</span></button>` : ''}
+        ${features.transfer ? `<button type="button" class="mini-btn act-upload">${ICONS.upload}<span>${escapeHtml(T('上传文件', 'Upload Files'))}</span></button>
+        <button type="button" class="mini-btn act-upload-dir">${ICONS.upload}<span>${escapeHtml(T('上传文件夹', 'Upload Folder'))}</span></button>` : ''}
+      </div>
+      <div class="fb-repo-banner hidden">
+        <span class="fb-repo-banner-icon">${ICONS.gitRepo}</span>
+        <span class="fb-repo-banner-text"></span>
+        <span class="branch-pill fb-repo-banner-branch"></span>
+        <button type="button" class="mini-btn primary act-open-current">${escapeHtml(opts.openRepoLabel)}</button>
+      </div>
+      <div class="fb-table" tabindex="0">
+        <div class="fb-head">
+          <span class="fb-col-chk"><input type="checkbox" class="fb-check-all" aria-label="${escapeHtml(T('全选', 'Select All'))}" /></span>
+          <button type="button" class="fb-col-name fb-sort" data-key="name">${escapeHtml(T('名称', 'Name'))}<i></i></button>
+          <button type="button" class="fb-col-size fb-sort" data-key="size">${escapeHtml(T('大小', 'Size'))}<i></i></button>
+          <button type="button" class="fb-col-mtime fb-sort" data-key="mtime">${escapeHtml(T('修改时间', 'Modified'))}<i></i></button>
+          <span class="fb-col-actions"></span>
+        </div>
+        <div class="fb-body" role="grid"></div>
+        <div class="fb-drop-hint hidden">${ICONS.upload}<span>${escapeHtml(T('松开以上传到当前目录', 'Drop to upload to this folder'))}</span></div>
+      </div>
+      <div class="fb-status">
+        <span class="fb-status-text"></span>
+        <span class="fb-selection-actions hidden">
+          ${features.transfer ? `<button type="button" class="mini-btn act-sel-download">${ICONS.download}<span>${escapeHtml(T('下载', 'Download'))}</span></button>` : ''}
+          ${features.delete ? `<button type="button" class="mini-btn danger act-sel-delete">${ICONS.trash}<span>${escapeHtml(T('删除', 'Delete'))}</span></button>` : ''}
+          <button type="button" class="mini-btn act-sel-clear">${escapeHtml(T('取消选择', 'Clear Selection'))}</button>
+        </span>
+      </div>
+    `;
+
+    const $ = (sel) => root.querySelector(sel);
+    const body = $('.fb-body');
+    const crumbs = $('.fb-crumbs');
+    const pathInput = $('.fb-path-input');
+    const suggestEl = $('.fb-suggest');
+    const filterInput = $('.fb-filter-input');
+
+    function updateHiddenButton() {
+      const btn = $('.act-hidden');
+      btn.innerHTML = fb.showHidden ? ICONS.eye : ICONS.eyeOff;
+      btn.classList.toggle('active', fb.showHidden);
     }
-    container.innerHTML = '';
-    entries.forEach((entry) => {
-      const row = document.createElement('div');
-      row.className = 'dir-entry' + (entry.isDirectory ? '' : ' file-entry');
-      row.innerHTML = `
-        <div class="dir-entry-left">
-          <span>${entry.isDirectory ? (entry.isGitRepo ? '📦' : '📁') : '📄'}</span>
-          <span class="dir-entry-name" title="${escapeHtml(entry.path)}">${escapeHtml(entry.name)}</span>
-        </div>
-        <div class="dir-entry-right">
-          ${entry.isGitRepo ? `<span class="git-badge">Git${entry.gitBranch ? ' · ' + escapeHtml(entry.gitBranch) : ''}</span>` : ''}
-          ${entry.isGitRepo ? `<button type="button" class="mini-btn primary act-open-repo">${escapeHtml(tr('openRepoBtn'))}</button>` : ''}
-        </div>
-      `;
-      if (entry.isDirectory) {
-        row.addEventListener('click', (e) => {
-          if (e.target.closest('.act-open-repo')) return;
-          onEnterDir(entry.path);
-        });
-      }
-      const openBtn = row.querySelector('.act-open-repo');
-      if (openBtn) {
-        openBtn.addEventListener('click', (e) => {
+
+    function updateSortHeader() {
+      root.querySelectorAll('.fb-sort').forEach((el) => {
+        const active = el.getAttribute('data-key') === fb.sort.key;
+        el.classList.toggle('active', active);
+        el.querySelector('i').innerHTML = active ? (fb.sort.dir === 1 ? ICONS.chevronUp : ICONS.chevronDown) : '';
+      });
+    }
+
+    function renderCrumbs(p) {
+      crumbs.innerHTML = '';
+      const isWinDrive = /^[a-zA-Z]:/.test(p);
+      const parts = p.split(/[\\/]/).filter(Boolean);
+      const add = (label, target, last) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'crumb-btn' + (last ? ' current' : '');
+        b.textContent = label;
+        b.addEventListener('click', (e) => {
           e.stopPropagation();
-          onOpenRepo(entry.path);
+          fb.navigate(target, { push: true });
         });
+        crumbs.appendChild(b);
+      };
+      add(isWinDrive ? parts[0] : '/', isWinDrive ? parts[0] + '/' : '/', parts.length === (isWinDrive ? 1 : 0));
+      let acc = isWinDrive ? parts[0] : '';
+      for (let i = isWinDrive ? 1 : 0; i < parts.length; i++) {
+        if (i > (isWinDrive ? 1 : 0)) {
+          const sep = document.createElement('span');
+          sep.className = 'crumb-sep';
+          sep.textContent = '/';
+          crumbs.appendChild(sep);
+        }
+        acc += '/' + parts[i];
+        add(parts[i], acc, i === parts.length - 1);
       }
-      container.appendChild(row);
+      crumbs.scrollLeft = crumbs.scrollWidth;
+    }
+
+    function sortedFiltered() {
+      const f = fb.filter.trim().toLowerCase();
+      const list = f ? fb.entries.filter((e) => e.name.toLowerCase().includes(f)) : fb.entries.slice();
+      const { key, dir } = fb.sort;
+      list.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        let c = 0;
+        if (key === 'size') c = (a.size || 0) - (b.size || 0);
+        else if (key === 'mtime') c = (a.mtime || 0) - (b.mtime || 0);
+        if (c === 0) c = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+        return c * dir;
+      });
+      return list;
+    }
+
+    function renderRows() {
+      fb.visible = sortedFiltered();
+      if (fb.entries.length === 0) {
+        body.innerHTML = `<div class="browser-empty-state">${escapeHtml(T('空目录', 'Empty folder'))}</div>`;
+      } else if (fb.visible.length === 0) {
+        body.innerHTML = `<div class="browser-empty-state">${escapeHtml(T('没有匹配“' + fb.filter + '”的项目', 'Nothing matches "' + fb.filter + '"'))}</div>`;
+      } else {
+        const html = fb.visible.map((e, idx) => {
+          const icon = fileIconFor(e);
+          const m = formatMtime(e.mtime);
+          const sel = fb.selected.has(e.path);
+          const rowActions = [];
+          if (e.isGitRepo) rowActions.push(`<button type="button" class="mini-btn act-row-open-repo">${escapeHtml(tr('openRepoBtn'))}</button>`);
+          if (features.transfer) rowActions.push(`<button type="button" class="mini-icon-btn act-row-download" title="${escapeHtml(T('下载', 'Download'))}">${ICONS.download}</button>`);
+          if (features.launch && e.isDirectory) {
+            rowActions.push(`<button type="button" class="mini-icon-btn act-row-term" title="${escapeHtml(tr('openInTerminal'))}">${ICONS.externalTerminal}</button>`);
+            rowActions.push(`<button type="button" class="mini-icon-btn act-row-editor" title="${escapeHtml(tr('openInEditor'))}">${ICONS.editor}</button>`);
+          }
+          rowActions.push(`<button type="button" class="mini-icon-btn act-row-copy" title="${escapeHtml(T('复制路径', 'Copy Path'))}">${ICONS.copy}</button>`);
+          if (features.rename) rowActions.push(`<button type="button" class="mini-icon-btn act-row-rename" title="${escapeHtml(T('重命名', 'Rename'))}">${ICONS.pencil}</button>`);
+          if (features.delete) rowActions.push(`<button type="button" class="mini-icon-btn danger act-row-delete" title="${escapeHtml(T('删除', 'Delete'))}">${ICONS.trash}</button>`);
+          return `<div class="fb-row${e.isDirectory ? ' is-dir' : ''}${e.isGitRepo ? ' is-git' : ''}${sel ? ' selected' : ''}${idx === fb.focusIdx ? ' focused' : ''}" data-idx="${idx}" role="row" title="${escapeHtml(e.path)}">
+            <span class="fb-col-chk"><input type="checkbox" class="fb-check" ${sel ? 'checked' : ''} tabindex="-1" /></span>
+            <span class="fb-col-name"><span class="fb-icon ${icon.cls}">${icon.svg}</span><span class="fb-name">${escapeHtml(e.name)}</span>${e.isSymlink ? `<span class="fb-link" title="${escapeHtml(T('符号链接', 'Symbolic link'))}">${ICONS.link}</span>` : ''}${e.isGitRepo ? `<span class="branch-pill">${ICONS.branch}${escapeHtml(e.gitBranch || 'HEAD')}</span>` : ''}</span>
+            <span class="fb-col-size">${e.isDirectory ? '—' : escapeHtml(formatBytes(e.size))}</span>
+            <span class="fb-col-mtime" title="${escapeHtml(m.full)}">${escapeHtml(m.short)}</span>
+            <span class="fb-col-actions">${rowActions.join('')}</span>
+          </div>`;
+        });
+        body.innerHTML = html.join('');
+      }
+      updateStatus();
+    }
+
+    function updateStatus() {
+      const dirs = fb.entries.filter((e) => e.isDirectory).length;
+      const files = fb.entries.length - dirs;
+      const repos = fb.entries.filter((e) => e.isGitRepo).length;
+      const parts = [T(`${dirs} 个文件夹`, `${dirs} folder${dirs === 1 ? '' : 's'}`), T(`${files} 个文件`, `${files} file${files === 1 ? '' : 's'}`)];
+      if (repos > 0) parts.push(T(`${repos} 个 Git 仓库`, `${repos} Git repo${repos === 1 ? '' : 's'}`));
+      if (fb.filter) parts.push(T(`显示 ${fb.visible.length} 项`, `showing ${fb.visible.length}`));
+      if (fb.selected.size > 0) {
+        let bytes = 0;
+        fb.entries.forEach((e) => {
+          if (fb.selected.has(e.path) && !e.isDirectory) bytes += e.size || 0;
+        });
+        parts.push(T(`已选 ${fb.selected.size} 项`, `${fb.selected.size} selected`) + (bytes > 0 ? ` (${formatBytes(bytes)})` : ''));
+      }
+      $('.fb-status-text').textContent = parts.join(' · ');
+      $('.fb-selection-actions').classList.toggle('hidden', fb.selected.size === 0);
+      const all = $('.fb-check-all');
+      all.checked = fb.visible.length > 0 && fb.visible.every((e) => fb.selected.has(e.path));
+      all.indeterminate = !all.checked && fb.visible.some((e) => fb.selected.has(e.path));
+    }
+
+    function setLoading(text) {
+      body.innerHTML = `<div class="browser-empty-state"><span class="fb-spinner"></span>${escapeHtml(text)}</div>`;
+    }
+
+    function updateNavButtons() {
+      $('.act-back').disabled = fb.historyIdx <= 0;
+      $('.act-forward').disabled = fb.historyIdx >= fb.history.length - 1;
+      $('.act-up').disabled = !fb.parentPath;
+    }
+
+    fb.reset = function () {
+      fb.currentPath = null;
+      fb.parentPath = null;
+      fb.entries = [];
+      fb.history = [];
+      fb.historyIdx = -1;
+      fb.selected.clear();
+      fb.filter = '';
+      filterInput.value = '';
+      crumbs.innerHTML = '';
+      body.innerHTML = '';
+    };
+
+    fb.navigate = async function (target, navOpts) {
+      const seq = ++fb.loadSeq;
+      setLoading(opts.loadingText());
+      hideSuggestions();
+      try {
+        const listing = await opts.list(target, fb.showHidden);
+        if (seq !== fb.loadSeq) return;
+        const changedDir = listing.currentPath !== fb.currentPath;
+        fb.currentPath = listing.currentPath;
+        fb.parentPath = listing.parentPath;
+        fb.entries = listing.entries || [];
+        if (changedDir) {
+          fb.selected.clear();
+          fb.focusIdx = -1;
+          fb.filter = '';
+          filterInput.value = '';
+        }
+        if (navOpts && navOpts.push && changedDir) {
+          fb.history = fb.history.slice(0, fb.historyIdx + 1);
+          fb.history.push(fb.currentPath);
+          fb.historyIdx = fb.history.length - 1;
+        }
+        renderCrumbs(fb.currentPath);
+        pathInput.value = fb.currentPath;
+        $('.fb-conn-summary').innerHTML = opts.summary ? opts.summary() : '';
+        const banner = $('.fb-repo-banner');
+        if (listing.currentRepoRoot) {
+          banner.classList.remove('hidden');
+          $('.fb-repo-banner-text').textContent = opts.displayRepo ? opts.displayRepo(listing.currentRepoRoot) : listing.currentRepoRoot;
+          $('.fb-repo-banner-branch').innerHTML = ICONS.branch + escapeHtml(listing.currentRepoBranch || 'HEAD');
+          fb.currentRepoRoot = listing.currentRepoRoot;
+        } else {
+          banner.classList.add('hidden');
+          fb.currentRepoRoot = null;
+        }
+        updateNavButtons();
+        renderRows();
+        if (opts.onNavigated) opts.onNavigated(listing);
+      } catch (err) {
+        if (seq !== fb.loadSeq) return;
+        body.innerHTML = `<div class="browser-empty-state error-text">${escapeHtml(err.message)}</div>`;
+        updateNavButtons();
+      }
+    };
+
+    fb.refresh = function () {
+      return fb.navigate(fb.currentPath, { push: false });
+    };
+
+    fb.entryAt = function (idx) {
+      return fb.visible[idx] || null;
+    };
+
+    function selectedEntries() {
+      return fb.entries.filter((e) => fb.selected.has(e.path));
+    }
+
+    function openEntry(entry) {
+      if (!entry) return;
+      if (entry.isDirectory) fb.navigate(entry.path, { push: true });
+      else if (opts.onOpenFile) opts.onOpenFile(entry);
+    }
+
+    function setFocus(idx) {
+      fb.focusIdx = Math.max(-1, Math.min(fb.visible.length - 1, idx));
+      body.querySelectorAll('.fb-row.focused').forEach((el) => el.classList.remove('focused'));
+      const row = body.querySelector(`.fb-row[data-idx="${fb.focusIdx}"]`);
+      if (row) {
+        row.classList.add('focused');
+        row.scrollIntoView({ block: 'nearest' });
+      }
+    }
+
+    function toggleSelect(idx, extend) {
+      const e = fb.visible[idx];
+      if (!e) return;
+      if (extend && fb.lastClicked > -1) {
+        const [a, b] = [Math.min(fb.lastClicked, idx), Math.max(fb.lastClicked, idx)];
+        for (let i = a; i <= b; i++) fb.selected.add(fb.visible[i].path);
+      } else if (fb.selected.has(e.path)) {
+        fb.selected.delete(e.path);
+      } else {
+        fb.selected.add(e.path);
+      }
+      fb.lastClicked = idx;
+      renderRows();
+    }
+
+    /* ---- Path field: breadcrumbs ⇄ editable input with Tab completion ---- */
+    function startEditingPath() {
+      crumbs.classList.add('hidden');
+      $('.fb-path-edit').classList.add('hidden');
+      pathInput.classList.remove('hidden');
+      pathInput.value = fb.currentPath || '';
+      pathInput.focus();
+      pathInput.setSelectionRange(pathInput.value.length, pathInput.value.length);
+    }
+
+    function stopEditingPath() {
+      hideSuggestions();
+      pathInput.classList.add('hidden');
+      crumbs.classList.remove('hidden');
+      $('.fb-path-edit').classList.remove('hidden');
+    }
+
+    function hideSuggestions() {
+      suggestEl.classList.add('hidden');
+      suggestEl.innerHTML = '';
+      fb.suggest = { items: [], idx: -1, base: '' };
+    }
+
+    function renderSuggestions() {
+      const { items, idx } = fb.suggest;
+      if (items.length === 0) {
+        hideSuggestions();
+        return;
+      }
+      suggestEl.innerHTML = items.slice(0, 80).map((it, i) => `<div class="fb-suggest-item${i === idx ? ' active' : ''}" data-i="${i}" role="option">
+        <span class="fb-icon ${it.isDirectory ? 'is-dir' : 'is-file'}">${it.isDirectory ? ICONS.folder : ICONS.file}</span>
+        <span>${escapeHtml(it.name)}${it.isDirectory ? '/' : ''}</span></div>`).join('');
+      suggestEl.classList.remove('hidden');
+      const active = suggestEl.querySelector('.active');
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    }
+
+    function applySuggestion(it) {
+      pathInput.value = it.path + (it.isDirectory ? '/' : '');
+    }
+
+    let completeSeq = 0;
+    async function fetchCompletions() {
+      const seq = ++completeSeq;
+      const res = await opts.complete(pathInput.value, fb.showHidden);
+      if (seq !== completeSeq) return null;
+      return res;
+    }
+
+    async function onTabComplete(backwards) {
+      // Repeated Tab cycles through the listed candidates
+      if (fb.suggest.items.length > 1 && fb.suggest.base === '__cycling__') {
+        const n = fb.suggest.items.length;
+        fb.suggest.idx = (fb.suggest.idx + (backwards ? n - 1 : 1)) % n;
+        applySuggestion(fb.suggest.items[fb.suggest.idx]);
+        renderSuggestions();
+        return;
+      }
+      let res;
+      try {
+        res = await fetchCompletions();
+      } catch (err) {
+        return;
+      }
+      if (!res) return;
+      const items = res.entries;
+      if (items.length === 0) {
+        pathInput.classList.add('shake');
+        setTimeout(() => pathInput.classList.remove('shake'), 300);
+        hideSuggestions();
+        return;
+      }
+      if (items.length === 1) {
+        applySuggestion(items[0]);
+        hideSuggestions();
+        if (items[0].isDirectory) scheduleSuggest();
+        return;
+      }
+      // Extend to the longest common prefix, like a shell
+      let common = items[0].name;
+      for (const it of items) {
+        let k = 0;
+        while (k < common.length && k < it.name.length && common[k] === it.name[k]) k++;
+        common = common.substring(0, k);
+      }
+      if (common.length > res.prefix.length) {
+        pathInput.value = joinPath(res.dir, common);
+        fb.suggest = { items, idx: -1, base: '' };
+      } else {
+        fb.suggest = { items, idx: 0, base: '__cycling__' };
+        applySuggestion(items[0]);
+      }
+      renderSuggestions();
+    }
+
+    let suggestTimer = null;
+    function scheduleSuggest() {
+      clearTimeout(suggestTimer);
+      suggestTimer = setTimeout(async () => {
+        if (pathInput.classList.contains('hidden')) return;
+        try {
+          const res = await fetchCompletions();
+          if (!res) return;
+          fb.suggest = { items: res.entries, idx: -1, base: '' };
+          renderSuggestions();
+        } catch (_) {
+          hideSuggestions();
+        }
+      }, 220);
+    }
+
+    crumbs.addEventListener('click', (e) => {
+      if (!e.target.closest('.crumb-btn')) startEditingPath();
+    });
+    $('.fb-path-edit').addEventListener('click', startEditingPath);
+    crumbs.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        startEditingPath();
+      }
+    });
+    pathInput.addEventListener('input', scheduleSuggest);
+    pathInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        onTabComplete(e.shiftKey);
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (fb.suggest.items.length === 0) return;
+        e.preventDefault();
+        const n = fb.suggest.items.length;
+        fb.suggest.idx = e.key === 'ArrowDown' ? (fb.suggest.idx + 1) % n : (fb.suggest.idx - 1 + n) % n;
+        fb.suggest.base = '__cycling__';
+        applySuggestion(fb.suggest.items[fb.suggest.idx]);
+        renderSuggestions();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const value = pathInput.value.trim() || '~';
+        stopEditingPath();
+        fb.navigate(value, { push: true });
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        stopEditingPath();
+      }
+    });
+    pathInput.addEventListener('blur', () => {
+      setTimeout(() => {
+        if (document.activeElement !== pathInput) stopEditingPath();
+      }, 150);
+    });
+    suggestEl.addEventListener('mousedown', (e) => {
+      const item = e.target.closest('.fb-suggest-item');
+      if (!item) return;
+      e.preventDefault();
+      const it = fb.suggest.items[Number(item.getAttribute('data-i'))];
+      if (!it) return;
+      applySuggestion(it);
+      if (it.isDirectory) {
+        stopEditingPath();
+        fb.navigate(it.path, { push: true });
+      } else {
+        hideSuggestions();
+      }
+    });
+
+    /* ---- Toolbar & action bar ---- */
+    $('.act-back').addEventListener('click', () => {
+      if (fb.historyIdx > 0) {
+        fb.historyIdx--;
+        fb.navigate(fb.history[fb.historyIdx], { push: false });
+      }
+    });
+    $('.act-forward').addEventListener('click', () => {
+      if (fb.historyIdx < fb.history.length - 1) {
+        fb.historyIdx++;
+        fb.navigate(fb.history[fb.historyIdx], { push: false });
+      }
+    });
+    $('.act-up').addEventListener('click', () => {
+      if (fb.parentPath) fb.navigate(fb.parentPath, { push: true });
+    });
+    $('.act-home').addEventListener('click', () => fb.navigate('~', { push: true }));
+    $('.act-refresh').addEventListener('click', () => fb.refresh());
+    $('.act-hidden').addEventListener('click', () => {
+      fb.showHidden = !fb.showHidden;
+      localStorage.setItem('gitmap.fb.hidden.' + opts.kind, fb.showHidden ? '1' : '0');
+      updateHiddenButton();
+      fb.refresh();
+    });
+    filterInput.addEventListener('input', () => {
+      fb.filter = filterInput.value;
+      fb.focusIdx = -1;
+      renderRows();
+    });
+    filterInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && fb.visible.length > 0) openEntry(fb.visible[0]);
+      else if (e.key === 'Escape' && filterInput.value) {
+        e.stopPropagation();
+        filterInput.value = '';
+        fb.filter = '';
+        renderRows();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        $('.fb-table').focus();
+        setFocus(0);
+      }
+    });
+    root.querySelectorAll('.fb-sort').forEach((el) => {
+      el.addEventListener('click', () => {
+        const key = el.getAttribute('data-key');
+        fb.sort = fb.sort.key === key ? { key, dir: -fb.sort.dir } : { key, dir: key === 'name' ? 1 : -1 };
+        localStorage.setItem('gitmap.fb.sort.' + opts.kind, JSON.stringify(fb.sort));
+        updateSortHeader();
+        renderRows();
+      });
+    });
+    $('.fb-check-all').addEventListener('change', (e) => {
+      if (e.target.checked) fb.visible.forEach((en) => fb.selected.add(en.path));
+      else fb.visible.forEach((en) => fb.selected.delete(en.path));
+      renderRows();
+    });
+    $('.act-sel-clear').addEventListener('click', () => {
+      fb.selected.clear();
+      renderRows();
+    });
+    $('.act-open-current').addEventListener('click', () => {
+      if (fb.currentRepoRoot) opts.onOpenRepo(fb.currentRepoRoot);
+    });
+
+    /* ---- Rows (event delegation) ---- */
+    body.addEventListener('click', (e) => {
+      const row = e.target.closest('.fb-row');
+      if (!row) return;
+      const idx = Number(row.getAttribute('data-idx'));
+      const entry = fb.visible[idx];
+      if (!entry) return;
+      const btn = e.target.closest('button');
+      if (btn) {
+        e.stopPropagation();
+        if (btn.classList.contains('act-row-open-repo')) opts.onOpenRepo(entry.path);
+        else if (btn.classList.contains('act-row-download') && opts.download) opts.download([entry.path]);
+        else if (btn.classList.contains('act-row-term')) opts.openTerminal(entry.path);
+        else if (btn.classList.contains('act-row-editor')) opts.openEditor(entry.path);
+        else if (btn.classList.contains('act-row-copy')) {
+          navigator.clipboard?.writeText(entry.path).catch(() => {});
+          showToast(T('已复制：', 'Copied: ') + entry.path, 'status');
+        } else if (btn.classList.contains('act-row-rename') && opts.rename) opts.rename(entry);
+        else if (btn.classList.contains('act-row-delete') && opts.remove) opts.remove([entry]);
+        return;
+      }
+      if (e.target.closest('.fb-col-chk') || e.metaKey || e.ctrlKey || e.shiftKey) {
+        toggleSelect(idx, e.shiftKey);
+        return;
+      }
+      setFocus(idx);
+      openEntry(entry);
+    });
+    body.addEventListener('change', (e) => {
+      if (e.target.classList.contains('fb-check')) {
+        // Handled by the click above
+        e.stopPropagation();
+      }
+    });
+    $('.fb-table').addEventListener('keydown', (e) => {
+      if (e.target !== $('.fb-table')) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setFocus(fb.focusIdx + 1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setFocus(fb.focusIdx - 1);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        openEntry(fb.visible[fb.focusIdx]);
+      } else if (e.key === ' ') {
+        e.preventDefault();
+        if (fb.focusIdx > -1) toggleSelect(fb.focusIdx, false);
+      } else if (e.key === 'Backspace' || (e.altKey && e.key === 'ArrowUp')) {
+        e.preventDefault();
+        if (fb.parentPath) fb.navigate(fb.parentPath, { push: true });
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        fb.visible.forEach((en) => fb.selected.add(en.path));
+        renderRows();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        filterInput.focus();
+      } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        // Type-to-filter
+        filterInput.focus();
+      }
+    });
+    root.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        startEditingPath();
+      } else if (e.altKey && e.key === 'ArrowLeft') $('.act-back').click();
+      else if (e.altKey && e.key === 'ArrowRight') $('.act-forward').click();
+    });
+
+    /* ---- Feature buttons ---- */
+    if (features.scan) $('.act-scan').addEventListener('click', () => opts.scan(fb.currentPath));
+    if (features.launch) {
+      $('.act-here-term').addEventListener('click', () => opts.openTerminal(fb.currentPath));
+      $('.act-here-editor').addEventListener('click', () => opts.openEditor(fb.currentPath));
+    }
+    if (features.nativePicker) $('.act-native').addEventListener('click', () => opts.nativePick());
+    if (features.mkdir) $('.act-mkdir').addEventListener('click', () => opts.mkdir(fb.currentPath));
+    if (features.transfer) {
+      $('.act-upload').addEventListener('click', () => opts.upload(fb.currentPath, false));
+      $('.act-upload-dir').addEventListener('click', () => opts.upload(fb.currentPath, true));
+      $('.act-sel-download').addEventListener('click', () => opts.download(selectedEntries().map((e) => e.path)));
+
+      // Drag & drop local files / folders onto the table to upload them (desktop app)
+      const table = $('.fb-table');
+      const dropHint = $('.fb-drop-hint');
+      let dragDepth = 0;
+      table.addEventListener('dragenter', (e) => {
+        if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+        e.preventDefault();
+        dragDepth++;
+        dropHint.classList.remove('hidden');
+      });
+      table.addEventListener('dragover', (e) => {
+        if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault();
+      });
+      table.addEventListener('dragleave', () => {
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) dropHint.classList.add('hidden');
+      });
+      table.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dragDepth = 0;
+        dropHint.classList.add('hidden');
+        const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+        const paths = desktopApi && desktopApi.getPathForFile ? files.map((f) => desktopApi.getPathForFile(f)).filter(Boolean) : [];
+        if (paths.length === 0) {
+          showToast(T('浏览器模式无法读取拖入文件的路径，请使用“上传文件”按钮。', 'The browser can\'t read the paths of dropped files; use "Upload Files" instead.'), 'warning');
+          return;
+        }
+        opts.uploadPaths(fb.currentPath, paths);
+      });
+    }
+    if (features.delete) {
+      $('.act-sel-delete').addEventListener('click', () => opts.remove(selectedEntries()));
+    }
+
+    updateHiddenButton();
+    updateSortHeader();
+    return fb;
+  }
+
+  /** Ask for confirmation in the in-app prompt dialog. */
+  function confirmDialog(title, message, confirmLabel, danger) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('promptModal');
+      document.getElementById('promptTitle').textContent = title;
+      const bodyEl = document.getElementById('promptBody');
+      const footerEl = document.getElementById('promptFooter');
+      bodyEl.innerHTML = `<p style="margin:0;white-space:pre-wrap;">${escapeHtml(message)}</p>`;
+      footerEl.innerHTML = `<button type="button" class="mini-btn act-cancel">${escapeHtml(tr('cancel'))}</button><button type="button" class="mini-btn ${danger ? 'danger-solid' : 'primary'} act-ok">${escapeHtml(confirmLabel)}</button>`;
+      modal.classList.remove('hidden');
+      const done = (v) => {
+        modal.classList.add('hidden');
+        resolve(v);
+      };
+      footerEl.querySelector('.act-cancel').onclick = () => done(false);
+      footerEl.querySelector('.act-ok').onclick = () => done(true);
+      document.getElementById('promptCloseBtn').onclick = () => done(false);
+      setTimeout(() => footerEl.querySelector('.act-cancel').focus(), 30);
     });
   }
 
-  /* Scan Remote Subfolders for Git Repositories */
-  document.getElementById('btnScanRemoteRepos').addEventListener('click', async () => {
-    if (!state.selectedSshHostId) return;
-    const dirList = document.getElementById('sshDirList');
-    dirList.innerHTML = `<div class="browser-empty-state">${escapeHtml(tr('scanning'))}</div>`;
-    try {
-      const res = await rpc('ssh:scanRepos', {
-        hostId: state.selectedSshHostId,
-        path: state.sshCurrentPath,
-        maxDepth: 3
+  /** Ask for a single line of text in the in-app prompt dialog. */
+  function inputDialog(title, label, value) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('promptModal');
+      document.getElementById('promptTitle').textContent = title;
+      const bodyEl = document.getElementById('promptBody');
+      const footerEl = document.getElementById('promptFooter');
+      bodyEl.innerHTML = `<label><span>${escapeHtml(label)}</span><input type="text" id="gmInputDialogField" spellcheck="false" value="${escapeHtml(value || '')}" /></label>`;
+      footerEl.innerHTML = `<button type="button" class="mini-btn act-cancel">${escapeHtml(tr('cancel'))}</button><button type="button" class="mini-btn primary act-ok">OK</button>`;
+      modal.classList.remove('hidden');
+      const input = document.getElementById('gmInputDialogField');
+      const done = (v) => {
+        modal.classList.add('hidden');
+        resolve(v);
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') done(input.value.trim() || null);
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          done(null);
+        }
       });
-      const repos = res.repos || [];
-      if (repos.length === 0) {
-        dirList.innerHTML = `<div class="browser-empty-state">${escapeHtml(tr('noReposScanned'))}</div>`;
-        return;
+      footerEl.querySelector('.act-cancel').onclick = () => done(null);
+      footerEl.querySelector('.act-ok').onclick = () => done(input.value.trim() || null);
+      document.getElementById('promptCloseBtn').onclick = () => done(null);
+      setTimeout(() => {
+        input.focus();
+        const dot = input.value.lastIndexOf('.');
+        input.setSelectionRange(0, dot > 0 ? dot : input.value.length);
+      }, 30);
+    });
+  }
+
+  function sshUriFor(hostId, remotePath) {
+    return 'ssh://' + encodeURIComponent(hostId) + (remotePath.startsWith('/') ? remotePath : '/' + remotePath);
+  }
+
+  const sshBrowser = createFileBrowser(document.getElementById('sshBrowserContent'), {
+    kind: 'ssh',
+    features: { scan: true, launch: true, mkdir: true, transfer: true, rename: true, delete: true },
+    openRepoLabel: tr('openCurrentRepo'),
+    loadingText: () => tr('connecting'),
+    list: (p, showHidden) => rpc('ssh:browsePath', { hostId: state.selectedSshHostId, path: p || undefined, showHidden }).then((listing) => {
+      state.sshHosts = listing.hosts || state.sshHosts;
+      state.sshCurrentPath = listing.currentPath;
+      try {
+        localStorage.setItem('gitmap.ssh.lastPath.' + state.selectedSshHostId, listing.currentPath);
+      } catch (_) {}
+      renderModalSshHosts();
+      renderSidebar();
+      return listing;
+    }),
+    complete: (p, showHidden) => rpc('ssh:complete', { hostId: state.selectedSshHostId, path: p, showHidden }),
+    summary: () => {
+      const h = state.sshHosts.find((x) => x.id === state.selectedSshHostId);
+      const label = h ? h.user + '@' + h.host + (h.port && h.port !== 22 ? ':' + h.port : '') : state.selectedSshHostId;
+      return `<i class="status-dot connected"></i>${h && h.alias ? `<strong>${escapeHtml(h.alias)}</strong><span class="fb-conn-addr">${escapeHtml(label)}</span>` : `<strong>${escapeHtml(label)}</strong>`}${h ? tagChipsHtml(h.tags, 'small') : ''}${h && h.gitVersion ? `<span class="fb-conn-meta">Git ${escapeHtml(h.gitVersion)}</span>` : `<span class="fb-conn-meta warn">${escapeHtml(state.lang === 'zh' ? '未检测到 git' : 'git not found')}</span>`}`;
+    },
+    displayRepo: (p) => `${hostLabel(state.selectedSshHostId)}:${p}`,
+    onOpenRepo: (p) => openRemoteRepoAndCloseModal(state.selectedSshHostId, p),
+    onOpenFile: (entry) => {
+      openFileTab({ repo: '', filePath: sshUriFor(state.selectedSshHostId, entry.path), commit: null, title: entry.name, lines: null });
+      document.getElementById('sshModal').classList.add('hidden');
+    },
+    openTerminal: (p) => openExternalTerminal(sshUriFor(state.selectedSshHostId, p)).catch((err) => showToast(err.message, 'error')),
+    openEditor: (p) => openInEditor(sshUriFor(state.selectedSshHostId, p)).catch((err) => showToast(err.message, 'error')),
+    scan: (p) => scanRemoteRepos(p),
+    mkdir: async (dir) => {
+      const name = await inputDialog(state.lang === 'zh' ? '新建文件夹' : 'New Folder', state.lang === 'zh' ? '文件夹名称' : 'Folder name', '');
+      if (!name) return;
+      try {
+        await rpc('ssh:mkdir', { hostId: state.selectedSshHostId, path: dir, name });
+        await sshBrowser.refresh();
+      } catch (err) {
+        showToast(err.message, 'error');
       }
-      dirList.innerHTML = `
-        <div style="padding:8px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--vscode-panel-border);">
-          <strong>Found ${repos.length} Git repositories</strong>
-          <button type="button" id="btnBatchAddRemote" class="mini-btn primary">${escapeHtml(tr('addSelectedRepos'))}</button>
-        </div>
-        <div class="scan-results-body"></div>
-      `;
-      const body = dirList.querySelector('.scan-results-body');
-      repos.forEach((r) => {
-        const row = document.createElement('label');
-        row.className = 'dir-entry inline-check';
-        row.style.justifyContent = 'space-between';
-        row.innerHTML = `
-          <span style="display:flex;align-items:center;gap:8px;min-width:0;">
-            <input type="checkbox" class="scan-repo-chk" value="${escapeHtml(r.sshUri)}" checked />
-            <strong style="font-family:var(--vscode-editor-font-family);">${escapeHtml(r.name)}</strong>
-            <span style="font-family:var(--vscode-editor-font-family);color:var(--vscode-descriptionForeground);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(r.path)}</span>
-          </span>
-          ${r.branch ? `<span class="branch-pill">${escapeHtml(r.branch)}</span>` : ''}
-        `;
-        body.appendChild(row);
-      });
-      dirList.querySelector('#btnBatchAddRemote').addEventListener('click', async () => {
-        const uris = Array.from(dirList.querySelectorAll('.scan-repo-chk:checked')).map((el) => el.value);
-        if (uris.length === 0) return;
-        const addRes = await rpc('repos:addBatch', { paths: uris });
-        state.repos = addRes.repos || state.repos;
-        if (addRes.added && addRes.added[0]) state.activeRepo = addRes.added[0];
-        renderSidebar();
-        renderActiveRepoBadge();
-        document.getElementById('sshModal').classList.add('hidden');
-        activateTab('graph');
-      });
-    } catch (err) {
-      showToast(err.message, 'error');
+    },
+    rename: async (entry) => {
+      const name = await inputDialog(state.lang === 'zh' ? '重命名' : 'Rename', state.lang === 'zh' ? '新名称' : 'New name', entry.name);
+      if (!name || name === entry.name) return;
+      try {
+        await rpc('ssh:rename', { hostId: state.selectedSshHostId, path: entry.path, name });
+        await sshBrowser.refresh();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    },
+    remove: async (entries) => {
+      if (entries.length === 0) return;
+      const zh = state.lang === 'zh';
+      const names = entries.slice(0, 8).map((e) => '• ' + e.name + (e.isDirectory ? '/' : '')).join('\n') + (entries.length > 8 ? `\n… +${entries.length - 8}` : '');
+      const ok = await confirmDialog(
+        zh ? '永久删除远程文件' : 'Permanently Delete Remote Files',
+        (zh ? `将在 ${state.selectedSshHostId} 上永久删除以下 ${entries.length} 项（文件夹含其全部内容），此操作无法撤销：\n\n` : `This permanently deletes these ${entries.length} item(s) on ${state.selectedSshHostId} (folders with everything in them). It can't be undone:\n\n`) + names,
+        zh ? '永久删除' : 'Delete Permanently',
+        true
+      );
+      if (!ok) return;
+      try {
+        await rpc('ssh:delete', { hostId: state.selectedSshHostId, paths: entries.map((e) => e.path) });
+        await sshBrowser.refresh();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    },
+    upload: async (destDir, folders) => {
+      try {
+        const res = await rpc('transfer:pickUpload', { hostId: state.selectedSshHostId, destDir, folders, both: !folders && desktopApi && desktopApi.platform === 'darwin' });
+        if (res.transfer) showTransferPanel(true);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    },
+    uploadPaths: async (destDir, paths) => {
+      try {
+        await rpc('transfer:start', { direction: 'upload', hostId: state.selectedSshHostId, sources: paths, destDir });
+        showTransferPanel(true);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    },
+    download: async (paths) => {
+      if (!paths || paths.length === 0) return;
+      try {
+        const res = await rpc('transfer:pickDownload', { hostId: state.selectedSshHostId, sources: paths });
+        if (res.transfer) showTransferPanel(true);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
     }
   });
 
-  /* ==================== Local Repository Browser Modal ==================== */
-  async function openLocalModal(targetPath) {
-    document.getElementById('localModal').classList.remove('hidden');
-    await browseLocalPath(targetPath || state.localCurrentPath || state.homeDir);
+  /* Scan Remote Subfolders for Git Repositories */
+  async function scanRemoteRepos(dirPath) {
+    if (!state.selectedSshHostId) return;
+    const zh = state.lang === 'zh';
+    const modal = document.getElementById('promptModal');
+    document.getElementById('promptTitle').textContent = zh ? '扫描 Git 仓库' : 'Find Git Repositories';
+    const bodyEl = document.getElementById('promptBody');
+    const footerEl = document.getElementById('promptFooter');
+    bodyEl.innerHTML = `<div class="browser-empty-state"><span class="fb-spinner"></span>${escapeHtml(tr('scanning'))}</div>`;
+    footerEl.innerHTML = `<button type="button" class="mini-btn act-cancel">${escapeHtml(tr('cancel'))}</button>`;
+    modal.classList.remove('hidden');
+    let cancelled = false;
+    const close = () => {
+      cancelled = true;
+      modal.classList.add('hidden');
+    };
+    footerEl.querySelector('.act-cancel').onclick = close;
+    document.getElementById('promptCloseBtn').onclick = close;
+    try {
+      const res = await rpc('ssh:scanRepos', { hostId: state.selectedSshHostId, path: dirPath, maxDepth: 3 });
+      if (cancelled) return;
+      const repos = res.repos || [];
+      if (repos.length === 0) {
+        bodyEl.innerHTML = `<div class="browser-empty-state">${escapeHtml(tr('noReposScanned'))}</div>`;
+        return;
+      }
+      bodyEl.innerHTML = `<p style="margin:0;">${escapeHtml(zh ? `找到 ${repos.length} 个 Git 仓库：` : `Found ${repos.length} Git repositories:`)}</p><div class="scan-results-body"></div>`;
+      const list = bodyEl.querySelector('.scan-results-body');
+      repos.forEach((r) => {
+        const row = document.createElement('label');
+        row.className = 'scan-result-row';
+        row.innerHTML = `<input type="checkbox" class="scan-repo-chk" value="${escapeHtml(r.sshUri)}" checked />
+          <span class="fb-icon is-git">${ICONS.gitRepo}</span>
+          <span class="scan-result-text"><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.path)}</small></span>
+          ${r.branch ? `<span class="branch-pill">${ICONS.branch}${escapeHtml(r.branch)}</span>` : ''}`;
+        list.appendChild(row);
+      });
+      footerEl.innerHTML = `<button type="button" class="mini-btn act-cancel">${escapeHtml(tr('cancel'))}</button><button type="button" class="mini-btn primary act-ok">${escapeHtml(tr('addSelectedRepos'))}</button>`;
+      footerEl.querySelector('.act-cancel').onclick = close;
+      footerEl.querySelector('.act-ok').onclick = async () => {
+        const uris = Array.from(list.querySelectorAll('.scan-repo-chk:checked')).map((el) => el.value);
+        if (uris.length === 0) return;
+        try {
+          const addRes = await rpc('repos:addBatch', { paths: uris });
+          state.repos = addRes.repos || state.repos;
+          if (addRes.added && addRes.added[0]) state.activeRepo = addRes.added[0];
+          renderSidebar();
+          renderActiveRepoBadge();
+          close();
+          document.getElementById('sshModal').classList.add('hidden');
+          activateTab('graph');
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      };
+    } catch (err) {
+      if (!cancelled) bodyEl.innerHTML = `<div class="browser-empty-state error-text">${escapeHtml(err.message)}</div>`;
+    }
   }
 
-  async function browseLocalPath(targetPath) {
-    const dirList = document.getElementById('localDirList');
-    try {
-      const showHidden = document.getElementById('localShowHidden').checked;
-      const listing = await rpc('local:browsePath', { path: targetPath, showHidden });
+  /* ==================== Local Repository Browser Modal ==================== */
+  const localBrowser = createFileBrowser(document.getElementById('localBrowserRoot'), {
+    kind: 'local',
+    features: { scan: true, launch: true, nativePicker: !!(desktopApi && desktopApi.isElectron) },
+    openRepoLabel: tr('openCurrentLocalRepo'),
+    loadingText: () => (state.lang === 'zh' ? '正在读取…' : 'Loading…'),
+    list: (p, showHidden) => rpc('local:browsePath', { path: p || state.homeDir, showHidden }).then((listing) => {
       state.localCurrentPath = listing.currentPath;
-      state.localParentPath = listing.parentPath;
-      document.getElementById('localPathInput').value = listing.currentPath;
-
-      renderBreadcrumbs(document.getElementById('localBreadcrumbs'), listing.currentPath, (p) => browseLocalPath(p));
-
-      const banner = document.getElementById('localCurrentRepoBanner');
-      if (listing.currentRepoRoot) {
-        banner.classList.remove('hidden');
-        document.getElementById('localCurrentRepoPath').textContent = listing.currentRepoRoot;
-        document.getElementById('localCurrentRepoBranch').textContent = listing.currentRepoBranch || 'HEAD';
-        document.getElementById('btnOpenCurrentLocalRepo').onclick = () => addLocalRepoAndClose(listing.currentRepoRoot);
-      } else {
-        banner.classList.add('hidden');
+      return listing;
+    }),
+    complete: (p, showHidden) => rpc('local:complete', { path: p, showHidden }),
+    summary: () => `<span class="fb-conn-meta">${escapeHtml(state.lang === 'zh' ? '本机文件系统' : 'This computer')}</span>`,
+    onOpenRepo: (p) => addLocalRepoAndClose(p),
+    onOpenFile: (entry) => {
+      openFileTab({ repo: '', filePath: entry.path, commit: null, title: entry.name, lines: null });
+      document.getElementById('localModal').classList.add('hidden');
+    },
+    openTerminal: (p) => openExternalTerminal(p).catch((err) => showToast(err.message, 'error')),
+    openEditor: (p) => openInEditor(p).catch((err) => showToast(err.message, 'error')),
+    nativePick: async () => {
+      const chosen = await desktopApi.pickLocalFolder();
+      if (chosen) await addLocalRepoAndClose(chosen);
+    },
+    scan: async (dirPath) => {
+      try {
+        const res = await rpc('repos:scanLocal', { path: dirPath, maxDepth: 3 });
+        state.repos = res.repos || state.repos;
+        renderSidebar();
+        if (res.added) {
+          document.getElementById('localModal').classList.add('hidden');
+          showToast(state.lang === 'zh' ? `已添加 ${res.added} 个仓库` : `Added ${res.added} repositories`, 'info');
+        } else {
+          showToast(tr('noReposScanned'), 'info');
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
       }
-
-      renderDirectoryEntries(
-        dirList,
-        listing.entries,
-        (p) => browseLocalPath(p),
-        (repoPath) => addLocalRepoAndClose(repoPath)
-      );
-    } catch (err) {
-      dirList.innerHTML = `<div class="browser-empty-state" style="color:var(--vscode-errorForeground);">${escapeHtml(err.message)}</div>`;
     }
+  });
+
+  async function openLocalModal(targetPath) {
+    document.getElementById('localModal').classList.remove('hidden');
+    await localBrowser.navigate(targetPath || state.localCurrentPath || state.homeDir, { push: true });
   }
 
   async function addLocalRepoAndClose(repoPath) {
@@ -1498,47 +2800,329 @@
     }
   }
 
-  /* ==================== Settings Modal ==================== */
-  async function openAppSettingsModal() {
-    document.getElementById('appSettingsModal').classList.remove('hidden');
+  /* ==================== File Transfers Panel ==================== */
+  state.transfers = [];
+
+  function showTransferPanel(show) {
+    document.getElementById('transferPanel').classList.toggle('hidden', !show);
+  }
+
+  function transferStateLabel(t) {
+    const zh = state.lang === 'zh';
+    const map = {
+      queued: zh ? '排队中' : 'Queued',
+      scanning: zh ? '正在统计文件…' : 'Counting files…',
+      running: zh ? '传输中' : 'Transferring',
+      paused: zh ? '已暂停' : 'Paused',
+      completed: zh ? '已完成' : 'Completed',
+      failed: zh ? '失败' : 'Failed',
+      cancelled: zh ? '已取消' : 'Cancelled',
+      undone: zh ? '已撤销（文件在回收站，可恢复）' : 'Undone (in trash, restorable)'
+    };
+    return map[t.state] || t.state;
+  }
+
+  function formatEta(seconds) {
+    if (seconds == null) return '';
+    if (seconds < 60) return seconds + 's';
+    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
+    return Math.floor(seconds / 3600) + 'h ' + Math.floor((seconds % 3600) / 60) + 'm';
+  }
+
+  function renderTransfers() {
+    const list = document.getElementById('transferList');
+    const zh = state.lang === 'zh';
+    const transfers = state.transfers;
+    const active = transfers.filter((t) => t.state === 'running' || t.state === 'scanning' || t.state === 'queued');
+    const btn = document.getElementById('btnTransfers');
+    btn.classList.toggle('hidden', transfers.length === 0);
+    btn.classList.toggle('busy', active.length > 0);
+    const badge = document.getElementById('transfersBadge');
+    badge.textContent = String(active.length);
+    badge.classList.toggle('hidden', active.length === 0);
+    if (transfers.length === 0) showTransferPanel(false);
+
+    let totalDone = 0;
+    let total = 0;
+    active.forEach((t) => {
+      totalDone += t.doneBytes;
+      total += t.totalBytes;
+    });
+    document.getElementById('transferSummary').textContent = active.length > 0
+      ? (zh ? `${active.length} 个进行中` : `${active.length} active`) + (total > 0 ? ` · ${Math.floor((totalDone / total) * 100)}%` : '')
+      : (zh ? `${transfers.length} 项` : `${transfers.length} item(s)`);
+
+    list.innerHTML = transfers.map((t) => {
+      const pct = t.totalBytes > 0 ? Math.min(100, (t.doneBytes / t.totalBytes) * 100) : (t.state === 'completed' ? 100 : 0);
+      const icon = t.direction === 'upload' ? ICONS.upload : ICONS.download;
+      const dest = t.direction === 'upload' ? `${t.hostId}:${t.destDir}` : t.destDir;
+      const from = t.direction === 'upload' ? (zh ? '上传到 ' : 'to ') + dest : (zh ? `从 ${t.hostId} 下载到 ` : `from ${t.hostId} to `) + dest;
+      const stats = [];
+      if (t.totalBytes > 0 || t.totalFiles > 0) stats.push(`${formatBytes(t.doneBytes)} / ${formatBytes(t.totalBytes)}`);
+      if (t.totalFiles > 1) stats.push(zh ? `${t.doneFiles}/${t.totalFiles} 个文件` : `${t.doneFiles}/${t.totalFiles} files`);
+      if (t.state === 'running' && t.speed > 0) stats.push(formatBytes(t.speed) + '/s');
+      if (t.etaSeconds != null) stats.push((zh ? '剩余 ' : 'ETA ') + formatEta(t.etaSeconds));
+      const actions = [];
+      const act = (action, iconSvg, title, cls) => actions.push(`<button type="button" class="mini-icon-btn ${cls || ''}" data-action="${action}" data-id="${t.id}" title="${escapeHtml(title)}">${iconSvg}</button>`);
+      if (t.state === 'running' || t.state === 'scanning' || t.state === 'queued') {
+        act('pause', ICONS.pause, zh ? '暂停（中断，可继续）' : 'Pause (resumable)');
+        act('cancel', ICONS.stop, zh ? '取消（删除未完成的文件）' : 'Cancel (deletes the partial file)', 'danger');
+      } else if (t.state === 'paused') {
+        act('resume', ICONS.play, zh ? '继续' : 'Resume');
+        act('cancel', ICONS.stop, zh ? '取消（删除未完成的文件）' : 'Cancel (deletes the partial file)', 'danger');
+      } else if (t.state === 'failed') {
+        act('resume', ICONS.retry, zh ? '重试（从断点继续）' : 'Retry (resumes)');
+      }
+      if (t.canUndo) act('undo', ICONS.undo, zh ? '撤销：把已传输的文件移到回收站' : 'Undo: move the transferred files to the trash');
+      if (t.canRestore) act('restore', ICONS.redo, zh ? '恢复：把文件从回收站移回' : 'Restore the files from the trash');
+      if (t.state === 'completed' || t.state === 'cancelled' || t.state === 'failed' || t.state === 'undone' || t.state === 'paused') {
+        act('remove', ICONS.close, t.state === 'undone' ? (zh ? '移除记录并清空其回收站' : 'Remove, and empty its trash') : (zh ? '从列表移除' : 'Remove from list'));
+      }
+      return `<div class="transfer-item state-${t.state}">
+        <div class="transfer-item-top">
+          <span class="transfer-dir ${t.direction}">${icon}</span>
+          <span class="transfer-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+          <span class="transfer-actions">${actions.join('')}</span>
+        </div>
+        <div class="transfer-sub" title="${escapeHtml(dest)}">${escapeHtml(from)}</div>
+        <div class="transfer-bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+        <div class="transfer-meta"><span class="transfer-state">${escapeHtml(transferStateLabel(t))}</span><span>${escapeHtml(stats.join(' · '))}</span></div>
+        ${t.error ? `<div class="transfer-error">${escapeHtml(t.error)}</div>` : ''}
+        ${t.currentFile && t.totalFiles > 1 ? `<div class="transfer-current" title="${escapeHtml(t.currentFile)}">${escapeHtml(t.currentFile)}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  function onTransfersUpdate(transfers) {
+    const before = new Map(state.transfers.map((t) => [t.id, t.state]));
+    state.transfers = transfers || [];
+    renderTransfers();
+    // Refresh the remote listing when an upload into the folder being shown finishes
+    for (const t of state.transfers) {
+      const prev = before.get(t.id);
+      if (prev && prev !== t.state && (t.state === 'completed' || t.state === 'undone' || (prev === 'undone' && t.state !== 'undone'))) {
+        if (t.direction === 'upload' && t.hostId === state.selectedSshHostId && t.destDir === sshBrowser.currentPath && !document.getElementById('sshModal').classList.contains('hidden')) {
+          sshBrowser.refresh();
+        }
+        if (t.state === 'completed' && prev !== 'undone') {
+          showToast((state.lang === 'zh' ? '传输完成：' : 'Transfer complete: ') + t.name, 'info');
+        }
+      }
+    }
+  }
+
+  document.getElementById('transferList').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    btn.disabled = true;
     try {
-      const res = await rpc('settings:get');
+      const res = await rpc('transfer:control', { id: btn.getAttribute('data-id'), action: btn.getAttribute('data-action') });
+      onTransfersUpdate(res.transfers);
+    } catch (err) {
+      showToast(err.message, 'error');
+      btn.disabled = false;
+    }
+  });
+  const transferBulk = (action) => rpc('transfer:control', { action }).then((res) => onTransfersUpdate(res.transfers)).catch((err) => showToast(err.message, 'error'));
+  document.getElementById('btnTransfersPauseAll').addEventListener('click', () => transferBulk('pauseAll'));
+  document.getElementById('btnTransfersResumeAll').addEventListener('click', () => transferBulk('resumeAll'));
+  document.getElementById('btnTransfersClear').addEventListener('click', () => transferBulk('clearFinished'));
+  document.getElementById('btnTransfersClose').addEventListener('click', () => showTransferPanel(false));
+  document.getElementById('btnTransfers').addEventListener('click', () => {
+    showTransferPanel(document.getElementById('transferPanel').classList.contains('hidden'));
+  });
+
+  /* ==================== Settings Modal ==================== */
+  const settingsUi = { aiInfo: null, launchers: null };
+
+  function selectSettingsSection(section) {
+    document.querySelectorAll('#appSettingsModal .settings-nav-item').forEach((el) => el.classList.toggle('active', el.getAttribute('data-section') === section));
+    document.querySelectorAll('#appSettingsModal .settings-section').forEach((el) => el.classList.toggle('active', el.getAttribute('data-section') === section));
+  }
+
+  function fillLauncherSelect(selectEl, apps, current, firstOption) {
+    selectEl.innerHTML = '';
+    const add = (value, label, disabled) => {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      opt.disabled = !!disabled;
+      selectEl.appendChild(opt);
+    };
+    add(firstOption.value, firstOption.label);
+    apps.forEach((app) => {
+      const notes = [];
+      if (!app.available) notes.push(tr('notInstalled'));
+      if (!app.supportsRemote) notes.push(tr('localOnly'));
+      add(app.id, app.name + (notes.length ? ` (${notes.join(', ')})` : ''), !app.available && app.id !== current);
+    });
+    add('custom', tr('customOption'));
+    selectEl.value = current && Array.from(selectEl.options).some((o) => o.value === current) ? current : firstOption.value;
+  }
+
+  function syncLauncherCustomRows() {
+    document.getElementById('cfgTerminalCustomRow').classList.toggle('hidden', document.getElementById('cfgTerminalApp').value !== 'custom');
+    document.getElementById('cfgEditorCustomRow').classList.toggle('hidden', document.getElementById('cfgEditorApp').value !== 'custom');
+  }
+
+  async function loadLaunchers(refresh) {
+    const s = state.settings;
+    settingsUi.launchers = await rpc('launchers:list', { refresh: !!refresh });
+    fillLauncherSelect(document.getElementById('cfgTerminalApp'), settingsUi.launchers.terminals, s['gitmap.terminal.app'] || 'system', { value: 'system', label: tr('systemDefault') });
+    fillLauncherSelect(document.getElementById('cfgEditorApp'), settingsUi.launchers.editors, s['gitmap.editor.app'] || 'auto', { value: 'auto', label: tr('autoDetect') });
+    syncLauncherCustomRows();
+  }
+
+  function syncAiProviderFields() {
+    const info = settingsUi.aiInfo;
+    if (!info) return;
+    const providerId = document.getElementById('cfgAiProvider').value;
+    const preset = info.presets.find((p) => p.id === providerId) || null;
+    document.getElementById('cfgAiModel').placeholder = preset && preset.defaultModel ? preset.defaultModel : (state.lang === 'zh' ? '模型名称' : 'Model name');
+    document.getElementById('cfgAiBaseUrl').placeholder = preset && preset.defaultBaseUrl ? preset.defaultBaseUrl : 'https://…';
+    const needsKey = !!(preset && preset.requiresApiKey);
+    const hasKey = !!(info.keys && info.keys[providerId]);
+    const keyInput = document.getElementById('cfgAiKey');
+    keyInput.disabled = !needsKey;
+    keyInput.value = '';
+    keyInput.placeholder = !needsKey ? tr('keyNotNeeded') : hasKey ? tr('keySaved') : 'sk-…';
+    document.getElementById('btnClearAiKey').classList.toggle('hidden', !(needsKey && hasKey));
+    const hintEl = document.getElementById('cfgAiProviderHint');
+    const hint = providerId === 'Magpie' ? tr('hintMagpie') : providerId === 'CC Switch' ? tr('hintCcSwitch') : providerId === 'Ollama' ? tr('hintOllama') : '';
+    hintEl.textContent = hint;
+    hintEl.classList.toggle('hidden', hint === '');
+  }
+
+  async function openAppSettingsModal(section) {
+    document.getElementById('appSettingsModal').classList.remove('hidden');
+    selectSettingsSection(section || 'appearance');
+    try {
+      const [res, aiInfo] = await Promise.all([rpc('settings:get'), rpc('ai:info')]);
       const s = res.settings || {};
       state.settings = s;
+      settingsUi.aiInfo = aiInfo;
       document.getElementById('cfgLanguage').value = s['git-map.language'] || 'Auto';
+      document.getElementById('cfgTheme').value = state.theme;
       document.getElementById('cfgColourPreset').value = s['git-map.graph.colourPreset'] || 'Default';
       document.getElementById('cfgGraphStyle').value = s['git-map.graph.style'] || 'rounded';
       document.getElementById('cfgNodeStyle').value = s['git-map.graph.nodeStyle'] || 'Dot';
-      document.getElementById('cfgAiProvider').value = s['git-map.ai.provider'] || 'DeepSeek';
+      document.getElementById('cfgSyntaxHighlight').value = s['gitmap.diff.syntaxHighlight'] === false ? 'off' : 'on';
+      document.getElementById('cfgTerminalCustom').value = s['gitmap.terminal.customCommand'] || '';
+      document.getElementById('cfgEditorCustom').value = s['gitmap.editor.customCommand'] || '';
+
+      const providerSelect = document.getElementById('cfgAiProvider');
+      providerSelect.innerHTML = '';
+      aiInfo.presets.forEach((p) => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.id === 'Magpie' ? 'Magpie (本地网关 / Local Gateway)'
+          : p.id === 'CC Switch' ? 'CC Switch (本地路由 / Local Routing)'
+            : p.id === 'Qwen' ? 'Qwen (通义千问)'
+              : p.id === 'Doubao' ? 'Doubao (豆包)'
+                : p.id === 'Ollama' ? 'Ollama (Local)'
+                  : p.name;
+        providerSelect.appendChild(opt);
+      });
+      providerSelect.value = aiInfo.presets.some((p) => p.id === s['git-map.ai.provider']) ? s['git-map.ai.provider'] : (aiInfo.presets[0] ? aiInfo.presets[0].id : '');
       document.getElementById('cfgAiModel').value = s['git-map.ai.model'] || '';
       document.getElementById('cfgAiBaseUrl').value = s['git-map.ai.baseUrl'] || '';
       document.getElementById('cfgAiExplain').checked = !!s['git-map.ai.explainCommit.enabled'];
       document.getElementById('cfgAiCommitMsg').checked = s['git-map.ai.commitMessage.enabled'] !== false;
-    } catch (_) {}
+      syncAiProviderFields();
+      await loadLaunchers(false);
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
   }
 
-  document.getElementById('btnSaveAppSettings').addEventListener('click', async () => {
+  async function saveAppSettings(closeAfter) {
+    const providerSelect = document.getElementById('cfgAiProvider');
     const updates = [
       ['git-map.language', document.getElementById('cfgLanguage').value],
       ['git-map.graph.colourPreset', document.getElementById('cfgColourPreset').value],
       ['git-map.graph.style', document.getElementById('cfgGraphStyle').value],
       ['git-map.graph.nodeStyle', document.getElementById('cfgNodeStyle').value],
-      ['git-map.ai.provider', document.getElementById('cfgAiProvider').value],
+      ['gitmap.diff.syntaxHighlight', document.getElementById('cfgSyntaxHighlight').value !== 'off'],
+      ['gitmap.terminal.app', document.getElementById('cfgTerminalApp').value],
+      ['gitmap.terminal.customCommand', document.getElementById('cfgTerminalCustom').value.trim()],
+      ['gitmap.editor.app', document.getElementById('cfgEditorApp').value],
+      ['gitmap.editor.customCommand', document.getElementById('cfgEditorCustom').value.trim()],
+      ['git-map.ai.provider', providerSelect.value],
       ['git-map.ai.model', document.getElementById('cfgAiModel').value.trim()],
       ['git-map.ai.baseUrl', document.getElementById('cfgAiBaseUrl').value.trim()],
       ['git-map.ai.explainCommit.enabled', document.getElementById('cfgAiExplain').checked],
       ['git-map.ai.commitMessage.enabled', document.getElementById('cfgAiCommitMsg').checked]
     ];
+    // Only write settings whose value changed: each write notifies the graph view, which re-renders
     for (const [key, value] of updates) {
-      await rpc('settings:update', { key, value });
+      if (state.settings[key] !== value && !(state.settings[key] === undefined && value === '')) {
+        const res = await rpc('settings:update', { key, value });
+        state.settings = res.settings || state.settings;
+      }
     }
+    const apiKey = document.getElementById('cfgAiKey').value.trim();
+    if (apiKey && !document.getElementById('cfgAiKey').disabled) {
+      await rpc('ai:setApiKey', { key: apiKey });
+    }
+
     const langVal = document.getElementById('cfgLanguage').value;
-    if (langVal === 'Simplified Chinese') state.lang = 'zh';
-    else if (langVal === 'English') state.lang = 'en';
+    state.lang = langVal === 'Simplified Chinese' ? 'zh' : langVal === 'English' ? 'en' : (navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en');
+    applyTheme(document.getElementById('cfgTheme').value);
     applyLanguageUI();
-    document.getElementById('appSettingsModal').classList.add('hidden');
-    showToast(state.lang === 'zh' ? '设置已保存' : 'Settings saved', 'info');
+    if (closeAfter) document.getElementById('appSettingsModal').classList.add('hidden');
+    showToast(tr('settingsSaved'), 'info');
+  }
+
+  document.querySelectorAll('#appSettingsModal .settings-nav-item').forEach((btn) => {
+    btn.addEventListener('click', () => selectSettingsSection(btn.getAttribute('data-section')));
   });
+  document.getElementById('cfgAiProvider').addEventListener('change', syncAiProviderFields);
+  document.getElementById('cfgTerminalApp').addEventListener('change', syncLauncherCustomRows);
+  document.getElementById('cfgEditorApp').addEventListener('change', syncLauncherCustomRows);
+  document.getElementById('btnRedetectApps').addEventListener('click', () => loadLaunchers(true).catch((err) => showToast(err.message, 'error')));
+  document.getElementById('btnClearAiKey').addEventListener('click', async () => {
+    try {
+      // The key belongs to the saved provider, so save the provider choice first
+      await rpc('settings:update', { key: 'git-map.ai.provider', value: document.getElementById('cfgAiProvider').value });
+      await rpc('ai:clearApiKey');
+      settingsUi.aiInfo = await rpc('ai:info');
+      syncAiProviderFields();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+  document.getElementById('btnTestTerminal').addEventListener('click', async () => {
+    try {
+      await saveAppSettings(false);
+      await openExternalTerminal(state.activeRepo || state.homeDir);
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+  document.getElementById('btnTestEditor').addEventListener('click', async () => {
+    try {
+      await saveAppSettings(false);
+      await openInEditor(state.activeRepo);
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+  document.getElementById('btnSaveAppSettings').addEventListener('click', () => {
+    saveAppSettings(true).catch((err) => showToast(err.message, 'error'));
+  });
+
+  /** Open a local path / ssh:// location in the external terminal chosen in Settings. */
+  async function openExternalTerminal(location) {
+    const res = await rpc('term:openSystem', { repo: location || state.activeRepo || state.homeDir });
+    showToast(tr('openedIn', res.app), 'status');
+  }
+
+  /** Open a local path / ssh:// location in the code editor chosen in Settings. */
+  async function openInEditor(location) {
+    if (!location) throw new Error(tr('noActiveRepo'));
+    const res = await rpc('editor:open', { repo: location });
+    showToast(tr('openedIn', res.app), 'status');
+  }
 
   /* ==================== Host Prompt Handler (InputBox, QuickPick, Open/Save, Modal Toast) ==================== */
   function handleHostPrompt(promptId, kind, req) {
@@ -1658,23 +3242,11 @@
   document.getElementById('btnNewRepoTerm').addEventListener('click', () => {
     openTerminalSession(state.activeRepo || state.homeDir, undefined, null);
   });
-  document.getElementById('btnOpenSysTerm').addEventListener('click', async () => {
-    try {
-      await rpc('term:openSystem', { repo: state.activeRepo || state.homeDir });
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
+  document.getElementById('btnOpenSysTerm').addEventListener('click', () => {
+    openExternalTerminal(state.activeRepo || state.homeDir).catch((err) => showToast(err.message, 'error'));
   });
   document.getElementById('btnAppSettings').addEventListener('click', () => openAppSettingsModal());
   document.getElementById('btnToggleTheme').addEventListener('click', () => toggleTheme());
-  document.getElementById('btnToggleLang').addEventListener('click', async () => {
-    state.lang = state.lang === 'zh' ? 'en' : 'zh';
-    applyLanguageUI();
-    await rpc('settings:update', {
-      key: 'git-map.language',
-      value: state.lang === 'zh' ? 'Simplified Chinese' : 'English'
-    }).catch(() => {});
-  });
 
   // Modal Close Buttons
   document.querySelectorAll('.modal-close').forEach((btn) => {
@@ -1686,15 +3258,20 @@
 
   // SSH Host Add Form
   document.getElementById('btnShowAddHostForm').addEventListener('click', () => {
-    document.getElementById('sshHostForm').classList.toggle('hidden');
+    const form = document.getElementById('sshHostForm');
+    if (!form.classList.contains('hidden') && !document.getElementById('sshFormId').value) form.classList.add('hidden');
+    else openHostForm(null);
   });
+  document.getElementById('sshHostSearch').addEventListener('input', () => renderModalSshHosts());
   document.getElementById('btnCancelHostForm').addEventListener('click', () => {
     document.getElementById('sshHostForm').classList.add('hidden');
   });
   document.getElementById('sshHostForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
+      const editingId = document.getElementById('sshFormId').value || undefined;
       const res = await rpc('ssh:saveHost', {
+        id: editingId,
         name: document.getElementById('sshFormName').value,
         host: document.getElementById('sshFormHost').value,
         port: Number(document.getElementById('sshFormPort').value) || 22,
@@ -1706,8 +3283,15 @@
         defaultPath: document.getElementById('sshFormDefaultPath').value
       });
       state.sshHosts = res.hosts || [];
+      const tagsValue = document.getElementById('sshFormTags').value;
+      const existing = findHost(res.profile.id);
+      if (tagsValue.trim() || (existing && (existing.tags || []).length)) {
+        const metaRes = await rpc('ssh:updateHostMeta', { id: res.profile.id, alias: existing ? existing.alias || '' : '', tags: tagsValue });
+        state.sshHosts = metaRes.hosts || state.sshHosts;
+      }
       document.getElementById('sshHostForm').classList.add('hidden');
       document.getElementById('sshFormPassword').value = '';
+      document.getElementById('sshFormId').value = '';
       renderSidebar();
       renderModalSshHosts();
       selectAndBrowseSshHost(res.profile.id, res.profile.defaultPath || '~');
@@ -1716,66 +3300,36 @@
     }
   });
 
-  // SSH Path Controls
-  document.getElementById('btnSshUp').addEventListener('click', () => {
-    if (state.selectedSshHostId && state.sshParentPath) {
-      selectAndBrowseSshHost(state.selectedSshHostId, state.sshParentPath);
+  // Escape closes the topmost dialog / panel
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    const prompt = document.getElementById('promptModal');
+    if (!prompt.classList.contains('hidden')) {
+      document.getElementById('promptCloseBtn').click();
+      return;
     }
-  });
-  document.getElementById('btnSshHome').addEventListener('click', () => {
-    if (state.selectedSshHostId) selectAndBrowseSshHost(state.selectedSshHostId, '~');
-  });
-  document.getElementById('btnSshRefresh').addEventListener('click', () => {
-    if (state.selectedSshHostId) selectAndBrowseSshHost(state.selectedSshHostId, state.sshCurrentPath);
-  });
-  document.getElementById('btnSshGo').addEventListener('click', () => {
-    if (state.selectedSshHostId) {
-      selectAndBrowseSshHost(state.selectedSshHostId, document.getElementById('sshPathInput').value.trim() || '~');
+    for (const id of ['appSettingsModal', 'sshModal', 'localModal']) {
+      const el = document.getElementById(id);
+      if (!el.classList.contains('hidden')) {
+        el.classList.add('hidden');
+        return;
+      }
     }
-  });
-  document.getElementById('sshPathInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && state.selectedSshHostId) {
-      selectAndBrowseSshHost(state.selectedSshHostId, e.target.value.trim() || '~');
-    }
-  });
-  document.getElementById('sshShowHidden').addEventListener('change', () => {
-    if (state.selectedSshHostId) selectAndBrowseSshHost(state.selectedSshHostId, state.sshCurrentPath);
+    if (!document.getElementById('transferPanel').classList.contains('hidden')) showTransferPanel(false);
   });
 
-  // Local Path Controls
-  document.getElementById('btnLocalUp').addEventListener('click', () => {
-    if (state.localParentPath) browseLocalPath(state.localParentPath);
-  });
-  document.getElementById('btnLocalHome').addEventListener('click', () => browseLocalPath('~'));
-  document.getElementById('btnLocalGo').addEventListener('click', () => {
-    browseLocalPath(document.getElementById('localPathInput').value.trim() || '~');
-  });
-  document.getElementById('localPathInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') browseLocalPath(e.target.value.trim() || '~');
-  });
-  document.getElementById('localShowHidden').addEventListener('change', () => {
-    browseLocalPath(state.localCurrentPath);
-  });
-  document.getElementById('btnLocalScan').addEventListener('click', async () => {
-    try {
-      const res = await rpc('repos:scanLocal', { path: state.localCurrentPath, maxDepth: 3 });
-      state.repos = res.repos || state.repos;
-      renderSidebar();
-      document.getElementById('localModal').classList.add('hidden');
-      showToast(res.added ? 'Scanned & added repositories!' : tr('noReposScanned'), 'info');
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  });
-  document.getElementById('btnNativePicker').addEventListener('click', async () => {
-    if (!desktopApi) return;
-    const chosen = await desktopApi.pickLocalFolder();
-    if (chosen) {
-      await addLocalRepoAndClose(chosen);
-    }
+  // Click on a modal's backdrop (outside the window) closes it
+  document.querySelectorAll('#sshModal, #localModal, #appSettingsModal').forEach((backdrop) => {
+    backdrop.addEventListener('mousedown', (e) => {
+      if (e.target === backdrop) backdrop.classList.add('hidden');
+    });
   });
 
   // Initialize UI
+  document.querySelectorAll('[data-icon]').forEach((el) => {
+    const name = el.getAttribute('data-icon');
+    if (ICONS[name]) el.innerHTML = ICONS[name];
+  });
   applyTheme(state.theme);
   applyLanguageUI();
   renderTabBar();
