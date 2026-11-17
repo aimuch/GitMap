@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron';
 import * as path from 'path';
 import { GitMapServer } from '../server/appServer';
 
@@ -25,7 +25,7 @@ async function createWindow(serverUrl: string) {
     minHeight: 620,
     title: 'GitMap',
     icon: iconPath,
-    backgroundColor: '#181818',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#181818' : '#ffffff',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 14, y: 12 } : undefined,
     webPreferences: {
@@ -133,10 +133,6 @@ function buildAppMenu() {
           label: 'Toggle Sidebar',
           accelerator: 'CmdOrCtrl+B',
           click: () => sendMenuAction('toggle-sidebar')
-        },
-        {
-          label: 'Toggle Theme (Dark / Light)',
-          click: () => sendMenuAction('toggle-theme')
         },
         { type: 'separator' },
         { role: 'reload' },

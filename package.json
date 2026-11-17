@@ -78,7 +78,13 @@
       "target": [
         "dmg",
         "zip"
-      ]
+      ],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "GitMap connects to SSH servers and Git hosts on your local network (for example 10.x.x.x or 192.168.x.x) to browse remote repositories, run Git and transfer files.",
+        "NSAppleEventsUsageDescription": "GitMap asks Terminal or iTerm to open a shell in a repository when you choose \"Open in External Terminal\"."
+      }
     },
     "win": {
       "icon": "resources/icon.png",

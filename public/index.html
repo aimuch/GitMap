@@ -10,6 +10,15 @@
   <link rel="stylesheet" href="/app.css" />
 </head>
 <body class="vscode-dark theme-dark">
+  <script>
+    // Apply the saved theme before first paint (avoids a dark flash in light mode)
+    (function () {
+      var pref = 'system';
+      try { pref = localStorage.getItem('gitmap.theme') || 'system'; } catch (_) {}
+      var theme = pref === 'light' || pref === 'dark' ? pref : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.body.className = theme === 'light' ? 'vscode-light theme-light' : 'vscode-dark theme-dark';
+    })();
+  </script>
   <div id="appShell">
     <!-- Top Title / Command Bar -->
     <header id="topBar">
@@ -40,9 +49,6 @@
         <button id="btnTransfers" class="icon-btn hidden" title="Transfers" aria-label="Transfers">
           <span class="icon-slot" data-icon="transfers"></span><span id="transfersBadge" class="icon-badge hidden">0</span>
         </button>
-        <button id="btnToggleTheme" class="icon-btn" title="Toggle Dark / Light Theme" aria-label="Toggle Dark / Light Theme">
-          <span id="themeIcon" class="icon-slot"></span>
-        </button>
         <button id="btnAppSettings" class="icon-btn" title="Settings (Cmd/Ctrl+,)" aria-label="Settings">
           <span class="icon-slot" data-icon="settings"></span>
         </button>
@@ -52,27 +58,38 @@
     <!-- Main Body Split: Sidebar + Workspace -->
     <div id="mainSplit">
       <aside id="sidebar">
-        <!-- Local Repositories -->
-        <section class="sidebar-section">
-          <div class="sidebar-section-header">
-            <span data-i18n="localRepos">本地仓库</span>
-            <button id="sidebarAddLocalBtn" class="mini-icon-btn" title="Add Local Repository">+</button>
-          </div>
-          <div id="localRepoList" class="sidebar-list"></div>
-        </section>
+        <label class="sidebar-search">
+          <span class="icon-slot" data-icon="search"></span>
+          <input type="text" id="sidebarSearch" spellcheck="false" autocomplete="off" placeholder="搜索仓库、服务器、#标签" />
+          <kbd id="sidebarSearchKbd">⌘K</kbd>
+        </label>
 
-        <!-- Remote Servers (SSH): repositories grouped by host -->
-        <section class="sidebar-section">
-          <div class="sidebar-section-header">
-            <span data-i18n="remoteServers">远程服务器 (SSH)</span>
-            <span class="sidebar-section-actions">
-              <button id="sidebarRefreshSshBtn" class="mini-icon-btn" title="Manage SSH Hosts"><span class="icon-slot" data-icon="settings"></span></button>
-              <button id="sidebarAddRemoteBtn" class="mini-icon-btn" title="Browse Remote Repository Paths"><span class="icon-slot" data-icon="plus"></span></button>
-            </span>
-          </div>
-          <div id="remoteTagFilter" class="tag-filter hidden"></div>
-          <div id="remoteRepoList" class="sidebar-list host-tree"></div>
-        </section>
+        <div class="sidebar-scroll">
+          <!-- Local Repositories -->
+          <section class="sidebar-section" data-section="local">
+            <div class="sidebar-section-header">
+              <button type="button" class="section-toggle"><span class="chev icon-slot" data-icon="chevronDown"></span><span data-i18n="localRepos">本地仓库</span><span class="section-count" id="localRepoCount"></span></button>
+              <span class="sidebar-section-actions">
+                <button id="sidebarAddLocalBtn" class="mini-icon-btn" title="Add Local Repository"><span class="icon-slot" data-icon="plus"></span></button>
+              </span>
+            </div>
+            <div id="localRepoList" class="sidebar-list"></div>
+          </section>
+
+          <!-- Remote Servers (SSH): repositories grouped by host -->
+          <section class="sidebar-section" data-section="remote">
+            <div class="sidebar-section-header">
+              <button type="button" class="section-toggle"><span class="chev icon-slot" data-icon="chevronDown"></span><span data-i18n="remoteServers">远程服务器</span><span class="section-count" id="remoteRepoCount"></span></button>
+              <span class="sidebar-section-actions">
+                <button id="sidebarRefreshSshBtn" class="mini-icon-btn" title="Manage SSH Hosts"><span class="icon-slot" data-icon="settings"></span></button>
+                <button id="sidebarAddRemoteBtn" class="mini-icon-btn" title="Browse Remote Repository Paths"><span class="icon-slot" data-icon="plus"></span></button>
+              </span>
+            </div>
+            <div id="remoteTagFilter" class="tag-filter hidden"></div>
+            <div id="remoteRepoList" class="sidebar-list host-tree"></div>
+          </section>
+        </div>
+        <div id="sidebarResizer" title="Drag to resize"></div>
       </aside>
 
       <!-- Workspace Area: Tabs + Content + Bottom Terminal -->
@@ -212,6 +229,7 @@
               </label>
               <label><span data-i18n="themeLabel">主题</span>
                 <select id="cfgTheme">
+                  <option value="system" data-i18n="themeSystem">跟随系统</option>
                   <option value="dark" data-i18n="themeDark">深色</option>
                   <option value="light" data-i18n="themeLight">浅色</option>
                 </select>

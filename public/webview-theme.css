@@ -209,3 +209,18 @@ body.vscode-light {
   --vscode-textLink-foreground: #005fb8;
   --vscode-textLink-activeForeground: #005fb8;
 }
+
+/* The root element follows the body's theme (otherwise :root keeps color-scheme: dark and paints a dark canvas in light mode) */
+html:has(> body.vscode-light) {
+  color-scheme: light;
+  background-color: #ffffff;
+}
+
+html:has(> body.vscode-dark) {
+  color-scheme: dark;
+  background-color: #181818;
+}
+
+body {
+  background-color: var(--vscode-editor-background);
+}

@@ -987,6 +987,14 @@ export class GitMapServer {
         return { ok: true, app };
       }
 
+      case 'system:openLocalNetworkSettings': {
+        if (process.platform !== 'darwin') throw new Error('Local Network privacy settings only exist on macOS.');
+        const url = 'x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork';
+        if (this.desktopHooks.openExternal) await this.desktopHooks.openExternal(url);
+        else cp.spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
+        return { ok: true };
+      }
+
       case 'launchers:list':
         return listLaunchers(!!params.refresh);
 

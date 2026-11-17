@@ -64,12 +64,13 @@
       expandLines: '展开 {0} 行未变更代码',
       binaryFileNotice: '二进制文件，无法直接显示文本差异。',
       transfersTitle: '传输',
-      remoteServers: '远程服务器 (SSH)',
+      remoteServers: '远程服务器',
       hostTags: '标签 (可选，逗号分隔)',
       navAppearance: '外观',
       navTools: '终端与编辑器',
       navAi: 'AI',
       themeLabel: '主题',
+      themeSystem: '跟随系统',
       themeDark: '深色',
       themeLight: '浅色',
       diffSyntax: 'Diff 语法高亮',
@@ -169,12 +170,13 @@
       expandLines: 'Expand {0} unchanged lines',
       binaryFileNotice: 'Binary file — text diff cannot be shown.',
       transfersTitle: 'Transfers',
-      remoteServers: 'Remote Servers (SSH)',
+      remoteServers: 'Remote Servers',
       hostTags: 'Tags (optional, comma separated)',
       navAppearance: 'Appearance',
       navTools: 'Terminal & Editor',
       navAi: 'AI',
       themeLabel: 'Theme',
+      themeSystem: 'Match System',
       themeDark: 'Dark',
       themeLight: 'Light',
       diffSyntax: 'Diff Syntax Highlighting',
@@ -220,7 +222,8 @@
   /* ==================== State ==================== */
   const state = {
     lang: (localStorage.getItem('gitmap.lang') || (navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en')),
-    theme: localStorage.getItem('gitmap.theme') || 'dark',
+    themePref: localStorage.getItem('gitmap.theme') || 'system',
+    theme: 'dark',
     repos: {},
     activeRepo: null,
     sshHosts: [],
@@ -298,23 +301,32 @@
       else if (action === 'open-ssh-modal') openSshModal();
       else if (action === 'toggle-terminal') toggleTerminalDrawer();
       else if (action === 'toggle-sidebar') document.getElementById('sidebar').classList.toggle('collapsed');
-      else if (action === 'toggle-theme') toggleTheme();
       else if (action === 'open-settings') openAppSettingsModal();
     });
   }
 
   /* ==================== Theme & Language ==================== */
-  function applyTheme(theme) {
-    state.theme = theme === 'light' ? 'light' : 'dark';
-    localStorage.setItem('gitmap.theme', state.theme);
+  const systemDarkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+  /** The theme to show for a preference ('system' follows the operating system's appearance). */
+  function resolveTheme(pref) {
+    if (pref === 'light' || pref === 'dark') return pref;
+    return systemDarkQuery && !systemDarkQuery.matches ? 'light' : 'dark';
+  }
+
+  /**
+   * Apply a theme preference: 'system' (default), 'dark' or 'light'.
+   */
+  function applyTheme(pref) {
+    state.themePref = pref === 'light' || pref === 'dark' ? pref : 'system';
+    state.theme = resolveTheme(state.themePref);
+    try {
+      localStorage.setItem('gitmap.theme', state.themePref);
+    } catch (_) {}
     document.body.classList.remove('vscode-dark', 'vscode-light', 'theme-dark', 'theme-light');
     document.body.classList.add(state.theme === 'light' ? 'vscode-light' : 'vscode-dark');
     document.body.classList.add(state.theme === 'light' ? 'theme-light' : 'theme-dark');
-    // Show the theme the button switches to
-    document.getElementById('themeIcon').innerHTML = state.theme === 'light' ? ICONS.moon : ICONS.sun;
-    document.getElementById('btnToggleTheme').title = state.theme === 'light'
-      ? (state.lang === 'zh' ? '切换到深色主题' : 'Switch to Dark Theme')
-      : (state.lang === 'zh' ? '切换到浅色主题' : 'Switch to Light Theme');
+    document.documentElement.style.colorScheme = state.theme;
     state.terminals.forEach((t) => {
       try {
         t.term.options.theme = TERMINAL_THEMES[state.theme];
@@ -328,13 +340,19 @@
     });
   }
 
-  function toggleTheme() {
-    applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+  if (systemDarkQuery) {
+    const onSystemThemeChange = () => {
+      if (state.themePref === 'system') applyTheme('system');
+    };
+    if (systemDarkQuery.addEventListener) systemDarkQuery.addEventListener('change', onSystemThemeChange);
+    else if (systemDarkQuery.addListener) systemDarkQuery.addListener(onSystemThemeChange);
   }
 
   function applyLanguageUI() {
     localStorage.setItem('gitmap.lang', state.lang);
     document.documentElement.lang = state.lang === 'zh' ? 'zh-CN' : 'en';
+    const sbSearch = document.getElementById('sidebarSearch');
+    if (sbSearch) sbSearch.placeholder = state.lang === 'zh' ? '搜索仓库、服务器、#标签' : 'Search repos, servers, #tags';
     const hostSearch = document.getElementById('sshHostSearch');
     if (hostSearch) hostSearch.placeholder = state.lang === 'zh' ? '筛选主机、别名或 #标签' : 'Filter hosts, aliases or #tags';
     document.querySelectorAll('[data-i18n]').forEach((el) => {
@@ -395,6 +413,7 @@
   function handleServerMessage(msg) {
     switch (msg.type) {
       case 'init':
+        state.platform = msg.platform || state.platform;
         state.repos = msg.repos || {};
         state.activeRepo = msg.lastActiveRepo || Object.keys(state.repos)[0] || null;
         state.sshHosts = msg.sshHosts || [];
@@ -650,17 +669,57 @@
     };
   }
 
+  /** Well-known Git hosting services: reachable over SSH for Git only, never as a shell, so they aren't browsable servers. */
+  const GIT_HOSTING_HOSTS = /(^|\.)(github\.com|gitlab\.com|bitbucket\.org|gitee\.com|codeberg\.org|ssh\.dev\.azure\.com|vs-ssh\.visualstudio\.com|codeup\.aliyun\.com|e\.coding\.net|git\.sr\.ht)$/i;
+
+  function isGitHostingHost(h) {
+    return !!h && (GIT_HOSTING_HOSTS.test(String(h.host || '')) || GIT_HOSTING_HOSTS.test(String(h.id || '')));
+  }
+
+  state.sidebarQuery = '';
+  state.collapsedSections = loadUiSet('gitmap.sidebar.collapsedSections');
+
+  function shortenHome(p) {
+    const home = String(state.homeDir || '').replace(/[\\/]+$/, '');
+    if (home && home !== '~' && (p === home || p.startsWith(home + '/') || p.startsWith(home + '\\'))) return '~' + p.substring(home.length);
+    return p;
+  }
+
+  /** Does a repository / host match the sidebar search ("#tag" matches tags exactly)? */
+  function sidebarMatches(texts, tags) {
+    const q = state.sidebarQuery.trim().toLowerCase();
+    if (!q) return true;
+    if (q.startsWith('#')) return (tags || []).some((t) => t.toLowerCase() === q.slice(1));
+    return texts.concat(tags || []).some((t) => t && String(t).toLowerCase().includes(q));
+  }
+
+  function emptyStateHtml(iconSvg, text, buttonLabel, buttonCls) {
+    return `<div class="sidebar-empty-card"><span class="sidebar-empty-icon">${iconSvg}</span><span>${escapeHtml(text)}</span>${buttonLabel ? `<button type="button" class="mini-btn ${buttonCls}">${ICONS.plus}<span>${escapeHtml(buttonLabel)}</span></button>` : ''}</div>`;
+  }
+
   function renderSidebar() {
+    const zh = state.lang === 'zh';
     const localContainer = document.getElementById('localRepoList');
     const repoKeys = Object.keys(state.repos);
-    const localKeys = repoKeys.filter((k) => !k.startsWith('ssh://')).sort();
+    const allLocal = repoKeys.filter((k) => !k.startsWith('ssh://')).sort((a, b) => parseRepoDisplay(a).name.localeCompare(parseRepoDisplay(b).name));
+    const localKeys = allLocal.filter((k) => sidebarMatches([parseRepoDisplay(k).name, k], []));
+    document.getElementById('localRepoCount').textContent = allLocal.length ? String(allLocal.length) : '';
+
+    document.querySelectorAll('#sidebar .sidebar-section').forEach((sec) => {
+      const collapsed = state.collapsedSections.has(sec.getAttribute('data-section')) && !state.sidebarQuery;
+      sec.classList.toggle('collapsed', collapsed);
+    });
 
     // Local Repos
-    if (localKeys.length === 0) {
-      localContainer.innerHTML = `<div class="sidebar-empty">${escapeHtml(tr('noLocalRepos'))}</div>`;
+    if (allLocal.length === 0) {
+      localContainer.innerHTML = state.sidebarQuery ? '' : emptyStateHtml(ICONS.folder, zh ? '还没有本地仓库' : 'No local repositories yet', zh ? '添加本地仓库' : 'Add Local Repository', 'act-empty-add-local');
+      const btn = localContainer.querySelector('.act-empty-add-local');
+      if (btn) btn.addEventListener('click', () => openLocalModal());
+    } else if (localKeys.length === 0) {
+      localContainer.innerHTML = `<div class="sidebar-empty">${escapeHtml(zh ? '没有匹配的本地仓库' : 'No matching local repositories')}</div>`;
     } else {
       localContainer.innerHTML = '';
-      const dupNames = duplicateNames(localKeys);
+      const dupNames = duplicateNames(allLocal);
       localKeys.forEach((repoKey) => {
         localContainer.appendChild(buildRepoSidebarItem(repoKey, { disambiguate: dupNames }));
       });
@@ -692,7 +751,8 @@
       if (!byHost.has(hostId)) byHost.set(hostId, []);
       byHost.get(hostId).push(k);
     });
-    const hosts = (state.sshHosts || []).slice();
+    // Git hosting services (github.com, …) can't be browsed: only show them if a repository somehow uses them
+    const hosts = (state.sshHosts || []).filter((h) => !isGitHostingHost(h) || byHost.has(h.id));
     byHost.forEach((_keys, hostId) => {
       if (!hosts.some((h) => h.id === hostId)) hosts.push({ id: hostId, name: hostId, host: hostId, user: '', port: 22, tags: [], source: 'unknown', connected: false });
     });
@@ -719,26 +779,37 @@
       });
     }
     const matchesTag = (h) => !state.remoteTagFilter || (h.tags || []).some((t) => t.toLowerCase() === state.remoteTagFilter.toLowerCase());
+    // A host matches the search if it does itself, or if any of its repositories does
+    const repoMatches = (k) => sidebarMatches([parseRepoDisplay(k).name, parseRepoDisplay(k).remotePath], []);
+    const hostSelfMatches = (h) => sidebarMatches([h.alias, h.name, h.host, h.user], h.tags);
+    const matchesSearch = (h) => hostSelfMatches(h) || (byHost.get(h.id) || []).some(repoMatches);
+    document.getElementById('remoteRepoCount').textContent = remoteKeys.length ? String(remoteKeys.length) : '';
 
-    const withRepos = hosts.filter((h) => byHost.has(h.id) && matchesTag(h)).sort((a, b) => hostLabel(a.id).localeCompare(hostLabel(b.id)));
-    const idle = hosts.filter((h) => !byHost.has(h.id) && matchesTag(h)).sort((a, b) => hostLabel(a.id).localeCompare(hostLabel(b.id)));
+    const withRepos = hosts.filter((h) => byHost.has(h.id) && matchesTag(h) && matchesSearch(h)).sort((a, b) => hostLabel(a.id).localeCompare(hostLabel(b.id)));
+    const idle = hosts.filter((h) => !byHost.has(h.id) && matchesTag(h) && matchesSearch(h)).sort((a, b) => hostLabel(a.id).localeCompare(hostLabel(b.id)));
     const dupNames = duplicateNames(remoteKeys);
 
     container.innerHTML = '';
     if (withRepos.length === 0 && idle.length === 0) {
-      container.innerHTML = `<div class="sidebar-empty">${escapeHtml(state.remoteTagFilter ? (zh ? '没有带此标签的服务器' : 'No servers with this tag') : tr('noSshHosts'))}</div>`;
+      if (state.remoteTagFilter || state.sidebarQuery) {
+        container.innerHTML = `<div class="sidebar-empty">${escapeHtml(zh ? '没有匹配的服务器' : 'No matching servers')}</div>`;
+      } else {
+        container.innerHTML = emptyStateHtml(ICONS.remote, zh ? '还没有 SSH 服务器' : 'No SSH servers yet', zh ? '连接服务器' : 'Connect a Server', 'act-empty-add-host');
+        container.querySelector('.act-empty-add-host').addEventListener('click', () => openSshModal().then(() => openHostForm(null)));
+      }
       return;
     }
-    if (withRepos.length === 0 && !state.remoteTagFilter) {
+    if (withRepos.length === 0 && !state.remoteTagFilter && !state.sidebarQuery) {
       const hint = document.createElement('div');
-      hint.className = 'sidebar-empty';
-      hint.textContent = tr('noRemoteRepos');
+      hint.className = 'sidebar-hint';
+      hint.textContent = zh ? '选择一台服务器，浏览并打开其中的 Git 仓库' : 'Pick a server to browse it and open its Git repositories';
       container.appendChild(hint);
     }
 
     withRepos.forEach((h) => {
-      const keys = byHost.get(h.id).slice().sort((a, b) => parseRepoDisplay(a).remotePath.localeCompare(parseRepoDisplay(b).remotePath));
-      const collapsed = state.collapsedHosts.has(h.id);
+      let keys = byHost.get(h.id).slice().sort((a, b) => parseRepoDisplay(a).remotePath.localeCompare(parseRepoDisplay(b).remotePath));
+      if (state.sidebarQuery && !hostSelfMatches(h)) keys = keys.filter(repoMatches);
+      const collapsed = state.collapsedHosts.has(h.id) && !state.sidebarQuery;
       const group = document.createElement('div');
       group.className = 'host-group' + (collapsed ? ' collapsed' : '') + (keys.includes(state.activeRepo) ? ' has-active' : '');
       group.appendChild(buildHostHeader(h, keys.length, collapsed));
@@ -751,13 +822,15 @@
       container.appendChild(group);
     });
 
-    if (idle.length > 0) {
+    if (idle.length > 0 && (withRepos.length === 0 || state.sidebarQuery)) {
+      idle.forEach((h) => container.appendChild(buildHostHeader(h, 0, true, true)));
+    } else if (idle.length > 0) {
       const others = document.createElement('div');
       others.className = 'host-idle' + (state.showIdleHosts ? ' expanded' : '');
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = 'host-idle-toggle';
-      toggle.innerHTML = `<span class="chev">${state.showIdleHosts ? ICONS.chevronDown : ICONS.arrowRight}</span><span>${escapeHtml(withRepos.length > 0 ? (zh ? `其他主机 (${idle.length})` : `Other hosts (${idle.length})`) : (zh ? `SSH 主机 (${idle.length})` : `SSH hosts (${idle.length})`))}</span>`;
+      toggle.innerHTML = `<span class="chev">${state.showIdleHosts ? ICONS.chevronDown : ICONS.arrowRight}</span><span>${escapeHtml(zh ? `其他服务器 (${idle.length})` : `Other servers (${idle.length})`)}</span>`;
       toggle.addEventListener('click', () => {
         state.showIdleHosts = !state.showIdleHosts;
         try {
@@ -781,7 +854,7 @@
     header.innerHTML = `
       ${idle ? '' : `<span class="chev">${collapsed ? ICONS.arrowRight : ICONS.chevronDown}</span>`}
       <i class="status-dot ${h.connected ? 'connected' : ''}"></i>
-      <span class="host-group-name">${escapeHtml(hostLabel(h.id))}</span>
+      <span class="host-group-label"><span class="host-group-name">${escapeHtml(hostLabel(h.id))}</span>${idle ? `<span class="host-group-addr">${escapeHtml(hostAddress(h))}</span>` : ''}</span>
       <span class="host-group-tags">${tagChipsHtml(h.tags, 'small')}</span>
       ${repoCount > 0 ? `<span class="host-group-count">${repoCount}</span>` : ''}
       <span class="host-group-actions">
@@ -929,7 +1002,7 @@
       const parts = pathForLabel.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean);
       if (parts.length >= 2) label = parts[parts.length - 2] + '/' + parts[parts.length - 1];
     }
-    let pathLine = info.fullDisplay;
+    let pathLine = shortenHome(info.fullDisplay);
     if (info.isRemote) {
       pathLine = options.homeDir && (info.remotePath === options.homeDir || info.remotePath.startsWith(options.homeDir + '/'))
         ? '~' + info.remotePath.substring(options.homeDir.length)
@@ -1674,6 +1747,7 @@
     let dragging = false;
     resizer.addEventListener('mousedown', (e) => {
       dragging = true;
+      document.body.classList.add('resizing-y');
       e.preventDefault();
     });
     window.addEventListener('mousemove', (e) => {
@@ -1684,6 +1758,7 @@
     });
     window.addEventListener('mouseup', () => {
       dragging = false;
+      document.body.classList.remove('resizing-y');
     });
   })();
 
@@ -1719,7 +1794,8 @@
       if (q.startsWith('#')) return (h.tags || []).some((t) => t.toLowerCase() === q.slice(1));
       return [h.alias, h.name, h.host, h.user, ...(h.tags || [])].some((v) => v && String(v).toLowerCase().includes(q));
     };
-    const shown = state.sshHosts.filter(matches);
+    // Git hosting services last: they're Git remotes, not servers to browse
+    const shown = state.sshHosts.filter(matches).sort((a, b) => (isGitHostingHost(a) ? 1 : 0) - (isGitHostingHost(b) ? 1 : 0));
     if (shown.length === 0) {
       listEl.innerHTML = `<div class="sidebar-empty">${escapeHtml(zh ? '没有匹配的主机' : 'No matching hosts')}</div>`;
       return;
@@ -1727,7 +1803,7 @@
     listEl.innerHTML = '';
     shown.forEach((h) => {
       const card = document.createElement('div');
-      card.className = 'host-card' + (state.selectedSshHostId === h.id ? ' selected' : '');
+      card.className = 'host-card' + (state.selectedSshHostId === h.id ? ' selected' : '') + (isGitHostingHost(h) ? ' git-hosting' : '');
       card.innerHTML = `
         <div class="host-card-top">
           <span class="host-card-title">
@@ -1736,7 +1812,7 @@
             ${h.alias ? `<span class="host-card-orig">${escapeHtml(h.name)}</span>` : ''}
           </span>
           <span class="host-card-actions">
-            <span class="ssh-chip">${h.source === 'ssh-config' ? 'ssh-config' : 'saved'}</span>
+            <span class="ssh-chip" title="${escapeHtml(isGitHostingHost(h) ? (zh ? 'Git 托管服务只能用于 Git 推送 / 拉取，无法登录浏览' : 'Git hosting: used for push / pull only, it can\'t be browsed') : '')}">${isGitHostingHost(h) ? (zh ? 'Git 托管' : 'Git hosting') : h.source === 'ssh-config' ? 'ssh-config' : (zh ? '已保存' : 'saved')}</span>
             <button class="mini-icon-btn edit-host" title="${escapeHtml(zh ? '别名与标签' : 'Alias & Tags')}">${ICONS.pencil}</button>
             ${h.source === 'saved' ? `<button class="mini-icon-btn danger del-host" title="${escapeHtml(zh ? '删除主机' : 'Delete Host')}">${ICONS.trash}</button>` : ''}
           </span>
@@ -2095,6 +2171,7 @@
       try {
         const listing = await opts.list(target, fb.showHidden);
         if (seq !== fb.loadSeq) return;
+        root.classList.remove('fb-failed');
         const changedDir = listing.currentPath !== fb.currentPath;
         fb.currentPath = listing.currentPath;
         fb.parentPath = listing.parentPath;
@@ -2128,7 +2205,14 @@
         if (opts.onNavigated) opts.onNavigated(listing);
       } catch (err) {
         if (seq !== fb.loadSeq) return;
-        body.innerHTML = `<div class="browser-empty-state error-text">${escapeHtml(err.message)}</div>`;
+        root.classList.add('fb-failed');
+        if (opts.renderError) {
+          body.innerHTML = '';
+          body.appendChild(opts.renderError(err, () => fb.navigate(target, navOpts)));
+          if (opts.summaryError) $('.fb-conn-summary').innerHTML = opts.summaryError(err);
+        } else {
+          body.innerHTML = `<div class="browser-empty-state error-text">${escapeHtml(err.message)}</div>`;
+        }
         updateNavButtons();
       }
     };
@@ -2582,6 +2666,90 @@
     });
   }
 
+  /* ==================== SSH Connection Diagnosis ==================== */
+  function isPrivateNetworkHost(host) {
+    const h = String(host || '').toLowerCase();
+    return /^10\./.test(h) || /^192\.168\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^169\.254\./.test(h) ||
+      /^f[cd][0-9a-f]{2}:/.test(h) || /^fe80:/.test(h) || h.endsWith('.local') || h.endsWith('.lan') || h.endsWith('.home') || h.endsWith('.internal');
+  }
+
+  /**
+   * Turn a raw SSH / socket error into a title, an explanation, and what can be done about it.
+   */
+  function diagnoseSshError(err, host) {
+    const zh = state.lang === 'zh';
+    const msg = String((err && err.message) || err || '');
+    const code = (msg.match(/\b(E[A-Z]{3,}[A-Z_]*)\b/) || [])[1] || '';
+    const addr = host ? `${host.user}@${host.host}:${host.port || 22}` : '';
+    const isMac = (state.platform || (desktopApi && desktopApi.platform)) === 'darwin';
+    const lan = host && isPrivateNetworkHost(host.host);
+    const d = { title: '', detail: '', tips: [], localNetwork: false, code };
+    if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH' || code === 'EHOSTDOWN' || code === 'EADDRNOTAVAIL') {
+      d.title = zh ? '无法到达主机' : 'The host can\'t be reached';
+      if (isMac && lan && desktopApi && desktopApi.isElectron) {
+        d.localNetwork = true;
+        d.detail = zh
+          ? `${addr} 位于局域网。macOS 需要授予 GitMap “本地网络”权限才能连接局域网地址；未授权时系统会直接返回“主机不可达”，即使在终端里 ssh 能连通。`
+          : `${addr} is on your local network. macOS only lets GitMap reach local-network addresses after you allow it under Local Network; until then it reports "host unreachable", even if ssh works in Terminal.`;
+        d.tips.push(zh ? '打开 系统设置 → 隐私与安全性 → 本地网络，打开 GitMap 的开关，然后重试。' : 'Open System Settings → Privacy & Security → Local Network, turn GitMap on, then retry.');
+        d.tips.push(zh ? '如果列表里没有 GitMap：重新安装最新构建的 GitMap 后再连接一次，系统会弹出授权提示。' : 'If GitMap isn\'t listed: install the latest GitMap build and connect again; macOS then asks for permission.');
+      } else {
+        d.detail = zh ? `网络无法路由到 ${addr}。` : `The network has no route to ${addr}.`;
+        d.tips.push(zh ? '确认主机已开机、与本机在同一网络或已连接 VPN。' : 'Check the host is on, and on the same network or VPN as this computer.');
+      }
+    } else if (code === 'ECONNREFUSED') {
+      d.title = zh ? '连接被拒绝' : 'Connection refused';
+      d.detail = zh ? `${addr} 拒绝了连接：该端口上没有运行 SSH 服务。` : `${addr} refused the connection: no SSH server is listening on that port.`;
+      d.tips.push(zh ? '检查端口号，以及远程主机上的 sshd 是否已启动。' : 'Check the port, and that sshd is running on the host.');
+    } else if (code === 'ETIMEDOUT' || /timed out/i.test(msg)) {
+      d.title = zh ? '连接超时' : 'Connection timed out';
+      d.detail = zh ? `${addr} 在规定时间内没有响应。` : `${addr} didn\'t answer in time.`;
+      d.tips.push(zh ? '检查防火墙 / 安全组是否放行 SSH 端口，或是否需要 VPN / 跳板机 (ProxyJump)。' : 'Check firewalls / security groups allow the SSH port, or whether a VPN or ProxyJump is needed.');
+    } else if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+      d.title = zh ? '无法解析主机名' : 'Unknown host name';
+      d.detail = zh ? `找不到主机 “${host ? host.host : ''}”。` : `The host name "${host ? host.host : ''}" couldn\'t be resolved.`;
+      d.tips.push(zh ? '检查主机名拼写和 DNS / VPN。' : 'Check the spelling, and your DNS or VPN.');
+    } else if (/authentication methods failed|auth/i.test(msg)) {
+      d.title = zh ? '认证失败' : 'Authentication failed';
+      d.detail = zh ? `${addr} 拒绝了所有认证方式（SSH Agent、私钥、密码）。` : `${addr} rejected every authentication method (SSH agent, keys, password).`;
+      d.tips.push(zh ? '检查用户名、私钥路径，或在“编辑连接”中填写密码。' : 'Check the user name and key path, or set a password in Edit Connection.');
+    } else {
+      d.title = zh ? '无法连接' : 'Unable to connect';
+      d.detail = msg;
+    }
+    d.raw = msg;
+    return d;
+  }
+
+  function renderSshErrorCard(err, retry) {
+    const zh = state.lang === 'zh';
+    const host = findHost(state.selectedSshHostId);
+    const d = diagnoseSshError(err, host);
+    const card = document.createElement('div');
+    card.className = 'conn-error';
+    card.innerHTML = `
+      <div class="conn-error-icon">${ICONS.alert}</div>
+      <h4>${escapeHtml(d.title)}</h4>
+      <p>${escapeHtml(d.detail)}</p>
+      ${d.tips.length ? `<ul>${d.tips.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul>` : ''}
+      <div class="conn-error-actions">
+        <button type="button" class="mini-btn primary act-retry">${ICONS.refresh}<span>${escapeHtml(zh ? '重试' : 'Retry')}</span></button>
+        ${d.localNetwork ? `<button type="button" class="mini-btn act-open-lan">${ICONS.settings}<span>${escapeHtml(zh ? '打开“本地网络”设置' : 'Open Local Network Settings')}</span></button>` : ''}
+        ${host && host.source === 'saved' ? `<button type="button" class="mini-btn act-edit-conn">${ICONS.pencil}<span>${escapeHtml(zh ? '编辑连接' : 'Edit Connection')}</span></button>` : ''}
+        ${host ? `<button type="button" class="mini-btn act-test-term">${ICONS.externalTerminal}<span>${escapeHtml(zh ? '在系统终端中测试 ssh' : 'Test ssh in Terminal')}</span></button>` : ''}
+      </div>
+      ${d.raw && d.raw !== d.detail ? `<code class="conn-error-raw">${escapeHtml(d.raw)}</code>` : ''}
+    `;
+    card.querySelector('.act-retry').addEventListener('click', retry);
+    const lanBtn = card.querySelector('.act-open-lan');
+    if (lanBtn) lanBtn.addEventListener('click', () => rpc('system:openLocalNetworkSettings').catch((e) => showToast(e.message, 'error')));
+    const editBtn = card.querySelector('.act-edit-conn');
+    if (editBtn) editBtn.addEventListener('click', () => openHostForm(host));
+    const termBtn = card.querySelector('.act-test-term');
+    if (termBtn) termBtn.addEventListener('click', () => openExternalTerminal('ssh://' + encodeURIComponent(host.id) + '/~').catch((e) => showToast(e.message, 'error')));
+    return card;
+  }
+
   function sshUriFor(hostId, remotePath) {
     return 'ssh://' + encodeURIComponent(hostId) + (remotePath.startsWith('/') ? remotePath : '/' + remotePath);
   }
@@ -2608,6 +2776,11 @@
       return `<i class="status-dot connected"></i>${h && h.alias ? `<strong>${escapeHtml(h.alias)}</strong><span class="fb-conn-addr">${escapeHtml(label)}</span>` : `<strong>${escapeHtml(label)}</strong>`}${h ? tagChipsHtml(h.tags, 'small') : ''}${h && h.gitVersion ? `<span class="fb-conn-meta">Git ${escapeHtml(h.gitVersion)}</span>` : `<span class="fb-conn-meta warn">${escapeHtml(state.lang === 'zh' ? '未检测到 git' : 'git not found')}</span>`}`;
     },
     displayRepo: (p) => `${hostLabel(state.selectedSshHostId)}:${p}`,
+    renderError: (err, retry) => renderSshErrorCard(err, retry),
+    summaryError: () => {
+      const h = findHost(state.selectedSshHostId);
+      return `<i class="status-dot failed"></i><strong>${escapeHtml(h ? hostLabel(h.id) : state.selectedSshHostId)}</strong>${h ? `<span class="fb-conn-addr">${escapeHtml(hostAddress(h))}</span>` : ''}<span class="fb-conn-meta warn">${escapeHtml(state.lang === 'zh' ? '未连接' : 'Not connected')}</span>`;
+    },
     onOpenRepo: (p) => openRemoteRepoAndCloseModal(state.selectedSshHostId, p),
     onOpenFile: (entry) => {
       openFileTab({ repo: '', filePath: sshUriFor(state.selectedSshHostId, entry.path), commit: null, title: entry.name, lines: null });
@@ -3002,7 +3175,7 @@
       state.settings = s;
       settingsUi.aiInfo = aiInfo;
       document.getElementById('cfgLanguage').value = s['git-map.language'] || 'Auto';
-      document.getElementById('cfgTheme').value = state.theme;
+      document.getElementById('cfgTheme').value = state.themePref;
       document.getElementById('cfgColourPreset').value = s['git-map.graph.colourPreset'] || 'Default';
       document.getElementById('cfgGraphStyle').value = s['git-map.graph.style'] || 'rounded';
       document.getElementById('cfgNodeStyle').value = s['git-map.graph.nodeStyle'] || 'Dot';
@@ -3246,7 +3419,6 @@
     openExternalTerminal(state.activeRepo || state.homeDir).catch((err) => showToast(err.message, 'error'));
   });
   document.getElementById('btnAppSettings').addEventListener('click', () => openAppSettingsModal());
-  document.getElementById('btnToggleTheme').addEventListener('click', () => toggleTheme());
 
   // Modal Close Buttons
   document.querySelectorAll('.modal-close').forEach((btn) => {
@@ -3300,6 +3472,77 @@
     }
   });
 
+  // Sidebar search, collapsible sections & resizing
+  const sidebarSearch = document.getElementById('sidebarSearch');
+  sidebarSearch.addEventListener('input', () => {
+    state.sidebarQuery = sidebarSearch.value;
+    renderSidebar();
+  });
+  sidebarSearch.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sidebarSearch.value) {
+      e.stopPropagation();
+      e.preventDefault();
+      sidebarSearch.value = '';
+      state.sidebarQuery = '';
+      renderSidebar();
+    } else if (e.key === 'Enter') {
+      const first = document.querySelector('#sidebar .repo-item');
+      if (first) first.click();
+    }
+  });
+  document.getElementById('sidebarSearchKbd').textContent = navigator.platform.toLowerCase().includes('mac') ? '⌘K' : 'Ctrl K';
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      const sidebar = document.getElementById('sidebar');
+      sidebar.classList.remove('collapsed');
+      sidebarSearch.focus();
+      sidebarSearch.select();
+    }
+  });
+  document.querySelectorAll('#sidebar .section-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.closest('.sidebar-section').getAttribute('data-section');
+      if (state.collapsedSections.has(id)) state.collapsedSections.delete(id);
+      else state.collapsedSections.add(id);
+      saveUiSet('gitmap.sidebar.collapsedSections', state.collapsedSections);
+      renderSidebar();
+    });
+  });
+  (function setupSidebarResize() {
+    const sidebar = document.getElementById('sidebar');
+    const resizer = document.getElementById('sidebarResizer');
+    try {
+      const saved = Number(localStorage.getItem('gitmap.sidebar.width'));
+      if (saved >= 200 && saved <= 520) sidebar.style.width = saved + 'px';
+    } catch (_) {}
+    let dragging = false;
+    resizer.addEventListener('mousedown', (e) => {
+      dragging = true;
+      document.body.classList.add('resizing-x');
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const width = Math.max(200, Math.min(520, e.clientX - sidebar.getBoundingClientRect().left));
+      sidebar.style.width = width + 'px';
+    });
+    window.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove('resizing-x');
+      try {
+        localStorage.setItem('gitmap.sidebar.width', String(parseInt(sidebar.style.width, 10)));
+      } catch (_) {}
+    });
+    resizer.addEventListener('dblclick', () => {
+      sidebar.style.width = '';
+      try {
+        localStorage.removeItem('gitmap.sidebar.width');
+      } catch (_) {}
+    });
+  })();
+
   // Escape closes the topmost dialog / panel
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
@@ -3330,7 +3573,7 @@
     const name = el.getAttribute('data-icon');
     if (ICONS[name]) el.innerHTML = ICONS[name];
   });
-  applyTheme(state.theme);
+  applyTheme(state.themePref);
   applyLanguageUI();
   renderTabBar();
   connectWs();

@@ -7,10 +7,14 @@
     document.body.classList.add(theme === 'light' ? 'vscode-light' : 'vscode-dark');
   }
 
-  var initialTheme = 'dark';
+  // The shell stores a preference ('system', 'dark' or 'light'); resolve 'system' from the OS appearance
+  var initialTheme = 'system';
   try {
-    initialTheme = localStorage.getItem('gitmap.theme') || 'dark';
+    initialTheme = localStorage.getItem('gitmap.theme') || 'system';
   } catch (_) {}
+  if (initialTheme !== 'light' && initialTheme !== 'dark') {
+    initialTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
 
   if (document.body) {
     applyTheme(initialTheme);

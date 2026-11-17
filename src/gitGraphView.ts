@@ -1437,16 +1437,36 @@ export class GitGraphView extends Disposable {
 			<script nonce="${nonce}" src="/media/out.min.js"></script>
 			</body>`;
 		} else {
+			// Text in both languages; the page picks the one the shell uses (saved in localStorage by the shell)
 			const isZh = getLanguage() === 'zh-cn';
-			body = `<body class="unableToLoad" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;">
-			<h2>${isZh ? '欢迎使用 GitMap 跨平台独立版' : 'Welcome to GitMap Standalone'}</h2>
-			<p class="unableToLoadMessage">${isZh ? '尚未添加任何 Git 仓库。你可以打开本地仓库目录，或通过 Remote - SSH 浏览并打开远程服务器上的仓库路径。' : 'No Git repositories added yet. Add a local repository folder or connect via Remote - SSH to browse remote repository paths.'}</p>
-			<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px;">
-				<div id="openLocalRepoBtn" class="roundedBtn" style="padding:8px 16px;font-weight:600;">${isZh ? '+ 添加本地仓库' : '+ Add Local Repository'}</div>
-				<div id="openRemoteRepoBtn" class="roundedBtn" style="padding:8px 16px;font-weight:600;">${isZh ? '⇄ 连接远程 SSH 仓库' : '⇄ Connect Remote (SSH)'}</div>
+			const welcomeCss = 'body.gmWelcome{display:flex;align-items:center;justify-content:center;margin:0;height:100vh;font-family:var(--vscode-font-family);}' +
+				'.gmCard{max-width:460px;padding:8px 24px;text-align:center;}' +
+				'.gmLogo{width:56px;height:56px;border-radius:14px;margin:0 auto 18px;display:block;box-shadow:0 8px 24px rgba(0,0,0,.25);}' +
+				'.gmCard h2{margin:0 0 8px;font-size:20px;font-weight:600;color:var(--vscode-foreground);}' +
+				'.gmCard p{margin:0 0 22px;line-height:1.6;color:var(--vscode-descriptionForeground);font-size:13px;}' +
+				'.gmActions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}' +
+				'.gmBtn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 16px;border-radius:8px;border:1px solid var(--vscode-dropdown-border);background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);font:inherit;font-size:13px;font-weight:600;cursor:pointer;}' +
+				'.gmBtn:hover{background:var(--vscode-button-secondaryHoverBackground);}' +
+				'.gmBtn.primary{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border-color:transparent;}' +
+				'.gmBtn.primary:hover{background:var(--vscode-button-hoverBackground);}' +
+				'.gmBtn svg{width:15px;height:15px;}' +
+				'.gmHint{margin-top:22px;font-size:11.5px;color:var(--vscode-descriptionForeground);opacity:.8;}' +
+				'.gmHint kbd{padding:1px 5px;border:1px solid var(--vscode-dropdown-border);border-radius:4px;font-family:inherit;}';
+			const folderSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>';
+			const remoteSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3-5 5 5 5"/><path d="M3 8h13"/><path d="m16 21 5-5-5-5"/><path d="M21 16H8"/></svg>';
+			body = `<body class="unableToLoad gmWelcome"><style>${welcomeCss}</style>
+			<div class="gmCard">
+				<img class="gmLogo" src="/resources/icon.png" alt="" />
+				<h2 data-zh="欢迎使用 GitMap" data-en="Welcome to GitMap">${isZh ? '欢迎使用 GitMap' : 'Welcome to GitMap'}</h2>
+				<p data-zh="添加一个本地 Git 仓库，或连接 SSH 服务器浏览并打开远程仓库，即可查看提交图谱、对比改动并执行 Git 操作。" data-en="Add a local Git repository, or connect to an SSH server to browse and open remote repositories — then explore the commit graph, compare changes and run Git actions.">${isZh ? '添加一个本地 Git 仓库，或连接 SSH 服务器浏览并打开远程仓库，即可查看提交图谱、对比改动并执行 Git 操作。' : 'Add a local Git repository, or connect to an SSH server to browse and open remote repositories — then explore the commit graph, compare changes and run Git actions.'}</p>
+				<div class="gmActions">
+					<button type="button" id="openLocalRepoBtn" class="gmBtn primary">${folderSvg}<span data-zh="添加本地仓库" data-en="Add Local Repository">${isZh ? '添加本地仓库' : 'Add Local Repository'}</span></button>
+					<button type="button" id="openRemoteRepoBtn" class="gmBtn">${remoteSvg}<span data-zh="连接 SSH 服务器" data-en="Connect SSH Server">${isZh ? '连接 SSH 服务器' : 'Connect SSH Server'}</span></button>
+				</div>
+				<div class="gmHint" data-zh="提示：按 ⌘K / Ctrl+K 搜索仓库与服务器" data-en="Tip: press ⌘K / Ctrl+K to search repositories and servers">${isZh ? '提示：按 ⌘K / Ctrl+K 搜索仓库与服务器' : 'Tip: press ⌘K / Ctrl+K to search repositories and servers'}</div>
 			</div>
 			<script nonce="${nonce}" src="/webview-bridge.js"></script>
-			<script nonce="${nonce}">(function(){ var api = acquireVsCodeApi(); document.getElementById('openLocalRepoBtn').addEventListener('click', function(){ window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-local-modal' }, '*'); }); document.getElementById('openRemoteRepoBtn').addEventListener('click', function(){ window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-ssh-modal' }, '*'); }); })();</script>
+			<script nonce="${nonce}">(function(){ var lang = null; try { lang = localStorage.getItem('gitmap.lang'); } catch (e) {} if (lang === 'zh' || lang === 'en') { document.querySelectorAll('[data-zh]').forEach(function(el){ el.textContent = el.getAttribute('data-' + lang); }); } document.getElementById('openLocalRepoBtn').addEventListener('click', function(){ window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-local-modal' }, '*'); }); document.getElementById('openRemoteRepoBtn').addEventListener('click', function(){ window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-ssh-modal' }, '*'); }); })();</script>
 			</body>`;
 		}
 		this.isGraphViewLoaded = numRepos > 0;
