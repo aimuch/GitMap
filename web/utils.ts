@@ -122,6 +122,7 @@ const MENU_ICONS = {
 };
 
 const DEFAULT_CDV_COMMIT_ACTIONS: ReadonlyArray<string> = ['checkout', 'createBranch', 'cherrypick'];
+const DEFAULT_ROW_COMMIT_ACTIONS: ReadonlyArray<string> = ['createBranch', 'checkout', 'cherrypick', 'copyHash'];
 
 function getCommitActionCatalog(): ReadonlyArray<{ readonly id: string, readonly title: string, readonly icon: string }> {
 	return [

@@ -206,7 +206,7 @@ export class GitGraphView extends Disposable {
 					} else {
 						this.needsAiSync = true;
 					}
-				} else if (event.affectsConfiguration('git-map.commitDetailsView.actions') || event.affectsConfiguration('git-map.diff.hideUnchangedRegions') || event.affectsConfiguration('diffEditor.hideUnchangedRegions.enabled')) {
+				} else if (event.affectsConfiguration('git-map.commitDetailsView.actions') || event.affectsConfiguration('git-map.commitRow') || event.affectsConfiguration('git-map.diff.hideUnchangedRegions') || event.affectsConfiguration('diffEditor.hideUnchangedRegions.enabled')) {
 					if (this.panel.visible && this.isGraphViewLoaded) {
 						this.sendCdvConfig();
 					} else {
@@ -1172,7 +1172,7 @@ export class GitGraphView extends Disposable {
 	 */
 	private sendCdvConfig() {
 		const cdv = getConfig().commitDetailsView;
-		this.sendMessage({ command: 'updateCdvConfig', actions: cdv.actions, hideUnchangedRegions: cdv.hideUnchangedRegions });
+		this.sendMessage({ command: 'updateCdvConfig', actions: cdv.actions, hideUnchangedRegions: cdv.hideUnchangedRegions, rowActions: getConfig().rowActions });
 	}
 
 	/**
@@ -1354,6 +1354,7 @@ export class GitGraphView extends Disposable {
 				commitDetailsView: config.commitDetailsView,
 				commitOrdering: config.commitOrder,
 				contextMenuActionsVisibility: config.contextMenuActionsVisibility,
+				rowActions: config.rowActions,
 				customBranchGlobPatterns: config.customBranchGlobPatterns,
 				customEmojiShortcodeMappings: config.customEmojiShortcodeMappings,
 				customPullRequestProviders: config.customPullRequestProviders,

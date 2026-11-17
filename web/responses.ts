@@ -104,7 +104,7 @@ function observeResponseMessages(gitGraph: GitGraphView, imageResizer: ImageResi
 				gitGraph.setAiConfig(msg.ai);
 				break;
 			case 'updateCdvConfig':
-				gitGraph.setCdvConfig(msg.actions, msg.hideUnchangedRegions);
+				gitGraph.setCdvConfig(msg.actions, msg.hideUnchangedRegions, msg.rowActions);
 				break;
 			case 'explainCommit':
 				gitGraph.commitExplainer.processExplainCommitResponse(msg);

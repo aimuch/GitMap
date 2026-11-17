@@ -2,6 +2,7 @@ import { AI_PROVIDER_VALUES, AiProvider, AiRequestSettings, getAiSettingsSnapsho
 import * as vscode from 'vscode';
 import {
 	AiSettingsConfig,
+	RowActionsConfig,
 	AppearanceConfig,
 	CommitDetailsViewConfig,
 	CommitDetailsViewLocation,
@@ -50,6 +51,8 @@ export const COMMIT_ACTION_IDS: ReadonlyArray<string> = [
 	'copyHash', 'copySubject', 'savePatch', 'copyPatch'
 ];
 export const DEFAULT_CDV_COMMIT_ACTIONS: ReadonlyArray<string> = ['checkout', 'createBranch', 'cherrypick'];
+export const DEFAULT_ROW_COMMIT_ACTIONS: ReadonlyArray<string> = ['createBranch', 'checkout', 'cherrypick', 'copyHash'];
+export const ROW_ACTIONS_POSITIONS: ReadonlyArray<string> = ['Description', 'Row'];
 
 const SETTING_FALLBACK_KEY = 'settingFallbacks';
 let fallbackMemento: vscode.Memento | null = null;
@@ -142,9 +145,28 @@ class Config {
 	 * Get the value of the `git-map.commitDetailsView.actions` Extension Setting.
 	 */
 	get cdvActions(): ReadonlyArray<string> {
-		const fallback = getSettingFallback<ReadonlyArray<string>>('commitDetailsView.actions');
-		const raw = Array.isArray(fallback) ? fallback : this.config.get<unknown>('commitDetailsView.actions');
-		if (!Array.isArray(raw)) return DEFAULT_CDV_COMMIT_ACTIONS;
+		return this.getCommitActionList('commitDetailsView.actions', DEFAULT_CDV_COMMIT_ACTIONS);
+	}
+
+	/**
+	 * Get the buttons shown on the row of the commit the mouse is over (`git-map.commitRow.actions`, the other actions are in its
+	 * "More Actions" menu), and where they're shown (`git-map.commitRow.actionsPosition`: at the end of the Description column, or of the row).
+	 */
+	get rowActions(): RowActionsConfig {
+		const position = this.config.get<unknown>('commitRow.actionsPosition', 'Description');
+		return {
+			actions: this.getCommitActionList('commitRow.actions', DEFAULT_ROW_COMMIT_ACTIONS),
+			position: typeof position === 'string' && ROW_ACTIONS_POSITIONS.includes(position) ? <RowActionsConfig['position']>position : 'Description'
+		};
+	}
+
+	/**
+	 * Get a list of commit actions from an Extension Setting (ignoring unknown & duplicate actions).
+	 */
+	private getCommitActionList(key: string, defaultValue: ReadonlyArray<string>): ReadonlyArray<string> {
+		const fallback = getSettingFallback<ReadonlyArray<string>>(key);
+		const raw = Array.isArray(fallback) ? fallback : this.config.get<unknown>(key);
+		if (!Array.isArray(raw)) return defaultValue;
 		const seen = new Set<string>(), out: string[] = [];
 		for (let i = 0; i < raw.length; i++) {
 			const item = raw[i];

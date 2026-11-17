@@ -1052,6 +1052,11 @@ class GitGraphView {
 			: DEFAULT_CDV_COMMIT_ACTIONS;
 	}
 
+	public getRowActionsConfig(): GG.RowActionsConfig {
+		const config = this.config.rowActions;
+		return config && Array.isArray(config.actions) ? config : { actions: DEFAULT_ROW_COMMIT_ACTIONS, position: 'Description' };
+	}
+
 	public setHideUnchangedRegions(enabled: boolean, persist: boolean = true) {
 		(<GG.Writeable<GG.CommitDetailsViewConfig>>this.config.commitDetailsView).hideUnchangedRegions = enabled;
 		this.cdvFileView.renderCdvHideUnchangedBtn();
@@ -1066,7 +1071,11 @@ class GitGraphView {
 		}
 	}
 
-	public setCdvConfig(actions: ReadonlyArray<string>, hideUnchangedRegions: boolean) {
+	public setCdvConfig(actions: ReadonlyArray<string>, hideUnchangedRegions: boolean, rowActions?: GG.RowActionsConfig) {
+		if (typeof rowActions !== 'undefined') {
+			(<GG.Writeable<GG.GitGraphViewConfig>>this.config).rowActions = rowActions;
+			this.rowActions.hide(); // Shown with the new buttons the next time the mouse moves over a row
+		}
 		(<GG.Writeable<GG.CommitDetailsViewConfig>>this.config.commitDetailsView).actions = actions;
 		(<GG.Writeable<GG.CommitDetailsViewConfig>>this.config.commitDetailsView).hideUnchangedRegions = hideUnchangedRegions;
 		this.renderCdvActions();
@@ -3475,11 +3484,19 @@ class GitGraphView {
 		if (elem !== null) elem.remove();
 	}
 
-	public openCdvActionsCustomizer() {
+	/**
+	 * Open the dialog that chooses which commit actions are buttons, and their order.
+	 * @param kind The buttons: of the Commit Details View's action bar, or on the row the mouse is over (the others are in its "More Actions" menu).
+	 */
+	public openCdvActionsCustomizer(kind: 'cdv' | 'row' = 'cdv') {
 		this.closeCdvActionsCustomizer();
 		closeDialogAndContextMenu();
+		const isRow = kind === 'row';
 		const catalog = getCommitActionCatalog();
-		const configured = this.getConfiguredCdvActions();
+		const defaults = isRow ? DEFAULT_ROW_COMMIT_ACTIONS : DEFAULT_CDV_COMMIT_ACTIONS;
+		const configured = isRow ? this.getRowActionsConfig().actions : this.getConfiguredCdvActions();
+		let position: GG.RowActionsConfig['position'] = this.getRowActionsConfig().position;
+		const title = isRow ? t('Customize Row Hover Buttons') : t('Customize Commit Action Buttons');
 		const items: { id: string, title: string, icon: string, checked: boolean }[] = [];
 		const added = new Set<string>();
 		configured.forEach((id) => {
@@ -3503,12 +3520,21 @@ class GitGraphView {
 		let dragIndex = -1;
 		const render = () => {
 			let orderCounter = 0;
-			modal.innerHTML = '<div class="cdvActionsModalPanel" role="dialog" aria-modal="true" aria-label="' + escapeHtml(t('Customize Commit Action Buttons')) + '">' +
-				'<div class="aiCommitHeader"><span class="aiCommitTitle">' + MENU_ICONS.settings + '<span>' + t('Customize Commit Action Buttons') + '</span></span>' +
+			const positionHtml = isRow
+				? '<div class="cdvActionsModalPosition"><span class="cdvActionsModalPositionLabel">' + t('Position:') + '</span>' +
+					[['Description', t('End of the Description Column')], ['Row', t('End of the Row')]].map((option) =>
+						'<span class="cdvActionsModalPositionOption' + (option[0] === position ? ' ' + CLASS_SELECTED : '') + '" data-position="' + option[0] + '" role="radio" aria-checked="' + (option[0] === position ? 'true' : 'false') + '">' + option[1] + '</span>'
+					).join('') + '</div>'
+				: '';
+			modal.innerHTML = '<div class="cdvActionsModalPanel" role="dialog" aria-modal="true" aria-label="' + escapeHtml(title) + '">' +
+				'<div class="aiCommitHeader"><span class="aiCommitTitle">' + MENU_ICONS.settings + '<span>' + title + '</span></span>' +
 				'<button type="button" class="aiCommitClose" data-cdv-custom="close" title="' + t('Close') + '">' + SVG_ICONS.close + '</button></div>' +
-				'<div class="cdvActionsModalHint">' + t('Choose which actions appear in the Commit Details action bar, and drag or use the arrows to adjust their order.') + '</div>' +
+				'<div class="cdvActionsModalHint">' + (isRow
+					? t('Checked actions are buttons on the row the mouse is over; the others are folded into its "More Actions" menu. Drag or use the arrows to adjust their order.')
+					: t('Choose which actions appear in the Commit Details action bar, and drag or use the arrows to adjust their order.')) + '</div>' +
+				positionHtml +
 				'<div class="cdvActionsModalList">' + items.map((item, index) => {
-				const badge = item.checked ? '<span class="cdvActionsOrderBadge' + (orderCounter === 0 ? ' primary' : '') + '">#' + (++orderCounter) + '</span>' : '<span class="cdvActionsOrderBadge empty"></span>';
+				const badge = item.checked ? '<span class="cdvActionsOrderBadge' + (orderCounter === 0 && !isRow ? ' primary' : '') + '">#' + (++orderCounter) + '</span>' : '<span class="cdvActionsOrderBadge empty"></span>';
 				return '<div class="cdvActionsModalItem' + (item.checked ? ' checked' : '') + '" draggable="true" data-index="' + index + '" data-action-id="' + escapeHtml(item.id) + '">' +
 						'<span class="rebaseEditorGrip" title="' + t('Drag to reorder') + '">' + REBASE_GRIP_ICON + '</span>' +
 						'<label class="cdvActionsModalLabel"><input type="checkbox" data-index="' + index + '"' + (item.checked ? ' checked' : '') + ' tabindex="-1"><span class="customCheckbox"></span>' +
@@ -3559,6 +3585,12 @@ class GitGraphView {
 		});
 		modal.addEventListener('click', (e) => {
 			if (!(e.target instanceof Element)) return;
+			const positionElem = <HTMLElement | null>e.target.closest('.cdvActionsModalPositionOption');
+			if (positionElem !== null) {
+				position = positionElem.dataset.position === 'Row' ? 'Row' : 'Description';
+				render();
+				return;
+			}
 			const moveElem = <HTMLElement | null>e.target.closest('.rebaseEditorMoveBtn');
 			if (moveElem !== null && !moveElem.classList.contains(CLASS_DISABLED)) {
 				const index = parseInt(moveElem.dataset.index!);
@@ -3573,12 +3605,13 @@ class GitGraphView {
 					break;
 				case 'reset': {
 					items.length = 0;
-					DEFAULT_CDV_COMMIT_ACTIONS.forEach((id) => {
+					position = 'Description';
+					defaults.forEach((id) => {
 						const entry = catalog.find((item) => item.id === id);
 						if (typeof entry !== 'undefined') items.push({ id: entry.id, title: entry.title, icon: entry.icon, checked: true });
 					});
 					catalog.forEach((entry) => {
-						if (!DEFAULT_CDV_COMMIT_ACTIONS.includes(entry.id)) {
+						if (!defaults.includes(entry.id)) {
 							items.push({ id: entry.id, title: entry.title, icon: entry.icon, checked: false });
 						}
 					});
@@ -3587,9 +3620,17 @@ class GitGraphView {
 				}
 				case 'save': {
 					const selectedIds = items.filter((item) => item.checked).map((item) => item.id);
-					(<GG.Writeable<GG.CommitDetailsViewConfig>>this.config.commitDetailsView).actions = selectedIds;
-					this.renderCdvActions();
-					sendMessage({ command: 'updateExtensionSetting', key: 'commitDetailsView.actions', value: selectedIds });
+					if (isRow) {
+						const previous = this.getRowActionsConfig();
+						(<GG.Writeable<GG.GitGraphViewConfig>>this.config).rowActions = { actions: selectedIds, position: position };
+						this.rowActions.hide();
+						sendMessage({ command: 'updateExtensionSetting', key: 'commitRow.actions', value: selectedIds });
+						if (position !== previous.position) sendMessage({ command: 'updateExtensionSetting', key: 'commitRow.actionsPosition', value: position });
+					} else {
+						(<GG.Writeable<GG.CommitDetailsViewConfig>>this.config.commitDetailsView).actions = selectedIds;
+						this.renderCdvActions();
+						sendMessage({ command: 'updateExtensionSetting', key: 'commitDetailsView.actions', value: selectedIds });
+					}
 					this.closeCdvActionsCustomizer();
 					break;
 				}

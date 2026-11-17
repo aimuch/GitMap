@@ -7,14 +7,19 @@ const ROW_ACTION_ICONS: { readonly [action: string]: string } = {
 };
 
 /**
- * Implements the buttons of the most common actions on a commit, shown at the end of its row while the mouse is over it (as in
- * GitLens): Create Branch, Checkout, Cherry Pick, Copy Commit Hash, and a button that opens the commit's context menu. They run the
- * same actions as the commit's context menu (and are hidden when the context menu doesn't show them).
+ * Implements the buttons of the most common actions on a commit, shown on its row while the mouse is over it (as in GitLens), and a
+ * button that opens the rest of the commit's actions. Which actions are buttons (and in which order), and whether they're at the end of
+ * the Description column or of the row, are set with "Customize Row Hover Buttons…" (the `git-map.commitRow.*` Extension Settings).
+ * They run the same actions as the commit's context menu (and are hidden when the context menu doesn't show them).
  */
 class RowActions {
 	private readonly view: GitGraphView;
 	private readonly elem: HTMLElement;
 	private commitElem: HTMLElement | null = null;
+	private hostElem: HTMLElement | null = null;
+	private target: (ContextMenuTarget & DialogTarget & CommitTarget) | null = null;
+	private actions: ContextMenuActions = [];
+	private shown: ContextMenuAction[] = [];
 
 	/**
 	 * Construct a new RowActions instance.
@@ -25,19 +30,12 @@ class RowActions {
 		this.elem = document.createElement('div');
 		this.elem.id = 'rowActions';
 		this.elem.setAttribute('role', 'toolbar');
-		this.elem.innerHTML = [
-			['createBranch', t('Create Branch') + ELLIPSIS],
-			['checkout', t('Checkout') + ELLIPSIS],
-			['cherrypick', t('Cherry Pick') + ELLIPSIS],
-			['copyHash', t('Copy Commit Hash to Clipboard')],
-			['more', t('More Actions') + ELLIPSIS]
-		].map((action) => '<button type="button" class="rowAction" data-action="' + action[0] + '" title="' + action[1] + '" aria-label="' + action[1] + '" tabindex="-1">' + ROW_ACTION_ICONS[action[0]] + '</button>').join('');
 
 		// The buttons are inside the row, so their events aren't handled by the row (which would open the Commit Details View)
 		this.elem.addEventListener('click', (e) => {
 			handledEvent(e);
 			const buttonElem = e.target instanceof Element ? <HTMLElement | null>e.target.closest('.rowAction') : null;
-			if (buttonElem !== null) this.run(buttonElem.dataset.action!, buttonElem);
+			if (buttonElem !== null) this.run(buttonElem);
 		});
 		['dblclick', 'contextmenu', 'mousedown'].forEach((type) => this.elem.addEventListener(type, (e) => e.stopPropagation()));
 	}
@@ -48,16 +46,36 @@ class RowActions {
 	 */
 	public show(commitElem: HTMLElement) {
 		if (commitElem === this.commitElem && this.elem.isConnected) return;
-		const commit = this.view.getCommitOfElem(commitElem), cellElem = commitElem.querySelector('td.descriptionCol');
+		const config = this.view.getRowActionsConfig();
+		const commit = this.view.getCommitOfElem(commitElem);
+		const cellElem = <HTMLElement | null>(config.position === 'Row' ? commitElem.lastElementChild : commitElem.querySelector('td.descriptionCol'));
 		if (commit === null || commit.hash === UNCOMMITTED || commit.stash !== null || cellElem === null) {
 			this.hide();
 			return;
 		}
-		const visibility = this.view.config.contextMenuActionsVisibility.commit;
-		const visible: { [action: string]: boolean } = { createBranch: visibility.createBranch, checkout: visibility.checkout, cherrypick: visibility.cherrypick, copyHash: visibility.copyHash, more: true };
-		this.elem.querySelectorAll<HTMLElement>('.rowAction').forEach((buttonElem) => {
-			buttonElem.style.display = visible[buttonElem.dataset.action!] ? '' : 'none';
-		});
+
+		const target: ContextMenuTarget & DialogTarget & CommitTarget = { type: TargetType.Commit, hash: commit.hash, index: parseInt(commitElem.dataset.id!), elem: commitElem };
+		const actions = this.view.actions.getCommitContextMenuActions(target);
+		const actionMap = new Map<string, ContextMenuAction>();
+		actions.forEach((group) => group.forEach((action) => {
+			if (typeof action.id === 'string') actionMap.set(action.id, action);
+		}));
+		const shown = config.actions.map((id) => actionMap.get(id)).filter((action): action is ContextMenuAction => typeof action !== 'undefined' && action.visible);
+		this.target = target;
+		this.actions = actions;
+		this.shown = shown;
+
+		// The titles are HTML (e.g. "&#8230;"), as in the context menu
+		const button = (action: string, title: string, icon: string) => '<button type="button" class="rowAction" data-action="' + action + '" title="' + title + '" aria-label="' + title + '" tabindex="-1">' + icon + '</button>';
+		this.elem.innerHTML = shown.map((action, index) => button(String(index), action.title, ROW_ACTION_ICONS[action.id!] || action.icon || '')).join('') +
+			button('more', t('More Actions') + ELLIPSIS, ROW_ACTION_ICONS.more);
+
+		if (this.hostElem !== cellElem) {
+			this.releaseHost();
+			cellElem.classList.add('rowActionsHost');
+			if (config.position === 'Row') cellElem.classList.add('rowActionsHostRow');
+			this.hostElem = cellElem;
+		}
 		cellElem.appendChild(this.elem);
 		this.commitElem = commitElem;
 	}
@@ -67,31 +85,38 @@ class RowActions {
 	 */
 	public hide() {
 		this.elem.remove();
+		this.releaseHost();
 		this.commitElem = null;
+		this.target = null;
+	}
+
+	private releaseHost() {
+		if (this.hostElem !== null) {
+			this.hostElem.classList.remove('rowActionsHost', 'rowActionsHostRow');
+			this.hostElem = null;
+		}
 	}
 
 	/**
-	 * Run an action on the commit whose buttons are shown.
-	 * @param action The action.
-	 * @param buttonElem The button of the action.
+	 * Run the action of a button.
+	 * @param buttonElem The button.
 	 */
-	private run(action: string, buttonElem: HTMLElement) {
-		const commitElem = this.commitElem;
-		const commit = commitElem !== null ? this.view.getCommitOfElem(commitElem) : null;
-		if (commitElem === null || commit === null) return;
-		const target: ContextMenuTarget & DialogTarget & CommitTarget = { type: TargetType.Commit, hash: commit.hash, index: parseInt(commitElem.dataset.id!), elem: commitElem };
-		const actions = this.view.actions.getCommitContextMenuActions(target);
+	private run(buttonElem: HTMLElement) {
+		const target = this.target;
+		if (target === null) return;
+		const action = buttonElem.dataset.action!;
 		if (action === 'more') {
 			const bounds = buttonElem.getBoundingClientRect();
-			contextMenu.show(actions, false, target, new MouseEvent('contextmenu', { clientX: Math.round(bounds.left), clientY: Math.round(bounds.bottom) }), this.view.viewElem);
+			const moreActions = this.actions.concat([[{
+				title: t('Customize Row Hover Buttons') + ELLIPSIS,
+				icon: MENU_ICONS.settings,
+				visible: true,
+				onClick: () => this.view.openCdvActionsCustomizer('row')
+			}]]);
+			contextMenu.show(moreActions, false, target, new MouseEvent('contextmenu', { clientX: Math.round(bounds.left), clientY: Math.round(bounds.bottom) }), this.view.viewElem);
 		} else {
-			for (const group of actions) {
-				const item = group.find((item) => item.id === action);
-				if (typeof item !== 'undefined') {
-					item.onClick();
-					return;
-				}
-			}
+			const item = this.shown[parseInt(action)];
+			if (typeof item !== 'undefined') item.onClick();
 		}
 	}
 }

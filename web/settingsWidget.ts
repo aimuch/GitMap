@@ -212,6 +212,7 @@ class SettingsWidget {
 				'<div class="settingsRow"><span class="settingsLabel">' + t('Footer') + '</span>' + segmented('graph.freezeFooter', [['true', t('Frozen')], ['false', t('Scroll with the Commits')]], initialState.config.graph.freezeFooter ? 'true' : 'false') + '</div>' +
 				'<div class="settingsRow"><span class="settingsLabel">' + t('Diff View') + '</span>' + segmented('diff.hideUnchangedRegions', [['false', t('Full File')], ['true', t('Changes Only')]], this.view.isHideUnchangedRegions() ? 'true' : 'false') + '</div>' +
 				'<div class="settingsRow"><span class="settingsLabel">' + t('Action Bar') + '</span>' + button('settingsCustomizeCdvActions', '', MENU_ICONS.settings + t('Customize Action Buttons') + ELLIPSIS) + '</div>' +
+				'<div class="settingsRow"><span class="settingsLabel">' + t('Row Hover Buttons') + '</span>' + button('settingsCustomizeRowActions', '', MENU_ICONS.settings + t('Customize Row Hover Buttons') + ELLIPSIS) + '</div>' +
 				'</div>';
 
 			html += '<div class="settingsSection"><h3>' + MENU_ICONS.globe + t('Language · All Repositories') + '</h3><div class="settingsChoices" data-setting="language">' +
@@ -810,6 +811,12 @@ class SettingsWidget {
 			aiAdvancedLink.addEventListener('click', () => {
 				flushAiTextInputs();
 				sendMessage({ command: 'openExtensionSettings', section: 'ai' });
+			});
+		}
+		const customizeRowActionsBtn = document.getElementById('settingsCustomizeRowActions');
+		if (customizeRowActionsBtn !== null) {
+			customizeRowActionsBtn.addEventListener('click', () => {
+				this.view.openCdvActionsCustomizer('row');
 			});
 		}
 		const customizeCdvActionsBtn = document.getElementById('settingsCustomizeCdvActions');

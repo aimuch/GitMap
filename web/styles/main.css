@@ -1521,11 +1521,19 @@ svg.openFolderIcon, svg.closedFolderIcon, svg.fileIcon{
 	bottom:max(1px, calc((var(--git-graph-rowHeight) - 26px) / 2));
 	left:20px;
 	right:3px;
-	border-radius:6px;
-	border:1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border, rgba(128,128,128,0.35)));
-	background:var(--vscode-editorWidget-background, var(--vscode-editor-background));
-	box-shadow:0 1px 3px var(--vscode-widget-shadow, rgba(0,0,0,0.3));
+	border-radius:7px;
+	/* Lighter than the row (mixed with the text colour, so it works in dark & light themes), with an accent outline */
+	border:1px solid color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 70%, transparent);
+	background:color-mix(in srgb, var(--vscode-foreground, #ccc) 15%, var(--vscode-editor-background, #1e1e1e));
+	box-shadow:0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,0.45));
 	pointer-events:none;
+}
+/* The buttons can be at the end of the row (in its last cell, which doesn't clip them so that they can cover the cells before it) */
+#commitTable td.rowActionsHost{
+	position:relative;
+}
+#commitTable td.rowActionsHostRow{
+	overflow:visible;
 }
 #rowActions > .rowAction{
 	position:relative;
@@ -1547,14 +1555,12 @@ svg.openFolderIcon, svg.closedFolderIcon, svg.fileIcon{
 	border:none;
 	border-radius:4px;
 	background-color:transparent;
-	color:var(--vscode-icon-foreground, var(--vscode-foreground));
+	color:var(--vscode-foreground);
 	cursor:pointer;
-	opacity:0.9;
 }
 .rowAction:hover{
-	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+	background-color:color-mix(in srgb, var(--vscode-foreground, #ccc) 22%, transparent);
 	color:var(--vscode-foreground);
-	opacity:1;
 }
 
 /* When there are many commits, only the rows near the view are rendered: the other rows are replaced by spacers of the same height, and
@@ -3826,6 +3832,34 @@ button.operationBarBtn svg{
 	font-size:12px;
 	line-height:1.45;
 	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+}
+.cdvActionsModalPosition{
+	display:flex;
+	align-items:center;
+	flex-wrap:wrap;
+	gap:6px;
+	padding:10px 16px;
+	font-size:12px;
+	border-bottom:1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+}
+.cdvActionsModalPositionLabel{
+	color:var(--vscode-descriptionForeground);
+	margin-right:4px;
+}
+.cdvActionsModalPositionOption{
+	padding:3px 10px;
+	border:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+	border-radius:5px;
+	color:var(--vscode-descriptionForeground);
+	cursor:pointer;
+}
+.cdvActionsModalPositionOption:hover{
+	color:var(--vscode-foreground);
+}
+.cdvActionsModalPositionOption.selected{
+	border-color:var(--vscode-focusBorder);
+	background-color:var(--vscode-button-secondaryBackground, rgba(128,128,128,0.25));
+	color:var(--vscode-button-secondaryForeground, var(--vscode-foreground));
 }
 .cdvActionsModalList{
 	flex:1 1 auto;

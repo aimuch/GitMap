@@ -561,6 +561,7 @@ export interface GitGraphViewConfig {
 	readonly onRepoLoad: OnRepoLoadConfig;
 	readonly referenceLabels: ReferenceLabelsConfig;
 	readonly repoDropdownOrder: RepoDropdownOrder;
+	readonly rowActions: RowActionsConfig;
 	readonly showRemoteBranches: boolean;
 	readonly showStashes: boolean;
 	readonly showTags: boolean;
@@ -580,6 +581,11 @@ export interface GitGraphViewWorkspaceState {
 	findIsCaseSensitive: boolean;
 	findIsRegex: boolean;
 	findOpenCommitDetailsView: boolean;
+}
+
+export interface RowActionsConfig {
+	readonly actions: ReadonlyArray<string>; // The buttons shown, in order (the other actions are in the "More Actions" menu)
+	readonly position: 'Description' | 'Row'; // At the end of the Description column, or at the end of the row
 }
 
 export interface CommitDetailsViewConfig {
@@ -1531,7 +1537,7 @@ export interface ResponseMerge extends ResponseWithErrorInfo {
 
 export interface RequestUpdateExtensionSetting extends BaseMessage {
 	readonly command: 'updateExtensionSetting';
-	readonly key: 'ai.baseUrl' | 'ai.commitMessage.enabled' | 'ai.explainCommit.enabled' | 'ai.model' | 'ai.provider' | 'commitDetailsView.actions' | 'diff.hideUnchangedRegions' | 'graph.colourPreset' | 'graph.density' | 'graph.freezeColumnHeaders' | 'graph.freezeFooter' | 'graph.nodeStyle' | 'graph.style' | 'language' | 'statusBarItemDisplay';
+	readonly key: 'ai.baseUrl' | 'ai.commitMessage.enabled' | 'ai.explainCommit.enabled' | 'ai.model' | 'ai.provider' | 'commitDetailsView.actions' | 'commitRow.actions' | 'commitRow.actionsPosition' | 'diff.hideUnchangedRegions' | 'graph.colourPreset' | 'graph.density' | 'graph.freezeColumnHeaders' | 'graph.freezeFooter' | 'graph.nodeStyle' | 'graph.style' | 'language' | 'statusBarItemDisplay';
 	readonly value: string | boolean | ReadonlyArray<string>;
 }
 export interface ResponseUpdateExtensionSetting extends ResponseWithErrorInfo {
@@ -2285,6 +2291,7 @@ export interface ResponseUpdateCdvConfig extends BaseMessage {
 	readonly command: 'updateCdvConfig';
 	readonly actions: ReadonlyArray<string>;
 	readonly hideUnchangedRegions: boolean;
+	readonly rowActions: RowActionsConfig;
 }
 
 

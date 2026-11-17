@@ -1367,5 +1367,11 @@
 	"Neither {0} nor {1} was found at {2} (HTTP {3}). Check the API Base URL and the model, or choose the API Format in Settings → AI.": "{2} 上 {0} 和 {1} 都不存在（HTTP {3}）。请检查 API 地址和模型名，或在 设置 → AI 中选择「接口格式」。",
 	"The {0} setting must be a JSON object, e.g. {1}.": "设置 {0} 必须是 JSON 对象，例如 {1}。",
 	"Choose a provider whose API Git Map calls directly first.": "请先选择一个由 Git Map 直接调用其 API 的 AI 服务。",
-	"API format, thinking, temperature & more…": "接口格式、思考、温度等更多选项…"
+	"API format, thinking, temperature & more…": "接口格式、思考、温度等更多选项…",
+	"Customize Row Hover Buttons": "自定义悬浮操作按钮",
+	"Row Hover Buttons": "行悬浮操作栏",
+	"Position:": "位置：",
+	"End of the Description Column": "说明列末尾",
+	"End of the Row": "整行最右侧",
+	"Checked actions are buttons on the row the mouse is over; the others are folded into its \"More Actions\" menu. Drag or use the arrows to adjust their order.": "勾选的操作会显示为鼠标所在行上的按钮，其余的收进「更多操作」菜单。拖动或用箭头调整顺序。"
 }
