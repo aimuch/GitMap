@@ -1,4 +1,5 @@
 import { diffLines, diffWordsWithSpace } from 'diff';
+import { decode } from 'iconv-lite';
 import { DataSource } from '../dataSource';
 import { readRepoFileBuffer } from '../remote/repoTransport';
 import { GitFileBlame, GitFileStatus } from '../types';
@@ -27,8 +28,7 @@ export interface DiffResult {
   toHash: string;
   type: GitFileStatus;
   isBinary: boolean;
-  oldContent: string;
-  newContent: string;
+  truncated: boolean;
   additions: number;
   deletions: number;
   rows: DiffRow[];
@@ -36,6 +36,8 @@ export interface DiffResult {
 }
 
 const MAX_WORD_DIFF_LINE_LEN = 600;
+const MAX_WORD_DIFF_PAIRS = 600;
+const MAX_FULL_MYERS_LINES = 15000;
 const MAX_DIFF_BYTES = 5 * 1024 * 1024;
 
 function splitContentLines(text: string): string[] {
@@ -71,6 +73,52 @@ function computeWordPair(oldLine: string, newLine: string): { oldSegs: WordSegme
   return { oldSegs, newSegs };
 }
 
+/**
+ * Fast O(N) prefix/suffix + linear chunk diff fallback when files exceed MAX_FULL_MYERS_LINES,
+ * preventing multi-second event-loop stalls on huge lockfiles or generated bundles.
+ */
+function fastLargeFileDiff(oldLines: string[], newLines: string[]): { rows: DiffRow[]; additions: number; deletions: number } {
+  let prefix = 0;
+  while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) {
+    prefix++;
+  }
+  let oldEnd = oldLines.length - 1;
+  let newEnd = newLines.length - 1;
+  while (oldEnd >= prefix && newEnd >= prefix && oldLines[oldEnd] === newLines[newEnd]) {
+    oldEnd--;
+    newEnd--;
+  }
+
+  const rows: DiffRow[] = [];
+  let oldNo = 1;
+  let newNo = 1;
+  for (let i = 0; i < prefix; i++) {
+    rows.push({ kind: 'context', oldLineNumber: oldNo++, newLineNumber: newNo++, oldText: oldLines[i], newText: newLines[i] });
+  }
+  const delCount = Math.max(0, oldEnd - prefix + 1);
+  const addCount = Math.max(0, newEnd - prefix + 1);
+  const pairLen = Math.min(delCount, addCount);
+  for (let k = 0; k < pairLen; k++) {
+    rows.push({
+      kind: 'change',
+      oldLineNumber: oldNo++,
+      newLineNumber: newNo++,
+      oldText: oldLines[prefix + k],
+      newText: newLines[prefix + k]
+    });
+  }
+  for (let k = pairLen; k < delCount; k++) {
+    rows.push({ kind: 'deleted', oldLineNumber: oldNo++, newLineNumber: null, oldText: oldLines[prefix + k], newText: null });
+  }
+  for (let k = pairLen; k < addCount; k++) {
+    rows.push({ kind: 'added', oldLineNumber: null, newLineNumber: newNo++, oldText: null, newText: newLines[prefix + k] });
+  }
+  for (let i = oldEnd + 1; i < oldLines.length; i++) {
+    rows.push({ kind: 'context', oldLineNumber: oldNo++, newLineNumber: newNo++, oldText: oldLines[i], newText: oldLines[i] });
+  }
+  return { rows, additions: addCount, deletions: delCount };
+}
+
 export class DiffService {
   constructor(private readonly dataSource: DataSource) {}
 
@@ -78,35 +126,44 @@ export class DiffService {
     repo: string,
     commit: string | null,
     filePath: string
-  ): Promise<{ content: string; isBinary: boolean; error: string | null }> {
+  ): Promise<{ content: string; isBinary: boolean; truncated: boolean; error: string | null }> {
     if (!commit || commit === UNCOMMITTED) {
       const buf = await readRepoFileBuffer(repo, filePath, MAX_DIFF_BYTES + 1);
       if (buf === null) {
-        return { content: '', isBinary: false, error: null };
+        return { content: '', isBinary: false, truncated: false, error: null };
       }
       if (buf.subarray(0, 8192).includes(0)) {
-        return { content: '', isBinary: true, error: null };
+        return { content: '', isBinary: true, truncated: false, error: null };
       }
-      return { content: buf.subarray(0, MAX_DIFF_BYTES).toString('utf8'), isBinary: false, error: null };
+      const truncated = buf.length > MAX_DIFF_BYTES;
+      return {
+        content: buf.subarray(0, MAX_DIFF_BYTES).toString('utf8'),
+        isBinary: false,
+        truncated,
+        error: null
+      };
     }
 
     try {
-      const content = await this.dataSource.getCommitFile(repo, commit, filePath);
-      if (content.slice(0, 4096).includes('\0')) {
-        return { content: '', isBinary: true, error: null };
+      const { buffer, encoding } = await this.dataSource.getCommitFileBuffer(repo, commit, filePath, MAX_DIFF_BYTES + 1);
+      if (buffer.subarray(0, 8192).includes(0)) {
+        return { content: '', isBinary: true, truncated: false, error: null };
       }
+      const truncated = buffer.length > MAX_DIFF_BYTES;
+      const sliced = truncated ? buffer.subarray(0, MAX_DIFF_BYTES) : buffer;
+      const content = encoding === 'utf8' ? sliced.toString('utf8') : decode(sliced, encoding);
       return {
-        content: content.length > MAX_DIFF_BYTES ? content.slice(0, MAX_DIFF_BYTES) : content,
+        content,
         isBinary: false,
+        truncated,
         error: null
       };
     } catch (err) {
-      // Empty tree or parent before initial commit => empty content
       const msg = String(err);
       if (/does not exist|invalid object name|unknown revision|bad revision|Path .* does not exist/i.test(msg)) {
-        return { content: '', isBinary: false, error: null };
+        return { content: '', isBinary: false, truncated: false, error: null };
       }
-      return { content: '', isBinary: false, error: msg };
+      return { content: '', isBinary: false, truncated: false, error: msg };
     }
   }
 
@@ -124,9 +181,15 @@ export class DiffService {
     const rightExists = type !== GitFileStatus.Deleted;
 
     const [leftRes, rightRes] = await Promise.all([
-      leftExists ? this.readRevisionText(repo, fromHash, oldFilePath) : Promise.resolve({ content: '', isBinary: false, error: null }),
-      rightExists ? this.readRevisionText(repo, toHash, newFilePath) : Promise.resolve({ content: '', isBinary: false, error: null })
+      leftExists
+        ? this.readRevisionText(repo, fromHash, oldFilePath)
+        : Promise.resolve({ content: '', isBinary: false, truncated: false, error: null }),
+      rightExists
+        ? this.readRevisionText(repo, toHash, newFilePath)
+        : Promise.resolve({ content: '', isBinary: false, truncated: false, error: null })
     ]);
+
+    const truncated = leftRes.truncated || rightRes.truncated;
 
     if (leftRes.error || rightRes.error) {
       return {
@@ -137,8 +200,7 @@ export class DiffService {
         toHash,
         type,
         isBinary: false,
-        oldContent: '',
-        newContent: '',
+        truncated,
         additions: 0,
         deletions: 0,
         rows: [],
@@ -155,8 +217,7 @@ export class DiffService {
         toHash,
         type,
         isBinary: true,
-        oldContent: '',
-        newContent: '',
+        truncated,
         additions: 0,
         deletions: 0,
         rows: [],
@@ -166,6 +227,27 @@ export class DiffService {
 
     const oldNorm = leftRes.content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const newNorm = rightRes.content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    const oldAllLines = splitContentLines(oldNorm);
+    const newAllLines = splitContentLines(newNorm);
+    if (oldAllLines.length + newAllLines.length > MAX_FULL_MYERS_LINES * 2) {
+      const fast = fastLargeFileDiff(oldAllLines, newAllLines);
+      return {
+        repo,
+        oldFilePath,
+        newFilePath,
+        fromHash,
+        toHash,
+        type,
+        isBinary: false,
+        truncated: true,
+        additions: fast.additions,
+        deletions: fast.deletions,
+        rows: fast.rows,
+        error: null
+      };
+    }
+
     const changes = diffLines(oldNorm, newNorm);
 
     const rows: DiffRow[] = [];
@@ -173,6 +255,7 @@ export class DiffService {
     let newLine = 1;
     let additions = 0;
     let deletions = 0;
+    let wordPairsComputed = 0;
 
     let i = 0;
     while (i < changes.length) {
@@ -199,15 +282,21 @@ export class DiffService {
           const hasOld = k < removedLines.length;
           const hasNew = k < addedLines.length;
           if (hasOld && hasNew) {
-            const { oldSegs, newSegs } = computeWordPair(removedLines[k], addedLines[k]);
+            let oldSegs: WordSegment[] | undefined;
+            let newSegs: WordSegment[] | undefined;
+            if (wordPairsComputed < MAX_WORD_DIFF_PAIRS) {
+              wordPairsComputed++;
+              const pair = computeWordPair(removedLines[k], addedLines[k]);
+              oldSegs = pair.oldSegs;
+              newSegs = pair.newSegs;
+            }
             rows.push({
               kind: 'change',
               oldLineNumber: oldLine++,
               newLineNumber: newLine++,
               oldText: removedLines[k],
               newText: addedLines[k],
-              oldSegments: oldSegs,
-              newSegments: newSegs
+              ...(oldSegs ? { oldSegments: oldSegs, newSegments: newSegs } : {})
             });
           } else if (hasOld) {
             rows.push({
@@ -265,8 +354,7 @@ export class DiffService {
       toHash,
       type,
       isBinary: false,
-      oldContent: oldNorm,
-      newContent: newNorm,
+      truncated,
       additions,
       deletions,
       rows,
@@ -274,8 +362,8 @@ export class DiffService {
     };
   }
 
-  public async loadFileBlame(repo: string, filePath: string): Promise<GitFileBlame | null> {
+  public async loadFileBlame(repo: string, filePath: string, commit?: string | null): Promise<GitFileBlame | null> {
     if (!repo) return null;
-    return this.dataSource.getFileBlame(repo, filePath);
+    return this.dataSource.getFileBlame(repo, filePath, null, undefined, commit || null);
   }
 }

@@ -87,7 +87,17 @@ class Dropdown {
 					if (this.openCallback !== null) this.openCallback();
 				}
 				this.elem.classList.toggle('dropdownOpen');
-				if (this.dropdownVisible) this.filterInput.focus();
+				if (this.dropdownVisible) {
+					this.menuElem.style.left = '';
+					const bounds = this.menuElem.getBoundingClientRect();
+					if (bounds.right > window.innerWidth - 8) {
+						const shift = Math.min(bounds.left - 8, bounds.right - (window.innerWidth - 8));
+						if (shift > 0) {
+							this.menuElem.style.left = -Math.round(shift) + 'px';
+						}
+					}
+					this.filterInput.focus();
+				}
 			} else if (this.dropdownVisible) {
 				if ((<HTMLElement>e.target).closest('.dropdown') !== this.elem) {
 					this.close();

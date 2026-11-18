@@ -518,12 +518,16 @@ class FindWidget {
 	 */
 	private update(scrollToCommit: boolean, goToCommitHash: string | null = this.getCurrentHash()) {
 		this.show(false);
-		this.requestSearchIfRequired(FindWidget.parseQuery(this.text));
+		const parsedQuery = FindWidget.parseQuery(this.text);
+		this.requestSearchIfRequired(parsedQuery);
 		this.clearMatches();
 		this.matches = [];
 		this.position = -1;
-		// When only the matches are shown, show the commits that match (all commits are shown while the file: & change: operators are being searched for)
-		this.view.setCommitFilter(this.isFiltering() ? this.getMatchingHashes(this.view.getLoadedCommits()) : null);
+		const waitingForBackendSearch = (parsedQuery.file.length > 0 || parsedQuery.change.length > 0) && this.searchHashes === null;
+		// Retain the existing commit filter while backend file:/change: search is in flight to avoid flashing all unfiltered commits
+		if (!(this.isFiltering() && waitingForBackendSearch)) {
+			this.view.setCommitFilter(this.isFiltering() ? this.getMatchingHashes(this.view.getLoadedCommits()) : null);
+		}
 		this.findMatches(goToCommitHash, scrollToCommit);
 		this.openCommitDetailsViewForCurrentMatchIfEnabled();
 	}

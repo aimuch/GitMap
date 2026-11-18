@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fffefb"/>
+      <stop offset="100%" stop-color="#f2ece1"/>
+    </linearGradient>
+    <linearGradient id="topSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect x="56" y="56" width="912" height="912" rx="206" ry="206" fill="url(#bgGrad)" stroke="#dcd3c2" stroke-width="14"/>
+  <rect x="63" y="63" width="898" height="898" rx="199" ry="199" fill="url(#topSheen)" pointer-events="none"/>
+  <g stroke="#e4ddd0" stroke-width="8" opacity="0.85">
+    <line x1="160" y1="336" x2="864" y2="336"/>
+    <line x1="160" y1="512" x2="864" y2="512"/>
+    <line x1="160" y1="688" x2="864" y2="688"/>
+    <line x1="336" y1="160" x2="336" y2="864"/>
+    <line x1="512" y1="160" x2="512" y2="864"/>
+    <line x1="688" y1="160" x2="688" y2="864"/>
+  </g>
+  <g filter="url(#softShadow)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 316 216 L 316 808" stroke="#0284c7" stroke-width="54"/>
+    <path d="M 216 512 L 512 512 L 708 708 L 708 808" stroke="#d97706" stroke-width="54"/>
+    <path d="M 316 708 L 512 512 L 708 316 L 708 216" stroke="#e11d48" stroke-width="54"/>
+  </g>
+  <g filter="url(#softShadow)">
+    <circle cx="316" cy="316" r="40" fill="#ffffff" stroke="#0284c7" stroke-width="26"/>
+    <circle cx="316" cy="708" r="40" fill="#ffffff" stroke="#e11d48" stroke-width="26"/>
+    <circle cx="708" cy="316" r="40" fill="#ffffff" stroke="#e11d48" stroke-width="26"/>
+    <circle cx="708" cy="708" r="40" fill="#ffffff" stroke="#d97706" stroke-width="26"/>
+    <circle cx="512" cy="512" r="68" fill="#ffffff" stroke="#1e293b" stroke-width="34"/>
+    <circle cx="512" cy="512" r="24" fill="#1e293b"/>
+  </g>
+</svg>

@@ -789,14 +789,13 @@ class GitGraphView {
 	}
 
 	public processLoadRepoInfoResponse(msg: GG.ResponseLoadRepoInfo) {
+		const refreshState = this.currentRepoRefreshState;
+		if (!refreshState.inProgress || refreshState.loadRepoInfoRefreshId !== msg.refreshId) return;
 		if (msg.error === null) {
-			const refreshState = this.currentRepoRefreshState;
-			if (refreshState.inProgress && refreshState.loadRepoInfoRefreshId === msg.refreshId) {
-				this.loadRepoInfo(msg.branches, msg.head, msg.remotes, msg.stashes, msg.upstreams, msg.isRepo);
-				this.renderUndo(msg.undo);
-				this.worktreeList.requestWorktrees();
-				this.operationBar.requestOperation();
-			}
+			this.loadRepoInfo(msg.branches, msg.head, msg.remotes, msg.stashes, msg.upstreams, msg.isRepo);
+			this.renderUndo(msg.undo);
+			this.worktreeList.requestWorktrees();
+			this.operationBar.requestOperation();
 		} else {
 			this.displayLoadDataError(t('Unable to load Repository Info'), msg.error);
 		}
@@ -807,11 +806,10 @@ class GitGraphView {
 	}
 
 	public processLoadCommitsResponse(msg: GG.ResponseLoadCommits) {
+		const refreshState = this.currentRepoRefreshState;
+		if (!refreshState.inProgress || refreshState.loadCommitsRefreshId !== msg.refreshId) return;
 		if (msg.error === null) {
-			const refreshState = this.currentRepoRefreshState;
-			if (refreshState.inProgress && refreshState.loadCommitsRefreshId === msg.refreshId) {
-				this.loadCommits(msg.commits, msg.head, msg.tags, msg.moreCommitsAvailable, msg.onlyFollowFirstParent, msg.fileHistory);
-			}
+			this.loadCommits(msg.commits, msg.head, msg.tags, msg.moreCommitsAvailable, msg.onlyFollowFirstParent, msg.fileHistory);
 		} else {
 			const error = this.gitBranches.length === 0 && msg.error.indexOf('bad revision \'HEAD\'') > -1
 				? t('There are no commits in this repository.')
@@ -1916,7 +1914,7 @@ class GitGraphView {
 	 * Get the top of the area of the view in which commits are visible: below the sticky controls, and the column headers when they're frozen.
 	 * @returns The vertical position (relative to the viewport, as rendered).
 	 */
-	private getVisibleCommitsTop() {
+	public getVisibleCommitsTop() {
 		const colHeaderElem = this.config.graph.freezeColumnHeaders ? document.querySelector('#tableColHeaders th') : null;
 		return Math.max(this.controlsElem.getBoundingClientRect().bottom, colHeaderElem !== null ? colHeaderElem.getBoundingClientRect().bottom : 0);
 	}
@@ -2384,6 +2382,14 @@ class GitGraphView {
 				} else if (this.findWidget.isVisible()) {
 					this.findWidget.close();
 					handledEvent(e);
+				} else if (this.cdvComparePending) {
+					this.cdvComparePending = false;
+					const compareElem = document.getElementById('cdvCompare');
+					if (compareElem !== null) {
+						alterClass(compareElem, CLASS_ACTIVE, false);
+						compareElem.innerHTML = SVG_ICONS.compare + t('Compare with…');
+					}
+					handledEvent(e);
 				} else if (this.expandedCommit !== null) {
 					this.closeCommitDetails(true);
 					handledEvent(e);
@@ -2577,8 +2583,16 @@ class GitGraphView {
 			}
 		});
 		this.tableElem.addEventListener('mousemove', (e: MouseEvent) => {
-			if (this.getRowActionsConfig().position === 'Pointer') this.rowActions.follow(e.clientX);
+			const commitElem = e.target instanceof Element ? <HTMLElement | null>e.target.closest('.commit') : null;
+			if (commitElem === null) {
+				this.rowActions.hide();
+			} else if (this.getRowActionsConfig().position === 'Pointer' || !this.rowActions.isShownFor(commitElem)) {
+				this.rowActions.show(commitElem, e.clientX);
+			}
 		});
+		this.viewElem.addEventListener('scroll', () => {
+			this.rowActions.hide();
+		}, { passive: true });
 		this.tableElem.addEventListener('mouseleave', (e: MouseEvent) => {
 			// The buttons float over the table (outside it), so moving onto them doesn't leave the row
 			if (this.rowActions.contains(e.relatedTarget)) return;

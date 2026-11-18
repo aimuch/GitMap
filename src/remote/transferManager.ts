@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { pipeline } from 'stream/promises';
 import { SFTPWrapper } from 'ssh2';
+import { StateMachine } from '../utils/fsm';
 import { quotePosixArg, sshManager } from './sshManager';
 
 /**
@@ -26,6 +27,8 @@ interface TransferItem {
   finished: boolean;
 }
 
+type TransferEvent = 'SCAN' | 'RUN' | 'PAUSE' | 'RESUME' | 'COMPLETE' | 'FAIL' | 'CANCEL' | 'UNDO' | 'RESTORE';
+
 interface TransferJob {
   id: string;
   direction: TransferDirection;
@@ -33,6 +36,8 @@ interface TransferJob {
   sources: string[];
   destDir: string;
   state: TransferState;
+  fsm: StateMachine<TransferState, TransferEvent>;
+  busyOp: 'cancelling' | 'undoing' | 'restoring' | null;
   /** State before an undo, to return to on restore. */
   stateBeforeUndo: TransferState | null;
   error: string | null;
@@ -48,6 +53,8 @@ interface TransferJob {
   speed: number;
   speedSample: { at: number; bytes: number } | null;
   abort: (() => void) | null;
+  runPromise: Promise<void> | null;
+  activePartialItem: TransferItem | null;
 }
 
 export interface TransferSummary {
@@ -118,14 +125,30 @@ function splitName(name: string): [string, string] {
   return dot > 0 ? [name.substring(0, dot), name.substring(dot)] : [name, ''];
 }
 
-async function uniqueName(dir: string, name: string, exists: (p: string) => Promise<boolean>, join: (a: string, b: string) => string): Promise<string> {
-  if (!(await exists(join(dir, name)))) return name;
+async function uniqueName(
+  dir: string,
+  name: string,
+  exists: (p: string) => Promise<boolean>,
+  join: (a: string, b: string) => string,
+  reserved: Set<string>
+): Promise<string> {
+  const firstFull = join(dir, name);
+  if (!reserved.has(firstFull) && !(await exists(firstFull))) {
+    reserved.add(firstFull);
+    return name;
+  }
   const [base, ext] = splitName(name);
   for (let i = 1; i < 1000; i++) {
     const candidate = `${base} (${i})${ext}`;
-    if (!(await exists(join(dir, candidate)))) return candidate;
+    const full = join(dir, candidate);
+    if (!reserved.has(full) && !(await exists(full))) {
+      reserved.add(full);
+      return candidate;
+    }
   }
-  return `${base} (${Date.now()})${ext}`;
+  const fallback = `${base} (${Date.now()})${ext}`;
+  reserved.add(join(dir, fallback));
+  return fallback;
 }
 
 async function localExists(p: string) {
@@ -158,13 +181,36 @@ export class TransferManager {
     const clean = sources.map((s) => String(s)).filter((s) => s.trim() !== '');
     if (clean.length === 0) throw new Error('Nothing to transfer.');
     if (!destDir) throw new Error('No destination folder.');
+    const id = 'tx-' + crypto.randomBytes(6).toString('hex');
+    const fsm = new StateMachine<TransferState, TransferEvent>({
+      name: 'sftpTransfer',
+      id,
+      initial: 'queued',
+      transitions: {
+        queued: { SCAN: 'scanning', RUN: 'running', PAUSE: 'paused', CANCEL: 'cancelled' },
+        scanning: { RUN: 'running', PAUSE: 'paused', CANCEL: 'cancelled', FAIL: 'failed' },
+        running: { PAUSE: 'paused', CANCEL: 'cancelled', COMPLETE: 'completed', FAIL: 'failed' },
+        paused: { RESUME: 'queued', CANCEL: 'cancelled' },
+        completed: { UNDO: 'undone' },
+        failed: { RESUME: 'queued', UNDO: 'undone' },
+        cancelled: { UNDO: 'undone' },
+        undone: {
+          RESTORE: ({ payload }) => (payload as TransferState) || 'completed'
+        }
+      },
+      onTransition: ({ to }) => {
+        job.state = to;
+      }
+    });
     const job: TransferJob = {
-      id: 'tx-' + crypto.randomBytes(6).toString('hex'),
+      id,
       direction,
       hostId,
       sources: clean,
       destDir,
       state: 'queued',
+      fsm,
+      busyOp: null,
       stateBeforeUndo: null,
       error: null,
       items: [],
@@ -177,7 +223,9 @@ export class TransferManager {
       finishedAt: null,
       speed: 0,
       speedSample: null,
-      abort: null
+      abort: null,
+      runPromise: null,
+      activePartialItem: null
     };
     this.jobs.set(job.id, job);
     this.pump();
@@ -187,10 +235,11 @@ export class TransferManager {
 
   public pause(id: string) {
     const job = this.get(id);
+    if (job.busyOp) return;
     if (job.state === 'queued') {
-      job.state = 'paused';
+      job.fsm.send('PAUSE');
     } else if (job.state === 'running' || job.state === 'scanning') {
-      job.state = 'paused';
+      job.fsm.send('PAUSE');
       job.abort?.();
     }
     this.notify(true);
@@ -199,8 +248,9 @@ export class TransferManager {
 
   public resume(id: string) {
     const job = this.get(id);
+    if (job.busyOp) return;
     if (job.state === 'paused' || job.state === 'failed') {
-      job.state = 'queued';
+      job.fsm.send('RESUME');
       job.error = null;
       this.pump();
       this.notify(true);
@@ -209,89 +259,139 @@ export class TransferManager {
 
   public async cancel(id: string) {
     const job = this.get(id);
-    if (job.state === 'completed' || job.state === 'cancelled' || job.state === 'undone') return;
-    const wasActive = job.state === 'running' || job.state === 'scanning';
-    job.state = 'cancelled';
-    job.finishedAt = Date.now();
-    if (wasActive) job.abort?.();
-    // Remove the partially transferred file
-    const partial = job.items.find((it) => !it.isDir && !it.finished && it.done > 0);
-    if (partial) {
-      try {
-        if (job.direction === 'download') await fs.promises.rm(partial.dest, { force: true });
-        else await sftpUnlink(await sshManager.getSftp(job.hostId), partial.dest);
-      } catch (_) {}
-      partial.done = 0;
+    if (job.busyOp || job.state === 'completed' || job.state === 'cancelled' || job.state === 'undone') return;
+    job.busyOp = 'cancelling';
+    try {
+      const wasActive = job.state === 'running' || job.state === 'scanning';
+      if (!job.fsm.send('CANCEL')) {
+        job.fsm.force('cancelled', 'cancel');
+      }
+      job.finishedAt = Date.now();
+      const partialBeforeAbort = job.activePartialItem || job.items.find((it) => !it.isDir && !it.finished && it.done > 0) || null;
+      if (wasActive || job.runPromise) {
+        job.abort?.();
+        if (job.runPromise) {
+          await job.runPromise.catch(() => {});
+        }
+      }
+      // Remove the partially transferred file after streams have closed
+      const partial = partialBeforeAbort && !partialBeforeAbort.finished ? partialBeforeAbort : job.items.find((it) => !it.isDir && !it.finished && it.done > 0);
+      if (partial) {
+        await this.deletePartialItem(job, partial);
+      }
+    } finally {
+      job.busyOp = null;
+      this.notify(true);
+      this.pump();
     }
-    this.notify(true);
-    this.pump();
+  }
+
+  private async deletePartialItem(job: TransferJob, partial: TransferItem) {
+    try {
+      if (job.direction === 'download') await fs.promises.rm(partial.dest, { force: true });
+      else await sftpUnlink(await sshManager.getSftp(job.hostId), partial.dest);
+    } catch (_) {}
+    partial.done = 0;
   }
 
   /** Move everything the transfer created into a trash folder (restorable). */
   public async undo(id: string) {
     const job = this.get(id);
+    if (job.busyOp) throw new Error('Transfer operation already in progress.');
     if (!(job.state === 'completed' || job.state === 'cancelled' || job.state === 'failed') || job.createdRoots.length === 0) {
       throw new Error('There is nothing to undo for this transfer.');
     }
-    if (job.direction === 'download') {
-      const trash = path.join(this.trashRoot, job.id);
-      await fs.promises.mkdir(trash, { recursive: true });
-      for (const root of job.createdRoots) {
-        if (!(await localExists(root))) continue;
-        await moveLocal(root, path.join(trash, path.basename(root)));
+    job.busyOp = 'undoing';
+    try {
+      if (job.direction === 'download') {
+        const trash = path.join(this.trashRoot, job.id);
+        await fs.promises.mkdir(trash, { recursive: true });
+        for (const root of job.createdRoots) {
+          if (!(await localExists(root))) continue;
+          await moveLocal(root, path.join(trash, path.basename(root)));
+        }
+        job.trashDir = trash;
+      } else {
+        const session = await sshManager.ensureConnected(job.hostId);
+        const trash = path.posix.join(session.homeDir || '/tmp', '.gitmap-trash', job.id);
+        const moves = job.createdRoots.map((root) => `if [ -e ${quotePosixArg(root)} ]; then mv ${quotePosixArg(root)} ${quotePosixArg(trash + '/')}; fi`).join('\n');
+        const res = await sshManager.execRemote(job.hostId, `mkdir -p ${quotePosixArg(trash)} && ${moves.length > 0 ? '{\n' + moves + '\n}' : 'true'}`);
+        if (res.code !== 0) throw new Error(res.stderr.trim() || 'Unable to move the uploaded files to the trash.');
+        job.trashDir = trash;
       }
-      job.trashDir = trash;
-    } else {
-      const trash = `$HOME/.gitmap-trash/${job.id}`;
-      const moves = job.createdRoots.map((root) => `if [ -e ${quotePosixArg(root)} ]; then mv ${quotePosixArg(root)} "${trash}/"; fi`).join('\n');
-      const res = await sshManager.execRemote(job.hostId, `mkdir -p "${trash}" && ${moves.length > 0 ? '{\n' + moves + '\n}' : 'true'} && printf '%s' "${trash}"`);
-      if (res.code !== 0) throw new Error(res.stderr.trim() || 'Unable to move the uploaded files to the trash.');
-      job.trashDir = res.stdout.trim();
+      job.stateBeforeUndo = job.state;
+      job.fsm.send('UNDO');
+      this.notify(true);
+    } finally {
+      job.busyOp = null;
     }
-    job.stateBeforeUndo = job.state;
-    job.state = 'undone';
-    this.notify(true);
   }
 
   /** Move the files of an undone transfer back from the trash. */
   public async restore(id: string) {
     const job = this.get(id);
+    if (job.busyOp) throw new Error('Transfer operation already in progress.');
     if (job.state !== 'undone' || job.trashDir === null) throw new Error('This transfer hasn\'t been undone.');
-    if (job.direction === 'download') {
-      for (const root of job.createdRoots) {
-        const inTrash = path.join(job.trashDir, path.basename(root));
-        if (!(await localExists(inTrash))) continue;
-        if (await localExists(root)) throw new Error(`"${root}" already exists, so it can't be restored.`);
-        await moveLocal(inTrash, root);
+    job.busyOp = 'restoring';
+    try {
+      if (job.direction === 'download') {
+        for (const root of job.createdRoots) {
+          const inTrash = path.join(job.trashDir, path.basename(root));
+          if (!(await localExists(inTrash))) continue;
+          if (await localExists(root)) throw new Error(`"${root}" already exists, so it can't be restored.`);
+          await moveLocal(inTrash, root);
+        }
+        await fs.promises.rm(job.trashDir, { recursive: true, force: true });
+      } else {
+        const lines = job.createdRoots.map((root) => {
+          const inTrash = path.posix.join(job.trashDir!, path.posix.basename(root));
+          return `if [ -e ${quotePosixArg(inTrash)} ]; then if [ -e ${quotePosixArg(root)} ]; then echo ${quotePosixArg(root + ' already exists')} >&2; exit 3; fi; mv ${quotePosixArg(inTrash)} ${quotePosixArg(root)}; fi`;
+        });
+        const res = await sshManager.execRemote(job.hostId, lines.join('\n') + `\nrmdir ${quotePosixArg(job.trashDir)} 2>/dev/null; true`);
+        if (res.code !== 0) throw new Error(res.stderr.trim() || 'Unable to restore the uploaded files.');
       }
-      await fs.promises.rm(job.trashDir, { recursive: true, force: true });
-    } else {
-      const lines = job.createdRoots.map((root) => {
-        const inTrash = path.posix.join(job.trashDir!, path.posix.basename(root));
-        return `if [ -e ${quotePosixArg(inTrash)} ]; then if [ -e ${quotePosixArg(root)} ]; then echo ${quotePosixArg(root + ' already exists')} >&2; exit 3; fi; mv ${quotePosixArg(inTrash)} ${quotePosixArg(root)}; fi`;
-      });
-      const res = await sshManager.execRemote(job.hostId, lines.join('\n') + `\nrmdir ${quotePosixArg(job.trashDir)} 2>/dev/null; true`);
-      if (res.code !== 0) throw new Error(res.stderr.trim() || 'Unable to restore the uploaded files.');
+      job.trashDir = null;
+      const restoreTarget = job.stateBeforeUndo || 'completed';
+      job.fsm.send('RESTORE', restoreTarget as any);
+      job.stateBeforeUndo = null;
+      this.notify(true);
+    } finally {
+      job.busyOp = null;
     }
-    job.trashDir = null;
-    job.state = job.stateBeforeUndo || 'completed';
-    job.stateBeforeUndo = null;
-    this.notify(true);
   }
 
-  /** Remove a finished transfer from the list (permanently deleting the trash of an undone transfer). */
+  /** Remove a finished or paused transfer from the list (cleaning up partial files and trash). */
   public async remove(id: string) {
     const job = this.get(id);
+    if (job.busyOp) throw new Error('Transfer operation already in progress.');
     if (job.state === 'running' || job.state === 'scanning' || job.state === 'queued') throw new Error('Pause or cancel the transfer first.');
+    if (job.runPromise) await job.runPromise.catch(() => {});
+    if (job.state === 'paused' || job.state === 'failed') {
+      for (const it of job.items) {
+        if (!it.isDir && !it.finished && it.done > 0) {
+          await this.deletePartialItem(job, it);
+        }
+      }
+    }
     await this.purgeTrash(job);
+    job.fsm.dispose();
     this.jobs.delete(id);
     this.notify(true);
   }
 
   public async clearFinished() {
     for (const job of Array.from(this.jobs.values())) {
-      if (job.state === 'completed' || job.state === 'cancelled' || job.state === 'undone') {
+      if (job.busyOp || job.runPromise) continue;
+      if (job.state === 'completed' || job.state === 'cancelled' || job.state === 'undone' || job.state === 'failed') {
+        if (job.state === 'failed') {
+          for (const it of job.items) {
+            if (!it.isDir && !it.finished && it.done > 0) {
+              await this.deletePartialItem(job, it);
+            }
+          }
+        }
         await this.purgeTrash(job);
+        job.fsm.dispose();
         this.jobs.delete(job.id);
       }
     }
@@ -314,9 +414,10 @@ export class TransferManager {
   public dispose() {
     for (const job of this.jobs.values()) {
       if (job.state === 'running' || job.state === 'scanning') {
-        job.state = 'paused';
+        job.fsm.send('PAUSE');
         job.abort?.();
       }
+      job.fsm.dispose();
     }
   }
 
@@ -335,17 +436,23 @@ export class TransferManager {
   }
 
   private pump() {
-    let running = Array.from(this.jobs.values()).filter((j) => j.state === 'running' || j.state === 'scanning').length;
-    const queued = Array.from(this.jobs.values()).filter((j) => j.state === 'queued').sort((a, b) => a.createdAt - b.createdAt);
+    let running = Array.from(this.jobs.values()).filter((j) => j.state === 'running' || j.state === 'scanning' || j.runPromise !== null).length;
+    const queued = Array.from(this.jobs.values())
+      .filter((j) => j.state === 'queued' && j.runPromise === null && !j.busyOp)
+      .sort((a, b) => a.createdAt - b.createdAt);
     for (const job of queued) {
       if (running >= MAX_CONCURRENT_JOBS) break;
       running++;
-      void this.run(job);
+      const p = this.run(job).finally(() => {
+        if (job.runPromise === p) job.runPromise = null;
+        this.pump();
+      });
+      job.runPromise = p;
     }
   }
 
   private async run(job: TransferJob) {
-    job.state = job.scanned ? 'running' : 'scanning';
+    job.fsm.send(job.scanned ? 'RUN' : 'SCAN');
     job.startedAt = job.startedAt || Date.now();
     job.speedSample = null;
     job.speed = 0;
@@ -361,7 +468,7 @@ export class TransferManager {
           throw new TransferInterrupted(stateOf(job) === 'cancelled' ? 'cancelled' : 'paused');
         }
         job.scanned = true;
-        job.state = 'running';
+        job.fsm.send('RUN');
         this.notify(true);
       }
       for (let i = 0; i < job.items.length; i++) {
@@ -378,14 +485,14 @@ export class TransferManager {
         item.finished = true;
         this.notify(false);
       }
-      job.state = 'completed';
+      job.fsm.send('COMPLETE');
       job.finishedAt = Date.now();
       job.speed = 0;
     } catch (err) {
       if (err instanceof TransferInterrupted || stateOf(job) === 'paused' || stateOf(job) === 'cancelled') {
         // Paused / cancelled: the state was already set by pause() / cancel()
       } else {
-        job.state = 'failed';
+        job.fsm.send('FAIL', undefined, { error: err instanceof Error ? err.message : String(err) });
         job.error = err instanceof Error ? err.message : String(err);
         job.finishedAt = Date.now();
       }
@@ -393,7 +500,6 @@ export class TransferManager {
     } finally {
       job.abort = null;
       this.notify(true);
-      this.pump();
     }
   }
 
@@ -401,7 +507,13 @@ export class TransferManager {
     const items: TransferItem[] = [];
     const roots: string[] = [];
     if (job.direction === 'upload') {
-      const destExists = async (p: string) => (await sftpStat(sftp, p)) !== null;
+      let existingRemoteNames: Set<string> | null = null;
+      try {
+        const list = await sftpReaddir(sftp, job.destDir);
+        existingRemoteNames = new Set(list.map((e) => path.posix.join(job.destDir, e.filename)));
+      } catch (_) {}
+      const destExists = async (p: string) =>
+        existingRemoteNames !== null ? existingRemoteNames.has(p) : (await sftpStat(sftp, p)) !== null;
       const walk = async (src: string, dest: string) => {
         if (job.state !== 'scanning') return;
         const st = await fs.promises.stat(src);
@@ -423,8 +535,9 @@ export class TransferManager {
           items.push({ src, dest, size: st.size, done: 0, isDir: false, finished: false });
         }
       };
+      const reserved = new Set<string>();
       for (const src of job.sources) {
-        const name = await uniqueName(job.destDir, path.basename(src), destExists, path.posix.join);
+        const name = await uniqueName(job.destDir, path.basename(src), destExists, path.posix.join, reserved);
         const dest = path.posix.join(job.destDir, name);
         roots.push(dest);
         await walk(src, dest);
@@ -450,8 +563,16 @@ export class TransferManager {
         }
       };
       await fs.promises.mkdir(job.destDir, { recursive: true });
+      let existingLocalNames: Set<string> | null = null;
+      try {
+        const names = await fs.promises.readdir(job.destDir);
+        existingLocalNames = new Set(names.map((n) => path.join(job.destDir, n)));
+      } catch (_) {}
+      const fastLocalExists = async (p: string) =>
+        existingLocalNames !== null ? existingLocalNames.has(p) : localExists(p);
+      const reserved = new Set<string>();
       for (const src of job.sources) {
-        const name = await uniqueName(job.destDir, path.posix.basename(src) || 'download', localExists, path.join);
+        const name = await uniqueName(job.destDir, path.posix.basename(src) || 'download', fastLocalExists, path.join, reserved);
         const dest = path.join(job.destDir, name);
         roots.push(dest);
         await walk(src, dest);
@@ -480,6 +601,7 @@ export class TransferManager {
     item.done = offset;
     if (offset >= item.size && item.size > 0) return;
 
+    job.activePartialItem = item;
     const reader = job.direction === 'download'
       ? sftp.createReadStream(item.src, { start: offset, highWaterMark: STREAM_CHUNK } as any)
       : fs.createReadStream(item.src, { start: offset, highWaterMark: STREAM_CHUNK });
@@ -500,6 +622,7 @@ export class TransferManager {
       await pipeline(reader as any, writer as any);
     } finally {
       job.abort = null;
+      job.activePartialItem = null;
     }
   }
 

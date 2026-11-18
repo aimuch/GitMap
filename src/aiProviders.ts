@@ -460,8 +460,8 @@ export function buildAiRequestBody(format: AiApiFormat, provider: string, model:
 				body.thinking = { type: thinkingOn ? 'enabled' : 'disabled' };
 			} else if (provider === AiProvider.DeepSeek) {
 				// DeepSeek switches thinking by model (deepseek-chat / deepseek-reasoner), not by a parameter
-			} else {
-				body.reasoning_effort = thinkingOn ? options.thinking : 'minimal';
+			} else if (thinkingOn) {
+				body.reasoning_effort = options.thinking;
 			}
 		}
 	}
@@ -717,6 +717,30 @@ function getPathOfUrl(url: string) {
 		return new URL(url).pathname;
 	} catch (_) {
 		return url;
+	}
+}
+
+/**
+ * Run a single prompt against the configured direct AI provider and collect the complete text reply.
+ */
+export async function completeAiPrompt(prompt: string): Promise<{ text: string; error: string | null }> {
+	const config = getDirectAiConfig();
+	if (config === null) {
+		return { text: '', error: t('Choose a provider whose API Git Map calls directly first.') };
+	}
+	const problem = await getDirectAiProblem(config);
+	if (problem !== null) {
+		return { text: '', error: problem.error };
+	}
+	const source = new vscode.CancellationTokenSource();
+	let text = '';
+	try {
+		const result = await streamAiCompletion(config, await getApiKey(config.provider), prompt, (part) => {
+			text += part;
+		}, source.token);
+		return { text: text.trim(), error: result.error };
+	} finally {
+		source.dispose();
 	}
 }
 

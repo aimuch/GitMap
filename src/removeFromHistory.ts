@@ -5,6 +5,7 @@ import { DataSource } from './dataSource';
 import { HistoryRemovalBlocker, HistoryRemovalPreview, HistoryRemovalResult, HistoryRewriteCancelledError, HistoryRewriter, UNCOMMITTED_CHANGES_ERROR } from './historyRewrite';
 import { t } from './l10n';
 import { Logger } from './logger';
+import { readRepoFileBuffer, writeRepoFileBuffer } from './remote/repoTransport';
 import { RepoManager } from './repoManager';
 import { getUndoManager } from './undoManager';
 import { getPathFromUri, getRepoName, showErrorMessage, showInformationMessage } from './utils';
@@ -470,14 +471,14 @@ function describeResult(name: string, preview: HistoryRemovalPreview, result: Hi
  * @param paths The paths (relative to the repository).
  */
 async function addToGitignore(repo: string, paths: ReadonlyArray<string>) {
-	const file = path.join(repo, '.gitignore');
-	const existing = await fs.promises.readFile(file, 'utf8').catch(() => '');
+	const existingBuf = await readRepoFileBuffer(repo, '.gitignore').catch(() => null);
+	const existing = existingBuf ? existingBuf.toString('utf8') : '';
 	const lines = existing.split(/\r?\n/);
 	// A pattern starting with "/" only matches the path from the root of the repository
 	const patterns = paths.map((filePath) => '/' + filePath.replace(/[\\*?[\]]/g, '\\$&').replace(/ $/, '\\ ')).filter((pattern) => !lines.includes(pattern));
 	if (patterns.length === 0) return;
 	const eol = existing.includes('\r\n') ? '\r\n' : '\n';
-	await fs.promises.writeFile(file, existing + (existing !== '' && !existing.endsWith('\n') ? eol : '') + patterns.join(eol) + eol);
+	await writeRepoFileBuffer(repo, '.gitignore', existing + (existing !== '' && !existing.endsWith('\n') ? eol : '') + patterns.join(eol) + eol);
 }
 
 /**

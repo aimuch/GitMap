@@ -1,13 +1,14 @@
 (function () {
   var STATE_KEY = 'gitmap.webview.state';
+  var targetOrigin = window.location.origin || '*';
 
   function applyTheme(theme) {
     if (!document.body) return;
+    document.body.classList.add('gitmap-standalone');
     document.body.classList.remove('vscode-dark', 'vscode-light');
     document.body.classList.add(theme === 'light' ? 'vscode-light' : 'vscode-dark');
   }
 
-  // The shell stores a preference ('system', 'dark' or 'light'); resolve 'system' from the OS appearance
   var initialTheme = 'system';
   try {
     initialTheme = localStorage.getItem('gitmap.theme') || 'system';
@@ -25,17 +26,46 @@
   }
 
   window.addEventListener('message', function (ev) {
+    if (window.location.origin && ev.origin && ev.origin !== window.location.origin) return;
     if (ev.data && ev.data.__gitmapTheme) {
       applyTheme(ev.data.__gitmapTheme);
       ev.stopImmediatePropagation();
     }
   }, true);
 
+  // Forward unhandled Escape & shell shortcuts to the parent window when focus is inside the iframe
+  document.addEventListener('keydown', function (ev) {
+    if (ev.defaultPrevented) return;
+    if (ev.key === 'Escape' && window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'gitmap-shell-key', key: 'Escape' }, targetOrigin);
+    } else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'k' || ev.key === 'K') && !ev.shiftKey) {
+      if (window.parent && window.parent !== window) {
+        ev.preventDefault();
+        window.parent.postMessage({ type: 'gitmap-shell-action', action: 'focus-search' }, targetOrigin);
+      }
+    } else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'p' || ev.key === 'P')) {
+      if (window.parent && window.parent !== window) {
+        ev.preventDefault();
+        window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-command-palette' }, targetOrigin);
+      }
+    } else if ((ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey && (ev.key === 'e' || ev.key === 'E')) {
+      if (window.parent && window.parent !== window) {
+        ev.preventDefault();
+        window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-repo-files' }, targetOrigin);
+      }
+    } else if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && ev.key === '\\') {
+      if (window.parent && window.parent !== window) {
+        ev.preventDefault();
+        window.parent.postMessage({ type: 'gitmap-shell-action', action: 'toggle-split-layout', shiftKey: !!ev.shiftKey }, targetOrigin);
+      }
+    }
+  });
+
   window.acquireVsCodeApi = function () {
     return {
       postMessage: function (msg) {
         if (window.parent && window.parent !== window) {
-          window.parent.postMessage({ type: 'gitmap-webview-req', payload: msg }, '*');
+          window.parent.postMessage({ type: 'gitmap-webview-req', payload: msg }, targetOrigin);
         }
       },
       getState: function () {

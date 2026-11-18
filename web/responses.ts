@@ -148,7 +148,7 @@ function observeResponseMessages(gitGraph: GitGraphView, imageResizer: ImageResi
 			case 'commitDetails':
 				if (msg.commitDetails !== null) {
 					gitGraph.showCommitDetails(msg.commitDetails, gitGraph.createFileTree(msg.commitDetails.fileChanges, msg.codeReview), msg.avatar, msg.codeReview, msg.codeReview !== null ? msg.codeReview.lastViewedFile : null, msg.refresh);
-				} else {
+				} else if (gitGraph.expandedCommit !== null && gitGraph.expandedCommit.loading && gitGraph.expandedCommit.compareWithHash === null) {
 					gitGraph.closeCommitDetails(true);
 					dialog.showError(t('Unable to load Commit Details'), msg.error, null, null);
 				}
@@ -156,7 +156,7 @@ function observeResponseMessages(gitGraph: GitGraphView, imageResizer: ImageResi
 			case 'compareCommits':
 				if (msg.error === null) {
 					gitGraph.showCommitComparison(msg.commitHash, msg.compareWithHash, msg.fileChanges, gitGraph.createFileTree(msg.fileChanges, msg.codeReview), msg.codeReview, msg.codeReview !== null ? msg.codeReview.lastViewedFile : null, msg.refresh);
-				} else {
+				} else if (gitGraph.expandedCommit !== null && gitGraph.expandedCommit.commitHash === msg.commitHash && gitGraph.expandedCommit.compareWithHash === msg.compareWithHash) {
 					gitGraph.closeCommitComparison(true);
 					dialog.showError(t('Unable to load Commit Comparison'), msg.error, null, null);
 				}

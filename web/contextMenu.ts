@@ -87,6 +87,19 @@ class ContextMenu {
 		menu.innerHTML = html;
 		frameElem.appendChild(menu);
 		const menuBounds = menu.getBoundingClientRect(), frameBounds = frameElem.getBoundingClientRect();
+		let topInset = 2;
+		if (frameElem.id === 'view') {
+			const controls = document.getElementById('controls');
+			const headers = document.getElementById('tableColHeaders');
+			const stickyBottom = Math.max(
+				controls !== null ? controls.getBoundingClientRect().bottom : 0,
+				headers !== null ? headers.getBoundingClientRect().bottom : 0
+			);
+			if (stickyBottom > frameBounds.top) {
+				topInset = Math.round(stickyBottom - frameBounds.top) + 4;
+			}
+		}
+		const minTopViewport = frameBounds.top + topInset;
 		const relativeX = event.pageX + menuBounds.width < frameBounds.right
 			? -2 // context menu fits to the right
 			: event.pageX - menuBounds.width > frameBounds.left
@@ -94,11 +107,11 @@ class ContextMenu {
 				: -2 - (menuBounds.width - (frameBounds.width - (event.pageX - frameBounds.left))); // Overlap the context menu horizontally with the cursor
 		const relativeY = event.pageY + menuBounds.height < frameBounds.bottom
 			? -2 // context menu fits below
-			: event.pageY - menuBounds.height > frameBounds.top
+			: event.pageY - menuBounds.height > minTopViewport
 				? 2 - menuBounds.height // context menu fits above
 				: -2 - (menuBounds.height - (frameBounds.height - (event.pageY - frameBounds.top))); // Overlap the context menu vertically with the cursor
 		menu.style.left = (frameElem.scrollLeft + Math.max(event.pageX - frameBounds.left + relativeX, 2)) + 'px';
-		menu.style.top = (frameElem.scrollTop + Math.max(event.pageY - frameBounds.top + relativeY, 2)) + 'px';
+		menu.style.top = (frameElem.scrollTop + Math.max(event.pageY - frameBounds.top + relativeY, topInset)) + 'px';
 		menu.style.opacity = '1';
 		this.elem = menu;
 		this.onClose = onClose;

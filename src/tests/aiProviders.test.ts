@@ -44,6 +44,7 @@ describe('AI request options', () => {
 		const opts = (s: object) => parseAiRequestSettings(AiProvider.OpenAI, s);
 		assert.deepEqual(buildAiRequestBody('chat', AiProvider.OpenAI, 'm', 'p', opts({ temperature: 0.2, maxTokens: 100, thinking: 'low', stream: false })),
 			{ model: 'm', messages: [{ role: 'user', content: 'p' }], temperature: 0.2, max_tokens: 100, reasoning_effort: 'low' });
+		assert.equal(buildAiRequestBody('chat', AiProvider.OpenAI, 'm', 'p', opts({ thinking: 'off', stream: false })).reasoning_effort, undefined);
 		assert.equal(buildAiRequestBody('chat', AiProvider.Qwen, 'm', 'p', opts({ thinking: 'off' })).enable_thinking, false);
 		assert.deepEqual(buildAiRequestBody('chat', AiProvider.Doubao, 'm', 'p', opts({ thinking: 'off' })).thinking, { type: 'disabled' });
 		const responses = buildAiRequestBody('responses', AiProvider.OpenAI, 'm', 'p', opts({ maxTokens: 50, thinking: 'high' }));

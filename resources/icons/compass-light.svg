@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fdff"/>
+      <stop offset="100%" stop-color="#dff1fc"/>
+    </linearGradient>
+    <linearGradient id="topSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect x="56" y="56" width="912" height="912" rx="206" ry="206" fill="url(#bgGrad)" stroke="#b6dcf2" stroke-width="14"/>
+  <rect x="63" y="63" width="898" height="898" rx="199" ry="199" fill="url(#topSheen)" pointer-events="none"/>
+  <circle cx="512" cy="512" r="334" fill="none" stroke="#93c5fd" stroke-width="18"/>
+  <circle cx="512" cy="512" r="256" fill="none" stroke="#93c5fd" stroke-width="8" stroke-dasharray="18 22" opacity="0.75"/>
+  <g stroke="#64748b" stroke-width="14" stroke-linecap="round">
+    <line x1="512" y1="146" x2="512" y2="188" stroke="#ea580c" stroke-width="20"/>
+    <line x1="512" y1="836" x2="512" y2="878"/>
+    <line x1="146" y1="512" x2="188" y2="512"/>
+    <line x1="836" y1="512" x2="878" y2="512"/>
+  </g>
+  <g filter="url(#softShadow)">
+    <path d="M 484 540 C 536 616, 588 646, 656 646" fill="none" stroke="#0d9488" stroke-width="48" stroke-linecap="round"/>
+    <line x1="348" y1="676" x2="628" y2="396" stroke="#0284c7" stroke-width="54" stroke-linecap="round"/>
+    <polygon points="712,312 586,360 664,438" fill="#ea580c"/>
+    <circle cx="348" cy="676" r="54" fill="#ffffff" stroke="#0284c7" stroke-width="32"/>
+    <circle cx="484" cy="540" r="58" fill="#ffffff" stroke="#0284c7" stroke-width="34"/>
+    <circle cx="656" cy="646" r="50" fill="#ffffff" stroke="#0d9488" stroke-width="30"/>
+  </g>
+</svg>

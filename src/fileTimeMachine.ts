@@ -196,7 +196,7 @@ export class FileTimeMachine extends Disposable {
 	}
 
 	private async getWorkingTreeStats(repo: string, filePath: string): Promise<{ additions: number, deletions: number }> {
-		const diffRes = await this.dataSource.getFileDiff(repo, UNCOMMITTED, 'HEAD', filePath, filePath).catch(() => null);
+		const diffRes = await this.getWorkingTreeDiff(repo, filePath).catch(() => null);
 		if (diffRes === null || diffRes.diff === '') return { additions: 0, deletions: 0 };
 		let additions = 0, deletions = 0;
 		const lines = diffRes.diff.split(/\r?\n/);
@@ -488,29 +488,29 @@ button{font:inherit;color:inherit}
 .ftmCollapsed{padding:4px 14px;margin:2px 0;background:color-mix(in srgb,var(--vscode-focusBorder,#0e7afe) 10%,transparent);color:var(--vscode-descriptionForeground);font-family:var(--vscode-font-family);font-size:11.5px;text-align:center;border-top:1px dashed rgba(128,128,128,.25);border-bottom:1px dashed rgba(128,128,128,.25)}
 .ftmEmpty{padding:28px 20px;color:var(--vscode-descriptionForeground)}
 
-/* Time Machine Right Scrubber Dock (modeled on camera/Time Machine vertical timeline) */
-.ftmRulerDock{flex:0 0 206px;display:flex;flex-direction:column;height:100%;background:#111318;color:#d6dce8;border-left:1px solid rgba(255,255,255,.08);user-select:none}
-.ftmZoomCapsule{margin:12px 14px 10px;height:34px;padding:0 10px;border-radius:17px;background:#1b1f27;border:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:8px;box-shadow:inset 0 1px 2px rgba(0,0,0,.4)}
-.ftmZoomBtn{width:22px;height:22px;border:0;background:transparent;color:#c9d1d9;font-size:18px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;padding:0}
-.ftmZoomBtn:hover{background:rgba(255,255,255,.1);color:#fff}
-.ftmZoomSlider{flex:1 1 auto;min-width:0;accent-color:#1a8cff;cursor:pointer;height:4px}
+/* Time Machine Right Scrubber Dock (theme-aware across Dark & Light modes) */
+.ftmRulerDock{flex:0 0 206px;display:flex;flex-direction:column;height:100%;background:var(--vscode-sideBar-background,#181a20);color:var(--vscode-foreground,#d6dce8);border-left:1px solid var(--vscode-panel-border,rgba(128,128,128,.22));user-select:none}
+.ftmZoomCapsule{margin:12px 14px 10px;height:34px;padding:0 10px;border-radius:17px;background:var(--vscode-editor-background,#1b1f27);border:1px solid var(--vscode-dropdown-border,rgba(128,128,128,.3));display:flex;align-items:center;gap:8px}
+.ftmZoomBtn{width:22px;height:22px;border:0;background:transparent;color:var(--vscode-foreground,#c9d1d9);font-size:18px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;padding:0}
+.ftmZoomBtn:hover{background:color-mix(in srgb,var(--vscode-foreground) 12%,transparent);color:var(--vscode-foreground)}
+.ftmZoomSlider{flex:1 1 auto;min-width:0;accent-color:var(--vscode-focusBorder,#1a8cff);cursor:pointer;height:4px}
 .ftmRulerScroll{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;position:relative}
 .ftmRulerTrack{position:relative;width:100%;min-height:100%;cursor:ns-resize;touch-action:none}
-.ftmRailBg{position:absolute;left:112px;top:24px;bottom:24px;width:8px;border-radius:4px;background:#343942}
-.ftmRailFill{position:absolute;left:112px;bottom:24px;width:8px;border-radius:0 0 4px 4px;background:linear-gradient(180deg,#1da1ff 0%,#0b4f8a 100%);box-shadow:0 0 10px rgba(29,161,255,.35)}
+.ftmRailBg{position:absolute;left:112px;top:24px;bottom:24px;width:8px;border-radius:4px;background:color-mix(in srgb,var(--vscode-foreground) 16%,transparent)}
+.ftmRailFill{position:absolute;left:112px;bottom:24px;width:8px;border-radius:0 0 4px 4px;background:linear-gradient(180deg,#1da1ff 0%,#0b5cab 100%);box-shadow:0 0 10px rgba(29,161,255,.3)}
 .ftmTicks{position:absolute;inset:0;pointer-events:none}
-.ftmMinorTick{position:absolute;left:98px;width:8px;height:1px;background:rgba(255,255,255,.2)}
+.ftmMinorTick{position:absolute;left:98px;width:8px;height:1px;background:color-mix(in srgb,var(--vscode-foreground) 22%,transparent)}
 .ftmCommitTick{position:absolute;left:0;right:0;height:20px;transform:translateY(-50%);display:flex;align-items:center;pointer-events:auto;cursor:pointer}
-.ftmCommitTick:hover .ftmTickLabel{color:#fff}
-.ftmTickLabel{width:84px;padding-right:6px;text-align:right;font-family:var(--vscode-editor-font-family);font-size:11px;color:#8e97a8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ftmTickMark{position:absolute;left:90px;width:16px;height:1.5px;background:rgba(255,255,255,.45)}
-.ftmCommitPip{position:absolute;left:113px;width:6px;height:6px;border-radius:50%;background:#6cb6ff;transform:translateY(-0.5px)}
+.ftmCommitTick:hover .ftmTickLabel{color:var(--vscode-foreground)}
+.ftmTickLabel{width:84px;padding-right:6px;text-align:right;font-family:var(--vscode-editor-font-family);font-size:11px;color:var(--vscode-descriptionForeground,#8e97a8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ftmTickMark{position:absolute;left:90px;width:16px;height:1.5px;background:color-mix(in srgb,var(--vscode-foreground) 38%,transparent)}
+.ftmCommitPip{position:absolute;left:113px;width:6px;height:6px;border-radius:50%;background:#3794ff;transform:translateY(-0.5px)}
 .ftmCommitTick.active .ftmCommitPip{background:#fff;box-shadow:0 0 0 3px #1da1ff}
 .ftmCommitTick.active .ftmTickLabel{opacity:0}
-.ftmCommitDelta{position:absolute;left:128px;right:8px;font-family:var(--vscode-editor-font-family);font-size:10.5px;color:#7d8697;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ftmPlayhead{position:absolute;left:0;right:0;height:2px;background:#1da1ff;box-shadow:0 0 8px rgba(29,161,255,.75);transform:translateY(-1px);pointer-events:none;z-index:4}
-.ftmPlayheadBadge{position:absolute;left:10px;top:50%;transform:translateY(-50%);padding:3px 9px;border-radius:7px;background:#188bff;color:#fff;font-weight:700;font-size:11px;letter-spacing:.03em;box-shadow:0 2px 8px rgba(0,0,0,.45);white-space:nowrap}
-.ftmRulerHint{padding:8px 12px;font-size:11px;line-height:1.35;color:#7a8291;border-top:1px solid rgba(255,255,255,.07);text-align:center}
+.ftmCommitDelta{position:absolute;left:128px;right:8px;font-family:var(--vscode-editor-font-family);font-size:10.5px;color:var(--vscode-descriptionForeground,#7d8697);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ftmPlayhead{position:absolute;left:0;right:0;height:2px;background:#1da1ff;box-shadow:0 0 8px rgba(29,161,255,.65);transform:translateY(-1px);pointer-events:none;z-index:4}
+.ftmPlayheadBadge{position:absolute;left:10px;top:50%;transform:translateY(-50%);padding:3px 9px;border-radius:7px;background:#0e70d1;color:#fff;font-weight:700;font-size:11px;letter-spacing:.03em;box-shadow:0 2px 8px rgba(0,0,0,.3);white-space:nowrap}
+.ftmRulerHint{padding:8px 12px;font-size:11px;line-height:1.35;color:var(--vscode-descriptionForeground,#7a8291);border-top:1px solid var(--vscode-panel-border,rgba(128,128,128,.22));text-align:center}
 `;
 
 const SCRIPT = `

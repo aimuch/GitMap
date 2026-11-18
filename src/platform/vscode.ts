@@ -110,7 +110,10 @@ export class Uri {
       return `ssh://${this.authority}${this.path}`;
     }
     if (process.platform === 'win32' && /^\/[a-zA-Z]:/.test(this.path)) {
-      return this.path.substring(1).replace(/\//g, '\\');
+      return this.path
+        .substring(1)
+        .replace(/^([A-Z]):/, (_, d: string) => d.toLowerCase() + ':')
+        .replace(/\//g, '\\');
     }
     return this.path;
   }
@@ -126,9 +129,12 @@ export class Uri {
   }
 
   public toString(): string {
-    const auth = this.authority ? `//${this.authority}` : this.scheme === 'file' ? '//' : '';
     const q = this.query ? `?${this.query}` : '';
     const f = this.fragment ? `#${this.fragment}` : '';
+    if (!this.scheme) {
+      return `${this.path}${q}${f}`;
+    }
+    const auth = this.authority ? `//${this.authority}` : this.scheme === 'file' ? '//' : '';
     return `${this.scheme}:${auth}${this.path}${q}${f}`;
   }
 
@@ -149,7 +155,7 @@ export class Uri {
     }
     let normalised = filePath.replace(/\\/g, '/');
     if (process.platform === 'win32' && /^[a-zA-Z]:/.test(normalised)) {
-      normalised = '/' + normalised;
+      normalised = '/' + normalised[0].toLowerCase() + normalised.substring(1);
     }
     return new Uri('file', '', normalised);
   }
@@ -246,6 +252,42 @@ export const version = '1.96.0';
 
 /* Persistent Storage Implementations */
 
+const atomicWriteQueues = new Map<string, Promise<void>>();
+let atomicTempCounter = 0;
+
+export function writeJsonAtomic(
+  filePath: string,
+  data: unknown,
+  options?: { mode?: number; dirMode?: number }
+): Promise<void> {
+  const prev = atomicWriteQueues.get(filePath) || Promise.resolve();
+  const next = prev
+    .catch(() => {})
+    .then(async () => {
+      const dir = path.dirname(filePath);
+      await fs.promises.mkdir(dir, { recursive: true, ...(options?.dirMode ? { mode: options.dirMode } : {}) });
+      if (options?.dirMode && process.platform !== 'win32') {
+        try {
+          await fs.promises.chmod(dir, options.dirMode);
+        } catch (_) {}
+      }
+      const tmpPath = `${filePath}.${process.pid}.${++atomicTempCounter}.tmp`;
+      const payload = JSON.stringify(data, null, 2);
+      await fs.promises.writeFile(tmpPath, payload, {
+        encoding: 'utf8',
+        ...(options?.mode ? { mode: options.mode } : {})
+      });
+      if (options?.mode && process.platform !== 'win32') {
+        try {
+          await fs.promises.chmod(tmpPath, options.mode);
+        } catch (_) {}
+      }
+      await fs.promises.rename(tmpPath, filePath);
+    });
+  atomicWriteQueues.set(filePath, next.catch(() => {}));
+  return next;
+}
+
 export interface Memento {
   keys(): readonly string[];
   get<T>(key: string): T | undefined;
@@ -280,10 +322,7 @@ export class JsonFileMemento implements Memento {
     } else {
       this.data[key] = value;
     }
-    try {
-      await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true });
-      await fs.promises.writeFile(this.filePath, JSON.stringify(this.data, null, 2), 'utf8');
-    } catch (_) {}
+    await writeJsonAtomic(this.filePath, this.data);
   }
 }
 
@@ -298,12 +337,20 @@ export interface SecretStorage {
   onDidChange: Event<SecretStorageChangeEvent>;
 }
 
+export interface SecretCipher {
+  isAvailable: () => boolean;
+  encrypt: (plainText: string) => Buffer;
+  decrypt: (encrypted: Buffer) => string;
+}
+
+const SECRET_ENC_PREFIX = 'enc:v1:';
+
 export class JsonSecretStorage implements SecretStorage {
   private secrets: { [key: string]: string } = {};
   private readonly emitter = new EventEmitter<SecretStorageChangeEvent>();
   public readonly onDidChange = this.emitter.event;
 
-  constructor(private readonly filePath: string) {
+  constructor(private readonly filePath: string, private readonly cipher?: SecretCipher) {
     try {
       if (fs.existsSync(filePath)) {
         this.secrets = JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -314,11 +361,25 @@ export class JsonSecretStorage implements SecretStorage {
   }
 
   public async get(key: string): Promise<string | undefined> {
-    return this.secrets[key];
+    const raw = this.secrets[key];
+    if (raw === undefined) return undefined;
+    if (raw.startsWith(SECRET_ENC_PREFIX)) {
+      if (!this.cipher || !this.cipher.isAvailable()) return undefined;
+      try {
+        return this.cipher.decrypt(Buffer.from(raw.substring(SECRET_ENC_PREFIX.length), 'base64'));
+      } catch (_) {
+        return undefined;
+      }
+    }
+    return raw;
   }
 
   public async store(key: string, value: string): Promise<void> {
-    this.secrets[key] = value;
+    if (this.cipher && this.cipher.isAvailable()) {
+      this.secrets[key] = SECRET_ENC_PREFIX + this.cipher.encrypt(value).toString('base64');
+    } else {
+      this.secrets[key] = value;
+    }
     await this.persist();
     this.emitter.fire({ key });
   }
@@ -330,10 +391,7 @@ export class JsonSecretStorage implements SecretStorage {
   }
 
   private async persist(): Promise<void> {
-    try {
-      await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true });
-      await fs.promises.writeFile(this.filePath, JSON.stringify(this.secrets, null, 2), { encoding: 'utf8', mode: 0o600 });
-    } catch (_) {}
+    await writeJsonAtomic(this.filePath, this.secrets, { mode: 0o600, dirMode: 0o700 });
   }
 }
 
@@ -402,15 +460,35 @@ export async function updateStandaloneSetting(fullKey: string, value: any): Prom
   } else {
     settingsData[fullKey] = value;
   }
-  try {
-    await fs.promises.mkdir(path.dirname(settingsFilePath), { recursive: true });
-    await fs.promises.writeFile(settingsFilePath, JSON.stringify(settingsData, null, 2), 'utf8');
-  } catch (_) {}
+  await writeJsonAtomic(settingsFilePath, settingsData);
   configChangeEmitter.fire({
     affectsConfiguration(section: string) {
       return fullKey === section || fullKey.startsWith(section + '.') || section.startsWith(fullKey + '.');
     }
   });
+  hostBridge.getHandlers().onSettingsChanged?.(getAllStandaloneSettings());
+}
+
+export async function updateStandaloneSettingsBatch(updates: { [fullKey: string]: any }): Promise<void> {
+  const changedKeys = Object.keys(updates);
+  if (changedKeys.length === 0) return;
+  for (const fullKey of changedKeys) {
+    const value = updates[fullKey];
+    if (value === undefined) {
+      delete settingsData[fullKey];
+    } else {
+      settingsData[fullKey] = value;
+    }
+  }
+  await writeJsonAtomic(settingsFilePath, settingsData);
+  configChangeEmitter.fire({
+    affectsConfiguration(section: string) {
+      return changedKeys.some(
+        (fullKey) => fullKey === section || fullKey.startsWith(section + '.') || section.startsWith(fullKey + '.')
+      );
+    }
+  });
+  hostBridge.getHandlers().onSettingsChanged?.(getAllStandaloneSettings());
 }
 
 function getNestedOrFlatValue(prefix: string, section: string): any {
@@ -468,6 +546,17 @@ function createRealFileSystemWatcher(globPattern: string | RelativePattern): Fil
       const recursive = process.platform === 'darwin' || process.platform === 'win32';
       fsWatcher = fs.watch(watchRoot, { recursive }, (eventType, filename) => {
         if (!filename) return;
+        const relNorm = filename.toString().replace(/\\/g, '/');
+        if (
+          relNorm === '.git/index.lock' ||
+          relNorm.startsWith('.git/objects/') ||
+          relNorm.startsWith('.git/logs/') ||
+          relNorm === 'node_modules' ||
+          relNorm.startsWith('node_modules/') ||
+          relNorm.includes('/node_modules/')
+        ) {
+          return;
+        }
         const fullPath = path.join(watchRoot!, filename.toString());
         const uri = Uri.file(fullPath);
         if (eventType === 'rename') {
@@ -481,6 +570,7 @@ function createRealFileSystemWatcher(globPattern: string | RelativePattern): Fil
         }
       });
       fsWatcher.on('error', () => {});
+      fsWatcher.unref?.();
     } catch (_) {}
   }
 
@@ -540,6 +630,8 @@ export interface WebviewPanel extends Disposable {
   reveal(viewColumn?: ViewColumn, preserveFocus?: boolean): void;
 }
 
+let panelIdCounter = 0;
+
 class StandaloneWebviewPanel implements WebviewPanel {
   public readonly viewType: string;
   public title: string;
@@ -565,7 +657,7 @@ class StandaloneWebviewPanel implements WebviewPanel {
     this.title = title;
     this.viewColumn = viewColumn;
     this.options = options;
-    this.panelId = `${viewType}-${Date.now()}`;
+    this.panelId = `${viewType}-${Date.now()}-${++panelIdCounter}`;
 
     const self = this;
     this.webview = {
@@ -583,7 +675,8 @@ class StandaloneWebviewPanel implements WebviewPanel {
           hostBridge.getHandlers().onVisualFileHistoryUpdated?.({
             title: self.title,
             html: val,
-            panelId: self.panelId
+            panelId: self.panelId,
+            viewType: self.viewType
           });
         }
       },
@@ -601,11 +694,11 @@ class StandaloneWebviewPanel implements WebviewPanel {
         const fsP = localResource.fsPath.replace(/\\/g, '/');
         const mediaMatch = fsP.match(/\/media\/([^/]+)$/);
         if (mediaMatch) {
-          return Uri.parse(`http://gitmap.local/media/${mediaMatch[1]}`);
+          return new Uri('', '', `/media/${mediaMatch[1]}`);
         }
         const resMatch = fsP.match(/\/resources\/([^/]+)$/);
         if (resMatch) {
-          return Uri.parse(`http://gitmap.local/resources/${resMatch[1]}`);
+          return new Uri('', '', `/resources/${resMatch[1]}`);
         }
         return localResource;
       }
@@ -624,12 +717,6 @@ class StandaloneWebviewPanel implements WebviewPanel {
     if (!this.visible) {
       this.visible = true;
       this.viewStateEmitter.fire({ webviewPanel: this });
-    } else if (this.viewType !== 'git-map' && this._html) {
-      hostBridge.getHandlers().onVisualFileHistoryUpdated?.({
-        title: this.title,
-        html: this._html,
-        panelId: this.panelId
-      });
     }
   }
 
@@ -656,6 +743,10 @@ export function dispatchMessageToGitMapPanel(msg: any): void {
 
 export function dispatchMessageToPanel(panelId: string, msg: any): void {
   activePanels.get(panelId)?.receiveFromClient(msg);
+}
+
+export function disposeStandalonePanel(panelId: string): void {
+  activePanels.get(panelId)?.dispose();
 }
 
 /* Commands Registry */
@@ -692,6 +783,10 @@ export const commands = {
     }
     if (command === 'workbench.action.openSettings') {
       hostBridge.getHandlers().onOpenSettingsUi?.(typeof rest[0] === 'string' ? rest[0] : undefined);
+      return undefined;
+    }
+    if (command === 'workbench.view.scm') {
+      hostBridge.getHandlers().onOpenScm?.(typeof rest[0] === 'string' ? rest[0] : undefined);
       return undefined;
     }
     if (command === 'vscode.diff') {
@@ -1014,6 +1109,7 @@ export const window = {
     const name = typeof options === 'string' ? options : options?.name || 'Git Terminal';
     const rawCwd = typeof options === 'object' && options?.cwd ? options.cwd : '';
     const cwd = rawCwd instanceof Uri ? rawCwd.fsPath : (rawCwd || '');
+    const shellPath = typeof options === 'object' && typeof options?.shellPath === 'string' ? options.shellPath : null;
     let pendingCmd: string | null = null;
     return {
       sendText(text: string) {
@@ -1023,7 +1119,8 @@ export const window = {
         hostBridge.getHandlers().onOpenTerminal?.({
           repo: cwd,
           name,
-          initialCommand: pendingCmd
+          initialCommand: pendingCmd,
+          shellPath
         });
       },
       dispose() {}

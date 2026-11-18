@@ -202,82 +202,96 @@ class SettingsWidget {
 			const displayLanguage = /^zh(-(cn|sg|hans.*))?$/i.test(appearance.displayLanguage) ? '简体中文' : /^en\b/i.test(appearance.displayLanguage) ? 'English' : appearance.displayLanguage;
 			const statusBarDisplay = appearance.statusBarItemDisplay === GG.StatusBarItemDisplay.Icon ? 'Icon' : appearance.statusBarItemDisplay === GG.StatusBarItemDisplay.Text ? 'Text' : 'Icon & Text';
 
-			let html = '<div class="settingsSection"><h3>' + MENU_ICONS.palette + t('Appearance · All Repositories') + '</h3>' +
-				'<div class="settingsLabel">' + t('Branch Line Colours') + '</div>' +
-				'<div class="settingsPresets">' + appearance.colourPresets.map((preset) => '<button type="button" class="settingsPreset' + (preset.name === appearance.colourPreset ? ' selected' : '') + '" data-preset="' + escapeHtml(preset.name) + '" aria-pressed="' + (preset.name === appearance.colourPreset) + '" tabindex="-1"><span class="settingsPresetColours">' + preset.colours.map((colour) => '<span style="background-color:' + escapeHtml(colour) + '"></span>').join('') + '</span><span class="settingsPresetName">' + escapeHtml(t(preset.name)) + '</span></button>').join('') + '</div>' +
-				'<div class="settingsRow"><span class="settingsLabel">' + t('Line Style') + '</span>' + segmented('graph.style', [['rounded', t('Rounded')], ['angular', t('Angular')]], initialState.config.graph.style === GG.GraphStyle.Angular ? 'angular' : 'rounded') + '</div>' +
-				'<div class="settingsRow"><span class="settingsLabel">' + t('Row Density') + '</span>' + segmented('graph.density', [['Comfortable', t('Comfortable')], ['Compact', t('Compact')]], initialState.config.graph.density === GG.GraphDensity.Compact ? 'Compact' : 'Comfortable') + '</div>' +
-				'<div class="settingsRow"><span class="settingsLabel">' + t('Commit Nodes') + '</span>' + segmented('graph.nodeStyle', [['Dot', t('Dot')], ['Avatar', t('Author Avatar')]], initialState.config.graph.nodeStyle === GG.GraphNodeStyle.Avatar ? 'Avatar' : 'Dot') + '</div>' +
-				'<div class="settingsRow"><span class="settingsLabel">' + t('Column Headers') + '</span>' + segmented('graph.freezeColumnHeaders', [['true', t('Frozen')], ['false', t('Scroll with the Commits')]], initialState.config.graph.freezeColumnHeaders ? 'true' : 'false') + '</div>' +
-				'<div class="settingsRow"><span class="settingsLabel">' + t('Footer') + '</span>' + segmented('graph.freezeFooter', [['true', t('Frozen')], ['false', t('Scroll with the Commits')]], initialState.config.graph.freezeFooter ? 'true' : 'false') + '</div>' +
-				'<div class="settingsRow"><span class="settingsLabel">' + t('Diff View') + '</span>' + segmented('diff.hideUnchangedRegions', [['false', t('Full File')], ['true', t('Changes Only')]], this.view.isHideUnchangedRegions() ? 'true' : 'false') + '</div>' +
-				'<div class="settingsRow"><span class="settingsLabel">' + t('Action Bar') + '</span>' + button('settingsCustomizeCdvActions', '', MENU_ICONS.settings + t('Customize Action Buttons') + ELLIPSIS) + '</div>' +
-				'<div class="settingsRow"><span class="settingsLabel">' + t('Row Hover Buttons') + '</span>' + button('settingsCustomizeRowActions', '', MENU_ICONS.settings + t('Customize Row Hover Buttons') + ELLIPSIS) + '</div>' +
-				'</div>';
+			const isStandaloneShell = document.body.classList.contains('gitmap-standalone');
+			let html = '';
 
-			html += '<div class="settingsSection"><h3>' + MENU_ICONS.globe + t('Language · All Repositories') + '</h3><div class="settingsChoices" data-setting="language">' +
-				[['Auto', t('Follow Visual Studio Code (Current: {0})', escapeHtml(displayLanguage))], ['English', 'English'], ['Simplified Chinese', '简体中文']].map((option) => '<label class="settingsChoice' + (appearance.language === option[0] ? ' selected' : '') + '"><input type="radio" name="settingsLanguage" value="' + option[0] + '"' + (appearance.language === option[0] ? ' checked' : '') + ' tabindex="-1"><span class="customRadio"></span>' + option[1] + '</label>').join('') +
-				'</div></div>';
+			if (isStandaloneShell) {
+				html += '<div class="settingsSection"><h3>' + MENU_ICONS.layout + t('Graph Layout & Toolbars') + '</h3>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Row Density') + '</span>' + segmented('graph.density', [['Comfortable', t('Comfortable')], ['Compact', t('Compact')]], initialState.config.graph.density === GG.GraphDensity.Compact ? 'Compact' : 'Comfortable') + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Column Headers') + '</span>' + segmented('graph.freezeColumnHeaders', [['true', t('Frozen')], ['false', t('Scroll with the Commits')]], initialState.config.graph.freezeColumnHeaders ? 'true' : 'false') + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Footer') + '</span>' + segmented('graph.freezeFooter', [['true', t('Frozen')], ['false', t('Scroll with the Commits')]], initialState.config.graph.freezeFooter ? 'true' : 'false') + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Diff View') + '</span>' + segmented('diff.hideUnchangedRegions', [['false', t('Full File')], ['true', t('Changes Only')]], this.view.isHideUnchangedRegions() ? 'true' : 'false') + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Action Bar') + '</span>' + button('settingsCustomizeCdvActions', '', MENU_ICONS.settings + t('Customize Action Buttons') + ELLIPSIS) + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Row Hover Buttons') + '</span>' + button('settingsCustomizeRowActions', '', MENU_ICONS.settings + t('Customize Row Hover Buttons') + ELLIPSIS) + '</div>' +
+					'</div>';
+			} else {
+				html += '<div class="settingsSection"><h3>' + MENU_ICONS.palette + t('Appearance · All Repositories') + '</h3>' +
+					'<div class="settingsLabel">' + t('Branch Line Colours') + '</div>' +
+					'<div class="settingsPresets">' + appearance.colourPresets.map((preset) => '<button type="button" class="settingsPreset' + (preset.name === appearance.colourPreset ? ' selected' : '') + '" data-preset="' + escapeHtml(preset.name) + '" aria-pressed="' + (preset.name === appearance.colourPreset) + '" tabindex="-1"><span class="settingsPresetColours">' + preset.colours.map((colour) => '<span style="background-color:' + escapeHtml(colour) + '"></span>').join('') + '</span><span class="settingsPresetName">' + escapeHtml(t(preset.name)) + '</span></button>').join('') + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Line Style') + '</span>' + segmented('graph.style', [['rounded', t('Rounded')], ['angular', t('Angular')]], initialState.config.graph.style === GG.GraphStyle.Angular ? 'angular' : 'rounded') + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Row Density') + '</span>' + segmented('graph.density', [['Comfortable', t('Comfortable')], ['Compact', t('Compact')]], initialState.config.graph.density === GG.GraphDensity.Compact ? 'Compact' : 'Comfortable') + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Commit Nodes') + '</span>' + segmented('graph.nodeStyle', [['Dot', t('Dot')], ['Avatar', t('Author Avatar')]], initialState.config.graph.nodeStyle === GG.GraphNodeStyle.Avatar ? 'Avatar' : 'Dot') + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Column Headers') + '</span>' + segmented('graph.freezeColumnHeaders', [['true', t('Frozen')], ['false', t('Scroll with the Commits')]], initialState.config.graph.freezeColumnHeaders ? 'true' : 'false') + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Footer') + '</span>' + segmented('graph.freezeFooter', [['true', t('Frozen')], ['false', t('Scroll with the Commits')]], initialState.config.graph.freezeFooter ? 'true' : 'false') + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Diff View') + '</span>' + segmented('diff.hideUnchangedRegions', [['false', t('Full File')], ['true', t('Changes Only')]], this.view.isHideUnchangedRegions() ? 'true' : 'false') + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Action Bar') + '</span>' + button('settingsCustomizeCdvActions', '', MENU_ICONS.settings + t('Customize Action Buttons') + ELLIPSIS) + '</div>' +
+					'<div class="settingsRow"><span class="settingsLabel">' + t('Row Hover Buttons') + '</span>' + button('settingsCustomizeRowActions', '', MENU_ICONS.settings + t('Customize Row Hover Buttons') + ELLIPSIS) + '</div>' +
+					'</div>';
 
-			html += '<div class="settingsSection"><h3>' + MENU_ICONS.layout + t('Status Bar · All Repositories') + '</h3><div class="settingsRow">' +
-				segmented('statusBarItemDisplay', [['Icon & Text', t('Icon & Text')], ['Icon', t('Icon Only')], ['Text', t('Text Only')]], statusBarDisplay) +
-				'<span class="settingsStatusBarPreview" title="' + t('Preview') + '">' + (statusBarDisplay !== 'Text' ? SVG_ICONS.logo : '') + (statusBarDisplay !== 'Icon' ? '<span>Git Map</span>' : '') + '</span>' +
-				'</div></div>';
+				html += '<div class="settingsSection"><h3>' + MENU_ICONS.globe + t('Language · All Repositories') + '</h3><div class="settingsChoices" data-setting="language">' +
+					[['Auto', t('Follow Visual Studio Code (Current: {0})', escapeHtml(displayLanguage))], ['English', 'English'], ['Simplified Chinese', '简体中文']].map((option) => '<label class="settingsChoice' + (appearance.language === option[0] ? ' selected' : '') + '"><input type="radio" name="settingsLanguage" value="' + option[0] + '"' + (appearance.language === option[0] ? ' checked' : '') + ' tabindex="-1"><span class="customRadio"></span>' + option[1] + '</label>').join('') +
+					'</div></div>';
 
-			const ai = this.ai;
-			const activePreset = ai.presets.find((p) => p.id === ai.provider) || ai.presets[0];
-			const isDirectAi = ai.provider !== 'VS Code';
-			const aiButtons = isDirectAi
-				? button('settingsSetAiApiKey', 'addBtn', MENU_ICONS.key + t('Set API Key') + ELLIPSIS) + (ai.hasApiKey ? button('settingsClearAiApiKey', 'removeBtn', MENU_ICONS.trash + t('Clear API Key')) : '')
-				: '';
-			const providerLabel = (preset: GG.AiProviderPresetInfo) => {
-				switch (preset.id) {
-					case 'VS Code': return t('VS Code (Built-in / Copilot)');
-					case 'Ollama': return t('Ollama (Local)');
-					case 'Magpie': return t('Magpie (Local Gateway)');
-					case 'CC Switch': return t('CC Switch (Local Routing)');
-					case 'OpenAI Compatible': return t('OpenAI Compatible');
-					default: return preset.name;
-				}
-			};
-			const modelPlaceholder = activePreset && activePreset.defaultModel !== ''
-				? t('Default: {0}', activePreset.defaultModel)
-				: ai.provider === 'Kimi' ? 'moonshot-v1-8k'
-					: ai.provider === 'Doubao' ? 'doubao-seed-1-6-250615 / ep-...'
-						: ai.provider === 'OpenAI' ? 'gpt-4o-mini'
-							: ai.provider === 'Ollama' ? 'qwen2.5-coder:7b'
-								: t('Model or endpoint ID');
-			const baseUrlPlaceholder = activePreset && activePreset.defaultBaseUrl !== ''
-				? activePreset.defaultBaseUrl
-				: 'https://api.example.com/v1';
-			const apiKeyStatus = ai.hasApiKey
-				? '<span class="settingsAiKeyStatus ok">' + escapeHtml(t('Saved in Visual Studio Code Secret Storage')) + '</span>'
-				: (activePreset && activePreset.requiresApiKey
-					? '<span class="settingsAiKeyStatus missing">' + escapeHtml(t('Not set — click "Set API Key…" above')) + '</span>'
-					: '<span class="settingsAiKeyStatus optional">' + escapeHtml(t('Not set (optional)')) + '</span>');
-			const aiCardBody = '<div class="settingsGrid two settingsAiGrid">' +
-				'<label class="settingsKey" for="settingsAiProvider">' + t('Provider:') + '</label>' +
-				'<select id="settingsAiProvider" class="settingsSelect">' + ai.presets.map((preset) => '<option value="' + escapeHtml(preset.id) + '"' + (preset.id === ai.provider ? ' selected' : '') + '>' + escapeHtml(providerLabel(preset)) + '</option>').join('') + '</select>' +
-				(isDirectAi
-					? '<label class="settingsKey" for="settingsAiModel">' + t('Model:') + '</label>' +
-					'<input id="settingsAiModel" type="text" class="settingsInput mono" value="' + escapeHtml(ai.model) + '" placeholder="' + escapeHtml(modelPlaceholder) + '" spellcheck="false">' +
-					'<label class="settingsKey" for="settingsAiBaseUrl">' + t('Base URL:') + '</label>' +
-					'<input id="settingsAiBaseUrl" type="text" class="settingsInput mono" value="' + escapeHtml(ai.baseUrl) + '" placeholder="' + escapeHtml(baseUrlPlaceholder) + '" spellcheck="false">' +
-					'<span class="settingsKey">' + t('API Key:') + '</span><span class="settingsValue">' + apiKeyStatus + '</span>'
-					: '') +
-				'</div>' +
-				(!isDirectAi ? '<p class="settingsDescription">' + t('Uses the language models provided in Visual Studio Code (e.g. GitHub Copilot Chat). No API URL or API key is needed.') + '</p>'
-					: ai.provider === 'Magpie' ? '<p class="settingsDescription">' + t('Requests go through the local gateway of Magpie, which calls the providers signed in to it. Keep Magpie running, and set a model it serves. No API key is needed.') + '</p>'
-						: ai.provider === 'CC Switch' ? '<p class="settingsDescription">' + t('Requests go through the local routing of CC Switch to the provider currently selected for Codex. Turn on local routing in CC Switch, and set a model that provider serves. No API key is needed.') + '</p>'
-							: '') +
-				(isDirectAi ? '<p class="settingsDescription"><span id="settingsAiAdvanced" class="settingsLink" tabindex="-1">' + t('API format, thinking, temperature & more…') + '</span></p>' : '');
-			html += '<div class="settingsSection" id="settingsAiSection"><h3>' + MENU_ICONS.sparkle + t('AI · All Repositories') + '</h3>' +
-				'<div class="settingsCheckboxes two">' +
-				'<span>' + checkbox('settingsAiCommitMessage', t('Generate Commit Messages'), t('Adds an action to generate commit messages from uncommitted changes in the Source Control view and the Git Map View.')) + '</span>' +
-				'<span>' + checkbox('settingsAiExplainCommit', t('Explain Commits'), t('Shows an "Explain" tab in the Commit Details View, where a language model explains the selected commit.')) + '</span>' +
-				'</div>' +
-				card(MENU_ICONS.sparkle + t('Language Model'), aiButtons, aiCardBody) +
-				'</div>';
+				html += '<div class="settingsSection"><h3>' + MENU_ICONS.layout + t('Status Bar · All Repositories') + '</h3><div class="settingsRow">' +
+					segmented('statusBarItemDisplay', [['Icon & Text', t('Icon & Text')], ['Icon', t('Icon Only')], ['Text', t('Text Only')]], statusBarDisplay) +
+					'<span class="settingsStatusBarPreview" title="' + t('Preview') + '">' + (statusBarDisplay !== 'Text' ? SVG_ICONS.logo : '') + (statusBarDisplay !== 'Icon' ? '<span>Git Map</span>' : '') + '</span>' +
+					'</div></div>';
+
+				const ai = this.ai;
+				const activePreset = ai.presets.find((p) => p.id === ai.provider) || ai.presets[0];
+				const isDirectAi = ai.provider !== 'VS Code';
+				const aiButtons = isDirectAi
+					? button('settingsSetAiApiKey', 'addBtn', MENU_ICONS.key + t('Set API Key') + ELLIPSIS) + (ai.hasApiKey ? button('settingsClearAiApiKey', 'removeBtn', MENU_ICONS.trash + t('Clear API Key')) : '')
+					: '';
+				const providerLabel = (preset: GG.AiProviderPresetInfo) => {
+					switch (preset.id) {
+						case 'VS Code': return t('VS Code (Built-in / Copilot)');
+						case 'Ollama': return t('Ollama (Local)');
+						case 'Magpie': return t('Magpie (Local Gateway)');
+						case 'CC Switch': return t('CC Switch (Local Routing)');
+						case 'OpenAI Compatible': return t('OpenAI Compatible');
+						default: return preset.name;
+					}
+				};
+				const modelPlaceholder = activePreset && activePreset.defaultModel !== ''
+					? t('Default: {0}', activePreset.defaultModel)
+					: ai.provider === 'Kimi' ? 'moonshot-v1-8k'
+						: ai.provider === 'Doubao' ? 'doubao-seed-1-6-250615 / ep-...'
+							: ai.provider === 'OpenAI' ? 'gpt-4o-mini'
+								: ai.provider === 'Ollama' ? 'qwen2.5-coder:7b'
+									: t('Model or endpoint ID');
+				const baseUrlPlaceholder = activePreset && activePreset.defaultBaseUrl !== ''
+					? activePreset.defaultBaseUrl
+					: 'https://api.example.com/v1';
+				const apiKeyStatus = ai.hasApiKey
+					? '<span class="settingsAiKeyStatus ok">' + escapeHtml(t('Saved in Secret Storage')) + '</span>'
+					: (activePreset && activePreset.requiresApiKey
+						? '<span class="settingsAiKeyStatus missing">' + escapeHtml(t('Not set — click "Set API Key…" above')) + '</span>'
+						: '<span class="settingsAiKeyStatus optional">' + escapeHtml(t('Not set (optional)')) + '</span>');
+				const aiCardBody = '<div class="settingsGrid two settingsAiGrid">' +
+					'<label class="settingsKey" for="settingsAiProvider">' + t('Provider:') + '</label>' +
+					'<select id="settingsAiProvider" class="settingsSelect">' + ai.presets.map((preset) => '<option value="' + escapeHtml(preset.id) + '"' + (preset.id === ai.provider ? ' selected' : '') + '>' + escapeHtml(providerLabel(preset)) + '</option>').join('') + '</select>' +
+					(isDirectAi
+						? '<label class="settingsKey" for="settingsAiModel">' + t('Model:') + '</label>' +
+						'<input id="settingsAiModel" type="text" class="settingsInput mono" value="' + escapeHtml(ai.model) + '" placeholder="' + escapeHtml(modelPlaceholder) + '" spellcheck="false">' +
+						'<label class="settingsKey" for="settingsAiBaseUrl">' + t('Base URL:') + '</label>' +
+						'<input id="settingsAiBaseUrl" type="text" class="settingsInput mono" value="' + escapeHtml(ai.baseUrl) + '" placeholder="' + escapeHtml(baseUrlPlaceholder) + '" spellcheck="false">' +
+						'<span class="settingsKey">' + t('API Key:') + '</span><span class="settingsValue">' + apiKeyStatus + '</span>'
+						: '') +
+					'</div>' +
+					(!isDirectAi ? '<p class="settingsDescription">' + t('Uses the language models provided in Visual Studio Code (e.g. GitHub Copilot Chat). No API URL or API key is needed.') + '</p>'
+						: ai.provider === 'Magpie' ? '<p class="settingsDescription">' + t('Requests go through the local gateway of Magpie, which calls the providers signed in to it. Keep Magpie running, and set a model it serves. No API key is needed.') + '</p>'
+							: ai.provider === 'CC Switch' ? '<p class="settingsDescription">' + t('Requests go through the local routing of CC Switch to the provider currently selected for Codex. Turn on local routing in CC Switch, and set a model that provider serves. No API key is needed.') + '</p>'
+								: '') +
+					(isDirectAi ? '<p class="settingsDescription"><span id="settingsAiAdvanced" class="settingsLink" tabindex="-1">' + t('API format, thinking, temperature & more…') + '</span></p>' : '');
+				html += '<div class="settingsSection" id="settingsAiSection"><h3>' + MENU_ICONS.sparkle + t('AI · All Repositories') + '</h3>' +
+					'<div class="settingsCheckboxes two">' +
+					'<span>' + checkbox('settingsAiCommitMessage', t('Generate Commit Messages'), t('Adds an action to generate commit messages from uncommitted changes in the Source Control view and the Git Map View.')) + '</span>' +
+					'<span>' + checkbox('settingsAiExplainCommit', t('Explain Commits'), t('Shows an "Explain" tab in the Commit Details View, where a language model explains the selected commit.')) + '</span>' +
+					'</div>' +
+					card(MENU_ICONS.sparkle + t('Language Model'), aiButtons, aiCardBody) +
+					'</div>';
+			}
 
 			html += '<div class="settingsSection"><h3>' + MENU_ICONS.repo + t('This Repository') + '</h3>' +
 				'<div class="settingsCheckboxes">' +
@@ -371,7 +385,7 @@ class SettingsWidget {
 
 			this.contentsElem.innerHTML = html;
 			this.repoNameElem.textContent = this.repo.name || getRepoName(this.currentRepo);
-			this.footerElem.innerHTML = '<button type="button" id="exportRepositoryConfig" class="settingsBtn" tabindex="-1">' + SVG_ICONS.package + t('Export Repository Configuration') + '</button><span id="openExtensionSettings" class="settingsLink" tabindex="-1">' + t('Open Git Map Extension Settings') + '</span>';
+			this.footerElem.innerHTML = '<button type="button" id="exportRepositoryConfig" class="settingsBtn" tabindex="-1">' + SVG_ICONS.package + t('Export Repository Configuration') + '</button><span id="openExtensionSettings" class="settingsLink" tabindex="-1">' + (isStandaloneShell ? t('Global Appearance, Tools & AI Settings…') : t('Open Git Map Extension Settings')) + '</span>';
 			this.renderAppearanceListeners();
 
 			const showRemoteBranchesElem = <HTMLInputElement>document.getElementById('settingsShowRemoteBranchesCheckbox');

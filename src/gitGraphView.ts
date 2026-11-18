@@ -1,7 +1,8 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { getDirectAiConfig, getHost, loadAiSettingsSnapshot, onDidChangeAiApiKey } from './aiProviders';
+import { AiProvider, getDirectAiConfig, getHost, loadAiSettingsSnapshot, onDidChangeAiApiKey } from './aiProviders';
 import { AvatarManager } from './avatarManager';
 import { getConfig } from './config';
 import { DataSource, GitConfigKey } from './dataSource';
@@ -11,6 +12,8 @@ import { ExtensionState } from './extensionState';
 import { buildFileIconTheme, findFileIconTheme, getFileIconThemeExtensionPaths, getLanguageFiles } from './fileIconTheme';
 import { GitFeatures } from './gitFeatures';
 import { Logger } from './logger';
+import { hostBridge } from './platform/hostBridge';
+import { isRemoteRepo, joinRepoPath } from './remote/repoTransport';
 import { RepoFileWatcher } from './repoFileWatcher';
 import { RepoManager } from './repoManager';
 import { UndoManager, getUndoManager } from './undoManager';
@@ -281,12 +284,29 @@ export class GitGraphView extends Disposable {
 		this.logger.log('Created Git Map View' + (loadViewTo !== null ? ' (active repo: ' + loadViewTo.repo + ')' : ''));
 	}
 
+	private static readonly READ_ONLY_COMMANDS = new Set<string>([
+		'loadRepoInfo',
+		'loadCommits',
+		'commitDetails',
+		'compareCommits',
+		'fetchAvatar',
+		'searchCommits',
+		'explainCommit',
+		'cancelExplainCommit',
+		'viewDiff',
+		'openFile',
+		'copyToClipboard',
+		'saveRepoState',
+		'exportGraph'
+	]);
+
 	/**
 	 * Respond to a message sent from the front-end.
 	 * @param msg The message that was received.
 	 */
 	private async respondToMessage(msg: RequestMessage) {
-		this.repoFileWatcher.mute();
+		const shouldMuteWatcher = !GitGraphView.READ_ONLY_COMMANDS.has(msg.command);
+		if (shouldMuteWatcher) this.repoFileWatcher.mute();
 		try {
 			await this.processMessage(msg);
 		} catch (error) {
@@ -295,7 +315,7 @@ export class GitGraphView extends Disposable {
 			this.logger.logError('Unable to process the "' + msg.command + '" message from the Git Map View: ' + reason);
 			showErrorMessage(t('An unexpected error occurred while running the command "{0}".', msg.command) + ' ' + reason);
 		} finally {
-			this.repoFileWatcher.unmute();
+			if (shouldMuteWatcher) this.repoFileWatcher.unmute();
 		}
 	}
 
@@ -579,7 +599,7 @@ export class GitGraphView extends Disposable {
 					isRepo: isRepo,
 					undo: this.undoManager.getUndo(msg.repo)
 				});
-				if (msg.repo !== this.currentRepo) {
+				if (msg.refreshId === this.loadRepoInfoRefreshId && msg.repo !== this.currentRepo) {
 					if (this.currentRepo !== null) {
 						this.cancelExplain();
 						this.cancelGenerateCommitMessage();
@@ -1006,7 +1026,7 @@ export class GitGraphView extends Disposable {
 				this.sendMessage({ command: 'savePatch', error: await this.savePatch(msg.repo, msg.kind, msg.hashes, msg.name, msg.copy) });
 				break;
 			case 'checkPatch': {
-				const uris = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(msg.repo), canSelectFiles: true, canSelectFolders: false, canSelectMany: false, openLabel: t('Apply Patch'), filters: { [t('Patches')]: ['patch', 'diff'], [t('All Files')]: ['*'] } });
+				const uris = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(isRemoteRepo(msg.repo) ? os.homedir() : msg.repo), canSelectFiles: true, canSelectFolders: false, canSelectMany: false, openLabel: t('Apply Patch'), filters: { [t('Patches')]: ['patch', 'diff'], [t('All Files')]: ['*'] } });
 				if (typeof uris === 'undefined' || uris.length === 0) {
 					this.sendMessage({ command: 'checkPatch', patch: null, error: null });
 				} else {
@@ -1025,7 +1045,7 @@ export class GitGraphView extends Disposable {
 				break;
 			case 'loadStashableFiles': {
 				const result = await this.gitFeatures.getStashableFiles(msg.repo);
-				this.sendMessage({ command: 'loadStashableFiles', files: result.files, filePath: msg.filePath, stagedSupported: this.dataSource.isStashStagedSupported(), error: result.error });
+				this.sendMessage({ command: 'loadStashableFiles', files: result.files, filePath: msg.filePath, stagedSupported: this.dataSource.isStashStagedSupported(msg.repo), error: result.error });
 				break;
 			}
 			case 'restoreFileFromStash': {
@@ -1081,6 +1101,10 @@ export class GitGraphView extends Disposable {
 				const scmResult = await fillScmCommitMessage(msg.repo, trimmed, true);
 				if (scmResult.filled) {
 					this.sendMessage({ command: 'useGeneratedCommitMessage', copiedToClipboard: false, error: scmResult.error });
+				} else if (hostBridge.getHandlers().onOpenScm) {
+					await copyToClipboard(trimmed).then(null, () => null);
+					hostBridge.getHandlers().onOpenScm!(trimmed);
+					this.sendMessage({ command: 'useGeneratedCommitMessage', copiedToClipboard: false, error: null });
 				} else {
 					const copyError = await copyToClipboard(trimmed);
 					if (copyError === null) vscode.window.setStatusBarMessage(t('Copied the generated commit message to the clipboard.'), 4000);
@@ -1113,7 +1137,8 @@ export class GitGraphView extends Disposable {
 	private async savePatch(repo: string, kind: 'commits' | 'stash' | 'uncommitted', hashes: ReadonlyArray<string>, name: string, copy: boolean): Promise<ErrorInfo> {
 		let targetPath: string | null = null;
 		if (!copy) {
-			const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(repo, name.replace(/[\\/:*?"<>|]/g, '-'))), saveLabel: t('Save Patch'), filters: { [t('Patches')]: ['patch'] } });
+			const baseDir = isRemoteRepo(repo) ? os.homedir() : repo;
+			const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(baseDir, name.replace(/[\\/:*?"<>|]/g, '-'))), saveLabel: t('Save Patch'), filters: { [t('Patches')]: ['patch'] } });
 			if (typeof uri === 'undefined') return null;
 			targetPath = uri.fsPath;
 		}
@@ -1142,7 +1167,7 @@ export class GitGraphView extends Disposable {
 	private async openAllChanges(repo: string, title: string, fromHash: string, toHash: string, fileChanges: ReadonlyArray<{ oldFilePath: string, newFilePath: string, type: GitFileStatus }>): Promise<ErrorInfo> {
 		await syncDiffHideUnchanged();
 		const resources = fileChanges.map((file) => [
-			vscode.Uri.file(path.join(repo, file.newFilePath)),
+			vscode.Uri.file(joinRepoPath(repo, file.newFilePath)),
 			encodeDiffDocUri(repo, file.oldFilePath, fromHash, file.type, DiffSide.Old),
 			encodeDiffDocUri(repo, file.newFilePath, toHash, file.type, DiffSide.New)
 		]);
@@ -1180,7 +1205,12 @@ export class GitGraphView extends Disposable {
 	 */
 	private async sendAiConfig() {
 		const ai = await loadAiSettingsSnapshot();
-		this.sendMessage({ command: 'updateAiConfig', ai: ai });
+		const filtered = {
+			...ai,
+			presets: ai.presets.filter((p) => p.id !== AiProvider.VsCode),
+			provider: ai.provider === AiProvider.VsCode ? AiProvider.DeepSeek : ai.provider
+		};
+		this.sendMessage({ command: 'updateAiConfig', ai: filtered });
 	}
 
 	/**
@@ -1466,8 +1496,8 @@ export class GitGraphView extends Disposable {
 				</div>
 				<div class="gmHint" data-zh="提示：按 ⌘K / Ctrl+K 搜索仓库与服务器" data-en="Tip: press ⌘K / Ctrl+K to search repositories and servers">${isZh ? '提示：按 ⌘K / Ctrl+K 搜索仓库与服务器' : 'Tip: press ⌘K / Ctrl+K to search repositories and servers'}</div>
 			</div>
-			<script nonce="${nonce}" src="/webview-bridge.js"></script>
-			<script nonce="${nonce}">(function(){ var lang = null; try { lang = localStorage.getItem('gitmap.lang'); } catch (e) {} if (lang === 'zh' || lang === 'en') { document.querySelectorAll('[data-zh]').forEach(function(el){ el.textContent = el.getAttribute('data-' + lang); }); } document.getElementById('openLocalRepoBtn').addEventListener('click', function(){ window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-local-modal' }, '*'); }); document.getElementById('openRemoteRepoBtn').addEventListener('click', function(){ window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-ssh-modal' }, '*'); }); })();</script>
+				<script nonce="${nonce}" src="/webview-bridge.js"></script>
+				<script nonce="${nonce}">(function(){ var lang = null; try { lang = localStorage.getItem('gitmap.lang'); } catch (e) {} if (lang === 'zh' || lang === 'en') { document.querySelectorAll('[data-zh]').forEach(function(el){ el.textContent = el.getAttribute('data-' + lang); }); } var tgt = window.location.origin || '*'; document.getElementById('openLocalRepoBtn').addEventListener('click', function(){ window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-local-modal' }, tgt); }); document.getElementById('openRemoteRepoBtn').addEventListener('click', function(){ window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-ssh-modal' }, tgt); }); })();</script>
 			</body>`;
 		}
 		this.isGraphViewLoaded = numRepos > 0;

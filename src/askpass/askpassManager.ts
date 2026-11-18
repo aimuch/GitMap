@@ -37,7 +37,13 @@ export class AskpassManager extends Disposable {
 		this.ipcHandlePath = getIPCHandlePath(getNonce());
 		this.server = http.createServer((req, res) => this.onRequest(req, res));
 		try {
-			this.server.listen(this.ipcHandlePath);
+			this.server.listen(this.ipcHandlePath, () => {
+				if (process.platform !== 'win32') {
+					try {
+						fs.chmodSync(this.ipcHandlePath, 0o600);
+					} catch (_) { }
+				}
+			});
 			this.server.on('error', () => { });
 		} catch (err) {
 			this.enabled = false;
@@ -73,7 +79,7 @@ export class AskpassManager extends Disposable {
 				res.end();
 				return;
 			}
-			vscode.window.showInputBox({ placeHolder: data.request, prompt: 'Git Map: ' + data.host, password: /password/i.test(data.request), ignoreFocusOut: true }).then(result => {
+			vscode.window.showInputBox({ placeHolder: data.request, prompt: 'Git Map: ' + data.host, password: /password|passphrase|token|secret|pin|code/i.test(data.request), ignoreFocusOut: true }).then(result => {
 				res.writeHead(200);
 				res.end(JSON.stringify(result || ''));
 			}, () => {
@@ -90,16 +96,18 @@ export class AskpassManager extends Disposable {
 		}
 
 		const askpassDir = __dirname.replace('app.asar', 'app.asar.unpacked');
+		const launcher = process.platform === 'win32' ? 'askpass.bat' : 'askpass.sh';
+		const emptyLauncher = process.platform === 'win32' ? 'askpass-empty.bat' : 'askpass-empty.sh';
 		return this.enabled
 			? {
 				ELECTRON_RUN_AS_NODE: '1',
-				GIT_ASKPASS: path.join(askpassDir, 'askpass.sh'),
+				GIT_ASKPASS: path.join(askpassDir, launcher),
 				VSCODE_GIT_GRAPH_ASKPASS_NODE: process.execPath,
 				VSCODE_GIT_GRAPH_ASKPASS_MAIN: path.join(askpassDir, 'askpassMain.js'),
 				VSCODE_GIT_GRAPH_ASKPASS_HANDLE: this.ipcHandlePath
 			}
 			: {
-				GIT_ASKPASS: path.join(askpassDir, 'askpass-empty.sh')
+				GIT_ASKPASS: path.join(askpassDir, emptyLauncher)
 			};
 	}
 }

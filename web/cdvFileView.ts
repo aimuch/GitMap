@@ -250,6 +250,98 @@ class CdvFileView {
 			triggerOpenFile(getFileOfFileElem(expandedCommit.fileChanges, fileElem), fileElem);
 		});
 
+		// Mouse-following floating action pill for Changed Files in Commit Details View
+		const filesElem = getCdvFileViewElem();
+		if (filesElem !== null) {
+			filesElem.classList.add('hasFloatingFileBar');
+			let barElem = document.getElementById('cdvFileFloatingBar');
+			if (barElem === null) {
+				barElem = document.createElement('div');
+				barElem.id = 'cdvFileFloatingBar';
+				barElem.className = 'hidden';
+				barElem.setAttribute('role', 'toolbar');
+			}
+			filesElem.appendChild(barElem);
+
+			let currentRecord: HTMLElement | null = null;
+			const hideBar = () => {
+				if (currentRecord !== null) currentRecord.classList.remove('rowActionsTarget');
+				currentRecord = null;
+				barElem!.classList.add('hidden');
+			};
+			const placeBar = (clientX: number, updateVertical: boolean) => {
+				if (currentRecord === null || barElem!.classList.contains('hidden')) return;
+				const hostRect = filesElem.getBoundingClientRect();
+				const rowRect = currentRecord.getBoundingClientRect();
+				const barW = barElem!.offsetWidth || 84;
+				const barH = barElem!.offsetHeight || 24;
+				const minL = 10;
+				const maxL = Math.max(minL, hostRect.width - barW - 14);
+				const relX = clientX - hostRect.left;
+				let left = relX + 14;
+				if (left > maxL) left = relX - 14 - barW;
+				left = Math.max(minL, Math.min(left, maxL));
+				barElem!.style.left = Math.round(left + filesElem.scrollLeft) + 'px';
+				if (updateVertical) {
+					const top = rowRect.top - hostRect.top + filesElem.scrollTop + (rowRect.height - barH) / 2;
+					barElem!.style.top = Math.round(top) + 'px';
+				}
+			};
+			filesElem.onmousemove = (ev: MouseEvent) => {
+				const targetEl = ev.target instanceof Element ? ev.target : null;
+				if (targetEl && barElem!.contains(targetEl)) return;
+				const rec = targetEl ? <HTMLElement | null>targetEl.closest('.fileTreeFileRecord') : null;
+				const expandedCommit = this.view.expandedCommit;
+				if (rec === null || expandedCommit === null || expandedCommit.fileChanges === null) {
+					hideBar();
+					return;
+				}
+				if (rec === currentRecord && !barElem!.classList.contains('hidden')) {
+					const bRect = barElem!.getBoundingClientRect();
+					if (ev.clientX < bRect.left - 24 || ev.clientX > bRect.right + 24) {
+						placeBar(ev.clientX, false);
+					}
+					return;
+				}
+				if (currentRecord !== null) currentRecord.classList.remove('rowActionsTarget');
+				currentRecord = rec;
+				currentRecord.classList.add('rowActionsTarget');
+				const file = getFileOfFileElem(expandedCommit.fileChanges, rec);
+				const commitOrder = this.view.getCommitOrder(expandedCommit.commitHash, expandedCommit.compareWithHash === null ? expandedCommit.commitHash : expandedCommit.compareWithHash);
+				const isUncommitted = commitOrder.to === UNCOMMITTED;
+				const textFile = file.additions !== null && file.deletions !== null;
+				const diffPossible = file.type === GG.GitFileStatus.Untracked || textFile;
+				const copyTitle = escapeHtml(t('Copy Absolute File Path to Clipboard'));
+				const revTitle = escapeHtml(t('View File at this Revision'));
+				const openTitle = escapeHtml(t('Open File'));
+				let html = '<button type="button" class="rowAction" data-cdv-act="copy" title="' + copyTitle + '" aria-label="' + copyTitle + '">' + SVG_ICONS.copy + '</button>';
+				if (file.type !== GG.GitFileStatus.Deleted) {
+					if (diffPossible && !isUncommitted) {
+						html += '<button type="button" class="rowAction" data-cdv-act="rev" title="' + revTitle + '" aria-label="' + revTitle + '">' + SVG_ICONS.commit + '</button>';
+					}
+					html += '<button type="button" class="rowAction" data-cdv-act="open" title="' + openTitle + '" aria-label="' + openTitle + '">' + SVG_ICONS.openFile + '</button>';
+				}
+				barElem!.innerHTML = html;
+				barElem!.classList.remove('hidden');
+				placeBar(ev.clientX, true);
+			};
+			filesElem.onmouseleave = () => hideBar();
+			filesElem.onscroll = () => hideBar();
+			const cdvContentElem = document.getElementById('cdvContent');
+			if (cdvContentElem !== null) cdvContentElem.onscroll = () => hideBar();
+			barElem.onclick = (ev: MouseEvent) => {
+				handledEvent(ev);
+				const btn = ev.target instanceof Element ? <HTMLElement | null>ev.target.closest('[data-cdv-act]') : null;
+				const expandedCommit = this.view.expandedCommit;
+				if (btn === null || currentRecord === null || expandedCommit === null || expandedCommit.fileChanges === null) return;
+				const file = getFileOfFileElem(expandedCommit.fileChanges, currentRecord);
+				const act = btn.dataset.cdvAct;
+				if (act === 'copy') triggerCopyFilePath(file, true);
+				else if (act === 'rev') triggerViewFileAtRevision(file, currentRecord);
+				else if (act === 'open') triggerOpenFile(file, currentRecord);
+			};
+		}
+
 		addListenerToClass('fileTreeFileRecord', 'contextmenu', (e: Event) => {
 			handledEvent(e);
 			const expandedCommit = this.view.expandedCommit;

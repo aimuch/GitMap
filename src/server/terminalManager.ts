@@ -2,7 +2,9 @@ import * as cp from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
+import { Writable } from 'stream';
 import { ClientChannel } from 'ssh2';
+import * as vscode from '../platform/vscode';
 import { parseRemoteRepo } from '../remote/repoTransport';
 import { sshManager } from '../remote/sshManager';
 
@@ -17,25 +19,76 @@ export interface TerminalSessionInfo {
 
 interface ActiveTerminal {
   info: TerminalSessionInfo;
+  owner: unknown;
+  onData: (id: string, chunk: string) => void;
+  onExit: (id: string, code: number) => void;
+  scrollback: string;
+  orphanTimer: NodeJS.Timeout | null;
   write: (data: string) => void;
   resize: (cols: number, rows: number) => void;
   kill: () => void;
 }
 
-function findPython3(): string | null {
+const MAX_TERMINAL_SESSIONS = 16;
+const MAX_SCROLLBACK_CHARS = 65536;
+
+let cachedPython3: string | null | undefined = undefined;
+
+function canSafelyProbeAppleStub(candidate: string): boolean {
+  if (process.platform !== 'darwin' || candidate !== '/usr/bin/python3') return true;
+  // Avoid triggering macOS GUI "command line developer tools" popup when CLT isn't installed
+  return (
+    fs.existsSync('/Library/Developer/CommandLineTools/usr/bin/python3') ||
+    fs.existsSync('/Applications/Xcode.app/Contents/Developer/usr/bin/python3')
+  );
+}
+
+function findWorkingPython3(): string | null {
   if (process.platform === 'win32') return null;
-  for (const candidate of ['/usr/bin/python3', '/opt/homebrew/bin/python3', '/usr/local/bin/python3']) {
-    if (fs.existsSync(candidate)) return candidate;
+  if (cachedPython3 !== undefined) return cachedPython3;
+
+  const candidates = [
+    '/opt/homebrew/bin/python3',
+    '/usr/local/bin/python3',
+    '/usr/bin/python3'
+  ];
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate) || !canSafelyProbeAppleStub(candidate)) continue;
+    try {
+      const check = cp.spawnSync(candidate, ['-c', 'import pty, select, fcntl, termios'], {
+        timeout: 2000,
+        stdio: 'ignore'
+      });
+      if (check.status === 0) {
+        cachedPython3 = candidate;
+        return candidate;
+      }
+    } catch (_) {}
   }
+  cachedPython3 = null;
   return null;
 }
 
-/**
- * Manages built-in interactive terminal sessions (Local PTY/Shell & Remote SSH PTY)
- * as well as launching external system terminals.
- */
-/** Upper bound on concurrent built-in terminal sessions, so a runaway client can't exhaust the process table (EAGAIN). */
-const MAX_TERMINAL_SESSIONS = 12;
+function resolveDefaultLocalShell(explicitShellPath?: string | null): string {
+  if (explicitShellPath && explicitShellPath.trim() && fs.existsSync(explicitShellPath.trim())) {
+    return explicitShellPath.trim();
+  }
+  const configured = vscode.workspace.getConfiguration('git-map').get<string>('integratedTerminalShell', '');
+  if (configured && configured.trim() && fs.existsSync(configured.trim())) {
+    return configured.trim();
+  }
+  if (process.platform === 'win32') {
+    for (const ps of ['pwsh.exe', 'powershell.exe']) {
+      try {
+        const res = cp.spawnSync('where.exe', [ps], { timeout: 1500, encoding: 'utf8' });
+        const first = (res.stdout || '').split(/\r?\n/)[0]?.trim();
+        if (res.status === 0 && first) return first;
+      } catch (_) {}
+    }
+    return process.env.COMSPEC || 'cmd.exe';
+  }
+  return process.env.SHELL || '/bin/zsh';
+}
 
 export class TerminalManager {
   private readonly sessions = new Map<string, ActiveTerminal>();
@@ -48,16 +101,67 @@ export class TerminalManager {
     rows: number,
     initialCommand: string | null | undefined,
     onData: (id: string, chunk: string) => void,
-    onExit: (id: string, code: number) => void
+    onExit: (id: string, code: number) => void,
+    owner?: unknown,
+    shellPath?: string | null
   ): Promise<TerminalSessionInfo> {
     if (this.sessions.size + this.pendingCreates >= MAX_TERMINAL_SESSIONS) {
       throw new Error(`Too many open terminals (limit ${MAX_TERMINAL_SESSIONS}). Close some terminal tabs first.`);
     }
     this.pendingCreates++;
     try {
-      return await this.createSessionInner(repo, name, cols, rows, initialCommand, onData, onExit);
+      return await this.createSessionInner(repo, name, cols, rows, initialCommand, onData, onExit, owner, shellPath);
     } finally {
       this.pendingCreates--;
+    }
+  }
+
+  public listSessions(): TerminalSessionInfo[] {
+    return Array.from(this.sessions.values()).map((s) => s.info);
+  }
+
+  /**
+   * Re-bind an existing live terminal session to a newly reconnected WebSocket client.
+   */
+  public attachSession(
+    id: string,
+    owner: unknown,
+    onData: (id: string, chunk: string) => void,
+    onExit: (id: string, code: number) => void
+  ): { session: TerminalSessionInfo; scrollback: string } | null {
+    const active = this.sessions.get(id);
+    if (!active) return null;
+    if (active.orphanTimer) {
+      clearTimeout(active.orphanTimer);
+      active.orphanTimer = null;
+    }
+    active.owner = owner;
+    active.onData = onData;
+    active.onExit = onExit;
+    return { session: active.info, scrollback: active.scrollback };
+  }
+
+  /**
+   * When a WebSocket disconnects, give it a brief grace window to reconnect and call `term:attach`;
+   * if it does not return (e.g. page reload or closed tab), clean up its PTY/SSH sessions automatically.
+   */
+  public detachOwner(owner: unknown, graceMs: number = 6000) {
+    for (const [id, active] of this.sessions.entries()) {
+      if (active.owner !== owner) continue;
+      if (active.orphanTimer) clearTimeout(active.orphanTimer);
+      active.orphanTimer = setTimeout(() => {
+        active.orphanTimer = null;
+        if (active.owner === owner) {
+          this.close(id);
+        }
+      }, graceMs);
+    }
+  }
+
+  private appendScrollback(active: ActiveTerminal, chunk: string) {
+    active.scrollback += chunk;
+    if (active.scrollback.length > MAX_SCROLLBACK_CHARS) {
+      active.scrollback = active.scrollback.slice(active.scrollback.length - MAX_SCROLLBACK_CHARS);
     }
   }
 
@@ -68,7 +172,9 @@ export class TerminalManager {
     rows: number,
     initialCommand: string | null | undefined,
     onData: (id: string, chunk: string) => void,
-    onExit: (id: string, code: number) => void
+    onExit: (id: string, code: number) => void,
+    owner?: unknown,
+    shellPath?: string | null
   ): Promise<TerminalSessionInfo> {
     const id = 'term-' + crypto.randomBytes(6).toString('hex');
     const remote = parseRemoteRepo(repo);
@@ -89,24 +195,13 @@ export class TerminalManager {
         cwd: remote.remotePath
       };
 
-      channel.setEncoding('utf8');
-      channel.stderr.setEncoding('utf8');
-      channel.on('data', (chunk: string) => onData(id, chunk));
-      channel.stderr.on('data', (chunk: string) => onData(id, chunk));
-      channel.on('error', (err: Error) => onData(id, `\r\n\x1b[31m[${err.message}]\x1b[0m\r\n`));
-      channel.on('close', (code?: number) => {
-        this.sessions.delete(id);
-        onExit(id, typeof code === 'number' ? code : 0);
-      });
-
-      if (initialCommand) {
-        setTimeout(() => {
-          channel.write(initialCommand + '\n');
-        }, 250);
-      }
-
-      this.sessions.set(id, {
+      const record: ActiveTerminal = {
         info,
+        owner,
+        onData,
+        onExit,
+        scrollback: '',
+        orphanTimer: null,
         write: (data: string) => {
           try {
             channel.write(data);
@@ -118,68 +213,115 @@ export class TerminalManager {
           } catch (_) {}
         },
         kill: () => {
+          if (record.orphanTimer) {
+            clearTimeout(record.orphanTimer);
+            record.orphanTimer = null;
+          }
           try {
             channel.close();
           } catch (_) {}
           this.sessions.delete(id);
         }
+      };
+
+      this.sessions.set(id, record);
+
+      const emitChunk = (chunk: string) => {
+        this.appendScrollback(record, chunk);
+        record.onData(id, chunk);
+      };
+
+      channel.setEncoding('utf8');
+      channel.stderr.setEncoding('utf8');
+      channel.on('data', emitChunk);
+      channel.stderr.on('data', emitChunk);
+      channel.on('error', (err: Error) => emitChunk(`\r\n\x1b[31m[${err.message}]\x1b[0m\r\n`));
+      channel.on('close', (code?: number) => {
+        if (record.orphanTimer) {
+          clearTimeout(record.orphanTimer);
+          record.orphanTimer = null;
+        }
+        this.sessions.delete(id);
+        record.onExit(id, typeof code === 'number' ? code : 0);
       });
+
+      if (initialCommand) {
+        setTimeout(() => {
+          try {
+            channel.write(initialCommand + '\n');
+          } catch (_) {}
+        }, 250);
+      }
 
       return info;
     }
 
     // Local shell session
     const cwd = repo && fs.existsSync(repo) ? repo : os.homedir();
-    const defaultShell =
-      process.platform === 'win32'
-        ? process.env.COMSPEC || 'powershell.exe'
-        : process.env.SHELL || '/bin/zsh';
+    const defaultShell = resolveDefaultLocalShell(shellPath);
+    const py3 = findWorkingPython3();
 
-    const py3 = findPython3();
     let proc: cp.ChildProcess;
-    let isPyPty = false;
+    let resizePipe: Writable | null = null;
 
     if (py3) {
-      // Lightweight pure-Python POSIX PTY bridge (no native node-gyp addons needed, supports resize & colors!)
+      // Dedicated fd 3 carries out-of-band RESIZE:CxR\n frames so stdin (fd 0) remains 100% 8-bit clean
       const pyScript = [
         'import os, pty, sys, select, struct, fcntl, termios, signal',
         'shell = sys.argv[1]',
         'cols, rows = int(sys.argv[2]), int(sys.argv[3])',
         'pid, fd = pty.fork()',
         'if pid == 0:',
+        '    try: os.close(3)',
+        '    except OSError: pass',
         '    os.environ["TERM"] = "xterm-256color"',
         '    os.execvp(shell, [shell, "-l"])',
-        'fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))',
+        'def set_winsz(c, r):',
+        '    try:',
+        '        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", r, c, 0, 0))',
+        '        os.killpg(pid, signal.SIGWINCH)',
+        '    except OSError: pass',
+        'set_winsz(cols, rows)',
+        'def cleanup(*_):',
+        '    try: os.close(fd)',
+        '    except OSError: pass',
+        '    try: os.killpg(pid, signal.SIGHUP)',
+        '    except OSError: pass',
+        'signal.signal(signal.SIGTERM, lambda *_: (cleanup(), os._exit(0)))',
+        'signal.signal(signal.SIGINT, lambda *_: (cleanup(), os._exit(0)))',
         'stdin_fd = sys.stdin.fileno()',
         'stdout_fd = sys.stdout.fileno()',
-        'buf = b""',
-        'while True:',
-        '    r, _, _ = select.select([fd, stdin_fd], [], [])',
-        '    if fd in r:',
-        '        try:',
-        '            data = os.read(fd, 8192)',
-        '            if not data: break',
-        '            os.write(stdout_fd, data)',
-        '        except OSError:',
-        '            break',
-        '    if stdin_fd in r:',
-        '        chunk = os.read(stdin_fd, 4096)',
-        '        if not chunk: break',
-        '        if b"\\x00RESIZE:" in chunk:',
-        '            parts = chunk.split(b"\\x00")',
-        '            out = []',
-        '            for p in parts:',
-        '                if p.startswith(b"RESIZE:"):',
+        'ctrl_fd = 3',
+        'ctrl_buf = b""',
+        'watch = [fd, stdin_fd, ctrl_fd]',
+        'try:',
+        '    while True:',
+        '        r, _, _ = select.select(watch, [], [])',
+        '        if fd in r:',
+        '            try:',
+        '                data = os.read(fd, 8192)',
+        '                if not data: break',
+        '                os.write(stdout_fd, data)',
+        '            except OSError: break',
+        '        if stdin_fd in r:',
+        '            chunk = os.read(stdin_fd, 4096)',
+        '            if not chunk: break',
+        '            os.write(fd, chunk)',
+        '        if ctrl_fd in r:',
+        '            cchunk = os.read(ctrl_fd, 256)',
+        '            if not cchunk:',
+        '                watch = [x for x in watch if x != ctrl_fd]',
+        '                continue',
+        '            ctrl_buf += cchunk',
+        '            while b"\\n" in ctrl_buf:',
+        '                line, ctrl_buf = ctrl_buf.split(b"\\n", 1)',
+        '                if line.startswith(b"RESIZE:"):',
         '                    try:',
-        '                        _, dims = p.split(b":", 1)',
-        '                        c, rw = map(int, dims.split(b"x"))',
-        '                        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rw, c, 0, 0))',
-        '                        os.kill(pid, signal.SIGWINCH)',
+        '                        c_s, r_s = line[7:].split(b"x", 1)',
+        '                        set_winsz(int(c_s), int(r_s))',
         '                    except Exception: pass',
-        '                else:',
-        '                    out.append(p)',
-        '            chunk = b"".join(out)',
-        '        if chunk: os.write(fd, chunk)',
+        'finally:',
+        '    cleanup()',
         'try:',
         '    _, status = os.waitpid(pid, 0)',
         '    sys.exit(os.waitstatus_to_exitcode(status))',
@@ -189,11 +331,14 @@ export class TerminalManager {
 
       proc = cp.spawn(py3, ['-u', '-c', pyScript, defaultShell, String(cols || 100), String(rows || 28)], {
         cwd,
-        env: { ...process.env, TERM: 'xterm-256color' }
+        env: { ...process.env, TERM: 'xterm-256color' },
+        stdio: ['pipe', 'pipe', 'pipe', 'pipe']
       });
-      isPyPty = true;
+      resizePipe = (proc.stdio[3] as Writable) || null;
+      resizePipe?.on('error', () => {});
     } else {
-      const args = process.platform === 'win32' ? [] : ['-i'];
+      const isPowerShell = process.platform === 'win32' && /pwsh|powershell/i.test(defaultShell);
+      const args = process.platform === 'win32' ? (isPowerShell ? ['-NoLogo'] : []) : ['-i'];
       proc = cp.spawn(defaultShell, args, {
         cwd,
         env: { ...process.env, TERM: 'xterm-256color' }
@@ -208,49 +353,74 @@ export class TerminalManager {
       cwd
     };
 
-    // Decode as streams so multi-byte UTF-8 characters split across chunks aren't mangled
+    const record: ActiveTerminal = {
+      info,
+      owner,
+      onData,
+      onExit,
+      scrollback: '',
+      orphanTimer: null,
+      write: (data: string) => {
+        if (proc.stdin && !proc.stdin.destroyed) proc.stdin.write(data);
+      },
+      resize: (c: number, r: number) => {
+        if (resizePipe && !resizePipe.destroyed) {
+          resizePipe.write(`RESIZE:${Math.max(2, Math.floor(c))}x${Math.max(2, Math.floor(r))}\n`);
+        }
+      },
+      kill: () => {
+        if (record.orphanTimer) {
+          clearTimeout(record.orphanTimer);
+          record.orphanTimer = null;
+        }
+        try {
+          resizePipe?.destroy();
+        } catch (_) {}
+        try {
+          proc.kill('SIGTERM');
+        } catch (_) {}
+        this.sessions.delete(id);
+      }
+    };
+
+    this.sessions.set(id, record);
+
+    const emitChunk = (chunk: string) => {
+      this.appendScrollback(record, chunk);
+      record.onData(id, chunk);
+    };
+
     proc.stdout?.setEncoding('utf8');
     proc.stderr?.setEncoding('utf8');
-    proc.stdout?.on('data', (chunk: string) => onData(id, chunk));
-    proc.stderr?.on('data', (chunk: string) => onData(id, chunk));
+    proc.stdout?.on('data', emitChunk);
+    proc.stderr?.on('data', emitChunk);
     proc.stdin?.on('error', () => {});
+
     let exited = false;
     const finish = (code: number) => {
       if (exited) return;
       exited = true;
+      if (record.orphanTimer) {
+        clearTimeout(record.orphanTimer);
+        record.orphanTimer = null;
+      }
       this.sessions.delete(id);
-      onExit(id, code);
+      record.onExit(id, code);
     };
-    // Without an 'error' listener a failed spawn (EAGAIN, ENOENT, ...) is an uncaught exception that takes down the whole process
+
     proc.on('error', (err) => {
-      onData(id, `\r\n\x1b[31m[Unable to start the shell: ${err.message}]\x1b[0m\r\n`);
+      emitChunk(`\r\n\x1b[31m[Unable to start the shell: ${err.message}]\x1b[0m\r\n`);
       finish(1);
     });
     proc.on('close', (code) => finish(typeof code === 'number' ? code : 0));
 
     if (initialCommand && proc.stdin) {
       setTimeout(() => {
-        proc.stdin?.write(initialCommand + (process.platform === 'win32' ? '\r\n' : '\n'));
+        if (proc.stdin && !proc.stdin.destroyed) {
+          proc.stdin.write(initialCommand + (process.platform === 'win32' ? '\r\n' : '\n'));
+        }
       }, 200);
     }
-
-    this.sessions.set(id, {
-      info,
-      write: (data: string) => {
-        if (proc.stdin && !proc.stdin.destroyed) proc.stdin.write(data);
-      },
-      resize: (c: number, r: number) => {
-        if (isPyPty && proc.stdin && !proc.stdin.destroyed) {
-          proc.stdin.write(`\x00RESIZE:${c}x${r}\x00`);
-        }
-      },
-      kill: () => {
-        try {
-          proc.kill();
-        } catch (_) {}
-        this.sessions.delete(id);
-      }
-    });
 
     return info;
   }

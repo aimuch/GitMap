@@ -9,31 +9,50 @@
 import * as fs from 'fs';
 import * as http from 'http';
 
-function fatal(err: any): void {
+function fatal(err: unknown): void {
 	console.error('Missing or invalid credentials.');
 	console.error(err);
 	process.exit(1);
 }
 
+function parsePromptArgs(args: string[]): { request: string; host: string } {
+	const raw = args.join(' ').trim();
+	if (!raw) {
+		return { request: 'Password', host: 'Git repository' };
+	}
+	const keyMatch = raw.match(/^(Enter passphrase for key)\s+'([^']+)'\s*:?$/i);
+	if (keyMatch) {
+		return { request: keyMatch[1], host: keyMatch[2] };
+	}
+	const forMatch = raw.match(/^(.+?)\s+for\s+'([^']+)'\s*:?$/i);
+	if (forMatch) {
+		return { request: forMatch[1].trim(), host: forMatch[2].trim() };
+	}
+	return { request: raw.replace(/:\s*$/, ''), host: 'Git authentication' };
+}
+
 function main(argv: string[]): void {
-	if (argv.length !== 5) return fatal('Wrong number of arguments');
-	if (!process.env['VSCODE_GIT_GRAPH_ASKPASS_HANDLE']) return fatal('Missing handle');
-	if (!process.env['VSCODE_GIT_GRAPH_ASKPASS_PIPE']) return fatal('Missing pipe');
+	const socketPath = process.env['VSCODE_GIT_GRAPH_ASKPASS_HANDLE'];
+	if (!socketPath) return fatal('Missing handle');
 
-	const output = process.env['VSCODE_GIT_GRAPH_ASKPASS_PIPE']!;
-	const socketPath = process.env['VSCODE_GIT_GRAPH_ASKPASS_HANDLE']!;
+	const outputPipe = process.env['VSCODE_GIT_GRAPH_ASKPASS_PIPE'];
+	const parsed = parsePromptArgs(argv.slice(2));
 
-	const req = http.request({ socketPath, path: '/', method: 'POST' }, res => {
+	const req = http.request({ socketPath, path: '/', method: 'POST' }, (res) => {
 		if (res.statusCode !== 200) return fatal('Bad status code: ' + res.statusCode);
 
 		let resData = '';
 		res.setEncoding('utf8');
-		res.on('data', (d) => resData += d);
+		res.on('data', (d) => (resData += d));
 		res.on('end', () => {
 			try {
-				let response = JSON.parse(resData);
-				fs.writeFileSync(output, response + '\n');
-			} catch (err) {
+				const response = String(JSON.parse(resData) ?? '');
+				if (outputPipe) {
+					fs.writeFileSync(outputPipe, response + '\n', { mode: 0o600 });
+				} else {
+					process.stdout.write(response + '\n');
+				}
+			} catch (_) {
 				return fatal('Error parsing response');
 			}
 			setTimeout(() => process.exit(0), 0);
@@ -41,7 +60,7 @@ function main(argv: string[]): void {
 	});
 
 	req.on('error', () => fatal('Error in request'));
-	req.write(JSON.stringify({ request: argv[2], host: argv[4].substring(1, argv[4].length - 2) }));
+	req.write(JSON.stringify(parsed));
 	req.end();
 }
 

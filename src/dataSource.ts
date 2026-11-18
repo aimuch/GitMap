@@ -574,10 +574,30 @@ export class DataSource extends Disposable {
 	 * @returns The file contents.
 	 */
 	public getCommitFile(repo: string, commitHash: string, filePath: string) {
+		if (!commitHash || commitHash.startsWith('-')) {
+			return Promise.reject('Invalid Git revision.');
+		}
 		return this._spawnGit(['show', commitHash + ':' + filePath], repo, stdout => {
 			const encoding = getConfig(repo).fileEncoding;
 			return decode(stdout, encodingExists(encoding) ? encoding : 'utf8');
 		});
+	}
+
+	public getCommitFileBuffer(repo: string, commitHash: string, filePath: string, maxBytes: number): Promise<{ buffer: Buffer; encoding: string }> {
+		if (!commitHash || commitHash.startsWith('-')) {
+			return Promise.reject('Invalid Git revision.');
+		}
+		const encoding = getConfig(repo).fileEncoding;
+		const resolvedEncoding = encodingExists(encoding) ? encoding : 'utf8';
+		return this._spawnGit(
+			['show', commitHash + ':' + filePath],
+			repo,
+			(stdout) => ({ buffer: stdout, encoding: resolvedEncoding }),
+			false,
+			null,
+			null,
+			{ maxBytes }
+		);
 	}
 
 
@@ -920,6 +940,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public fetch(repo: string, remote: string | null, prune: boolean, pruneTags: boolean) {
+		if (remote !== null && remote.startsWith('-')) {
+			return Promise.resolve('Invalid remote name.');
+		}
 		let args = ['fetch', remote === null ? '--all' : remote];
 
 		if (prune) {
@@ -928,7 +951,7 @@ export class DataSource extends Disposable {
 		if (pruneTags) {
 			if (!prune) {
 				return Promise.resolve(remote !== null ? t('In order to Prune Tags, pruning must also be enabled when fetching from a remote.') : t('In order to Prune Tags, pruning must also be enabled when fetching from remote(s).'));
-			} else if (this.gitExecutable !== null && !doesVersionMeetRequirement(this.gitExecutable.version, GitVersionRequirement.FetchAndPruneTags)) {
+			} else if (!isRemoteRepo(repo) && this.gitExecutable !== null && !doesVersionMeetRequirement(this.gitExecutable.version, GitVersionRequirement.FetchAndPruneTags)) {
 				return Promise.resolve(constructIncompatibleGitVersionMessage(this.gitExecutable, GitVersionRequirement.FetchAndPruneTags, t('pruning tags when fetching')));
 			}
 			args.push('--prune-tags');
@@ -947,6 +970,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public pushBranch(repo: string, branchName: string, remote: string, setUpstream: boolean, mode: GitPushBranchMode) {
+		if (remote.startsWith('-') || branchName.startsWith('-')) {
+			return Promise.resolve('Invalid remote or branch name.');
+		}
 		let args = ['push'];
 		args.push(remote, 'refs/heads/' + branchName + ':refs/heads/' + branchName);
 		if (setUpstream) args.push('--set-upstream');
@@ -1110,6 +1136,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public pullBranch(repo: string, branchName: string, remote: string, createNewCommit: boolean, squash: boolean) {
+		if (remote.startsWith('-') || branchName.startsWith('-')) {
+			return Promise.resolve('Invalid remote or branch name.');
+		}
 		const args = ['pull', remote, branchName], config = getConfig();
 		if (squash) {
 			args.push('--squash');
@@ -1211,6 +1240,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public archive(repo: string, ref: string, outputFilePath: string, type: 'tar' | 'zip'): Promise<ErrorInfo> {
+		if (!ref || ref.startsWith('-')) {
+			return Promise.resolve('Invalid Git reference.');
+		}
 		if (isRemoteRepo(repo)) {
 			return this._spawnGit(['archive', '--format=' + type, ref], repo, (stdout) => stdout)
 				.then(async (stdout) => {
@@ -1232,6 +1264,9 @@ export class DataSource extends Disposable {
 	 * @returns The ErrorInfo from the executed command.
 	 */
 	public checkoutCommit(repo: string, commitHash: string) {
+		if (!commitHash || commitHash.startsWith('-')) {
+			return Promise.resolve('Invalid commit hash.');
+		}
 		return this.runGitCommand(['checkout', commitHash], repo);
 	}
 
@@ -1444,12 +1479,22 @@ export class DataSource extends Disposable {
 	 * @param includeUntracked Is `--include-untracked` enabled.
 	 * @returns The ErrorInfo from the executed command.
 	 */
+	private getRepoGitVersion(repo: string): string | null {
+		const remote = parseRemoteRepo(repo);
+		if (remote !== null) {
+			const host = sshManager.listHosts().find((h) => h.id === remote.hostId);
+			return host?.gitVersion || '2.39.0';
+		}
+		return this.gitExecutable ? this.gitExecutable.version : null;
+	}
+
 	public pushStash(repo: string, message: string, includeUntracked: boolean, paths: ReadonlyArray<string> | null = null, onlyStaged: boolean = false): Promise<ErrorInfo> {
-		if (this.gitExecutable === null) {
+		const effectiveVersion = this.getRepoGitVersion(repo);
+		if (effectiveVersion === null) {
 			return Promise.resolve(UNABLE_TO_FIND_GIT_MSG);
-		} else if (!doesVersionMeetRequirement(this.gitExecutable.version, GitVersionRequirement.PushStash)) {
+		} else if (!isRemoteRepo(repo) && this.gitExecutable !== null && !doesVersionMeetRequirement(effectiveVersion, GitVersionRequirement.PushStash)) {
 			return Promise.resolve(constructIncompatibleGitVersionMessage(this.gitExecutable, GitVersionRequirement.PushStash));
-		} else if (onlyStaged && !doesVersionMeetRequirement(this.gitExecutable.version, GitVersionRequirement.StashStaged)) {
+		} else if (!isRemoteRepo(repo) && this.gitExecutable !== null && onlyStaged && !doesVersionMeetRequirement(effectiveVersion, GitVersionRequirement.StashStaged)) {
 			return Promise.resolve(constructIncompatibleGitVersionMessage(this.gitExecutable, GitVersionRequirement.StashStaged, t('stashing only the staged changes')));
 		}
 
@@ -1465,8 +1510,98 @@ export class DataSource extends Disposable {
 	/**
 	 * Does the Git executable support stashing only the staged changes (Git 2.35 or later).
 	 */
-	public isStashStagedSupported() {
-		return this.gitExecutable !== null && doesVersionMeetRequirement(this.gitExecutable.version, GitVersionRequirement.StashStaged);
+	public isStashStagedSupported(repo?: string) {
+		const ver = repo ? this.getRepoGitVersion(repo) : (this.gitExecutable ? this.gitExecutable.version : '2.39.0');
+		return ver !== null && doesVersionMeetRequirement(ver, GitVersionRequirement.StashStaged);
+	}
+
+	/* Standalone Working Tree Stage & Commit Methods */
+
+	public async getWorkingTreeStatus(repo: string): Promise<{
+		branch: string | null;
+		headSubject: string | null;
+		staged: Array<{ path: string; oldPath: string | null; status: string }>;
+		unstaged: Array<{ path: string; oldPath: string | null; status: string }>;
+		conflicted: Array<{ path: string; status: string }>;
+		error: string | null;
+	}> {
+		try {
+			const [porcelain, branch, headSubject] = await Promise.all([
+				this.spawnGit(['-c', 'core.quotepath=false', 'status', '--porcelain=v1', '-z', '-uall'], repo, (stdout) => stdout),
+				this.spawnGit(['symbolic-ref', '-q', '--short', 'HEAD'], repo, (s) => s.trim()).catch(() => null),
+				this.getCommitSubject(repo, 'HEAD')
+			]);
+			const staged: Array<{ path: string; oldPath: string | null; status: string }> = [];
+			const unstaged: Array<{ path: string; oldPath: string | null; status: string }> = [];
+			const conflicted: Array<{ path: string; status: string }> = [];
+
+			const tokens = porcelain.split('\0');
+			let idx = 0;
+			while (idx < tokens.length) {
+				const entry = tokens[idx++];
+				if (entry.length < 4) continue;
+				const x = entry[0];
+				const y = entry[1];
+				const filePath = entry.substring(3);
+				let oldPath: string | null = null;
+				if ((x === 'R' || x === 'C' || y === 'R' || y === 'C') && idx < tokens.length) {
+					oldPath = tokens[idx++];
+				}
+				const isConflict =
+					x === 'U' ||
+					y === 'U' ||
+					(x === 'A' && y === 'A') ||
+					(x === 'D' && y === 'D');
+				if (isConflict) {
+					conflicted.push({ path: filePath, status: x + y });
+					continue;
+				}
+				if (x !== ' ' && x !== '?') {
+					staged.push({ path: filePath, oldPath, status: x });
+				}
+				if (y !== ' ') {
+					unstaged.push({ path: filePath, oldPath: null, status: y === '?' ? 'U' : y });
+				}
+			}
+			return { branch, headSubject, staged, unstaged, conflicted, error: null };
+		} catch (err) {
+			return { branch: null, headSubject: null, staged: [], unstaged: [], conflicted: [], error: String(err) };
+		}
+	}
+
+	public stageFiles(repo: string, paths: string[]): Promise<ErrorInfo> {
+		if (paths.length === 0) return Promise.resolve(null);
+		return this.runGitCommand(['add', '-A', '--', ...paths], repo);
+	}
+
+	public stageAll(repo: string): Promise<ErrorInfo> {
+		return this.runGitCommand(['add', '-A'], repo);
+	}
+
+	public async unstageFiles(repo: string, paths: string[]): Promise<ErrorInfo> {
+		if (paths.length === 0) return null;
+		const hasHead = await this.spawnGit(['rev-parse', '--verify', 'HEAD'], repo, () => true).catch(() => false);
+		if (hasHead) {
+			return this.runGitCommand(['reset', '-q', 'HEAD', '--', ...paths], repo);
+		}
+		return this.runGitCommand(['rm', '--cached', '-r', '--', ...paths], repo);
+	}
+
+	public async unstageAll(repo: string): Promise<ErrorInfo> {
+		const hasHead = await this.spawnGit(['rev-parse', '--verify', 'HEAD'], repo, () => true).catch(() => false);
+		if (hasHead) {
+			return this.runGitCommand(['reset', '-q', 'HEAD'], repo);
+		}
+		return this.runGitCommand(['rm', '--cached', '-r', '.'], repo);
+	}
+
+	public commitWorkingTree(repo: string, message: string, amend: boolean = false): Promise<ErrorInfo> {
+		const trimmed = message.trim();
+		if (!trimmed) return Promise.resolve('Commit message cannot be empty.');
+		const args = ['commit', '-F', '-'];
+		if (amend) args.push('--amend');
+		if (getConfig(repo).signCommits) args.push('-S');
+		return this._spawnGit(args, repo, () => null, false, trimmed + '\n').catch((err) => String(err));
 	}
 
 
@@ -1963,9 +2098,13 @@ export class DataSource extends Disposable {
 	 * @param cancellation Optional token cancelling the blame process.
 	 * @returns The blame of the file, or NULL if it couldn't be determined (e.g. the file isn't tracked).
 	 */
-	public getFileBlame(repo: string, filePath: string, contents: string | null = null, cancellation?: vscode.CancellationToken): Promise<GitFileBlame | null> {
+	public getFileBlame(repo: string, filePath: string, contents: string | null = null, cancellation?: vscode.CancellationToken, commitHash?: string | null): Promise<GitFileBlame | null> {
 		const args = ['-c', 'core.quotepath=false', 'blame', '--porcelain', ...this.getBlameOptions(repo)];
-		if (contents !== null) args.push('--contents', '-');
+		if (contents !== null) {
+			args.push('--contents', '-');
+		} else if (commitHash && commitHash !== '*' && !commitHash.startsWith('-')) {
+			args.push(commitHash);
+		}
 		args.push('--', filePath);
 		return this._spawnGit(args, repo, (stdout) => {
 			const lines: { hash: string, originalLine: number }[] = [], commits: { [hash: string]: Writeable<GitBlameCommit> } = {};
@@ -2453,6 +2592,9 @@ export class DataSource extends Disposable {
 	 * @returns The diff output.
 	 */
 	private execDiff(repo: string, fromHash: string, toHash: string, arg: '--numstat' | '--name-status', filter: string) {
+		if (fromHash.startsWith('-') || toHash.startsWith('-')) {
+			return Promise.reject('Invalid Git revision.');
+		}
 		let args: string[];
 		if (fromHash === toHash) {
 			args = ['diff-tree', arg, '-r', '--root', '--find-renames', '--diff-filter=' + filter, '-z', fromHash];
@@ -2729,6 +2871,30 @@ export class DataSource extends Disposable {
 	}
 
 	/**
+	 * Execute an arbitrary Git command in a local or `ssh://` repository, returning raw stdout Buffer and stderr string.
+	 */
+	public execGitRaw(
+		repo: string,
+		args: string[],
+		options?: {
+			input?: string | null;
+			env?: { [name: string]: string } | null;
+			ignoreExitCode?: boolean;
+			maxBytes?: number;
+		}
+	): Promise<{ stdout: Buffer; stderr: string }> {
+		return this._spawnGit(
+			args,
+			repo,
+			(stdout, stderr) => ({ stdout, stderr }),
+			options?.ignoreExitCode ?? false,
+			options?.input ?? null,
+			options?.env ?? null,
+			options?.maxBytes ? { maxBytes: options.maxBytes } : undefined
+		);
+	}
+
+	/**
 	 * Run a Git command (typically for a Git Map View action).
 	 * @param args The arguments to pass to Git.
 	 * @param repo The repository to run the command in.
@@ -2762,7 +2928,8 @@ export class DataSource extends Disposable {
 			return sshManager.execRemoteGit(remote.hostId, remote.remotePath, args, {
 				input: input,
 				env: env,
-				cancellation: options?.cancellation || null
+				cancellation: options?.cancellation || null,
+				maxBytes: options?.maxBytes
 			}).then(
 				(res) => {
 					if (res.code === 0 || ignoreExitCode) {
@@ -2875,7 +3042,9 @@ function getErrorMessage(error: Error | null, stdoutBuffer: Buffer, stderr: stri
 	let stdout = stdoutBuffer.toString(), lines: string[];
 	if (stdout !== '' || stderr !== '') {
 		lines = (stderr + stdout).split(EOL_REGEX);
-		lines.pop();
+		if (lines.length > 0 && lines[lines.length - 1] === '') {
+			lines.pop();
+		}
 	} else if (error) {
 		lines = error.message.split(EOL_REGEX);
 	} else {

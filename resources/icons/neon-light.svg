@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fcfcff"/>
+      <stop offset="100%" stop-color="#ede9fe"/>
+    </linearGradient>
+    <linearGradient id="topSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect x="56" y="56" width="912" height="912" rx="206" ry="206" fill="url(#bgGrad)" stroke="#c7d2fe" stroke-width="14"/>
+  <rect x="63" y="63" width="898" height="898" rx="199" ry="199" fill="url(#topSheen)" pointer-events="none"/>
+  <defs>
+    <linearGradient id="auroraTrunk" gradientUnits="userSpaceOnUse" x1="348" y1="796" x2="348" y2="228">
+      <stop offset="0%" stop-color="#0891b2"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="auroraArc" gradientUnits="userSpaceOnUse" x1="348" y1="708" x2="692" y2="296">
+      <stop offset="0%" stop-color="#0891b2"/>
+      <stop offset="52%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#db2777"/>
+    </linearGradient>
+    <radialGradient id="auroraGlow" cx="50%" cy="50%" r="46%">
+      <stop offset="0%" stop-color="#4f46e5" stop-opacity="0.16"/>
+      <stop offset="85%" stop-color="#4f46e5" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#4f46e5" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="512" cy="512" r="380" fill="url(#auroraGlow)"/>
+  <g filter="url(#softShadow)">
+    <line x1="348" y1="216" x2="348" y2="808" stroke="url(#auroraTrunk)" stroke-width="58" stroke-linecap="round"/>
+    <path d="M 348 708 C 348 560, 692 652, 692 504 C 692 356, 348 440, 348 296" fill="none" stroke="url(#auroraArc)" stroke-width="58" stroke-linecap="round"/>
+    <circle cx="348" cy="708" r="64" fill="#ffffff" stroke="#0891b2" stroke-width="38"/>
+    <circle cx="692" cy="504" r="68" fill="#ffffff" stroke="#db2777" stroke-width="38"/>
+    <circle cx="348" cy="296" r="72" fill="#ffffff" stroke="#4f46e5" stroke-width="40"/>
+    <circle cx="348" cy="296" r="24" fill="#db2777"/>
+  </g>
+</svg>

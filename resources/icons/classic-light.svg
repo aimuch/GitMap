@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#eaf1fb"/>
+    </linearGradient>
+    <linearGradient id="topSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect x="56" y="56" width="912" height="912" rx="206" ry="206" fill="url(#bgGrad)" stroke="#cbd6e6" stroke-width="14"/>
+  <rect x="63" y="63" width="898" height="898" rx="199" ry="199" fill="url(#topSheen)" pointer-events="none"/>
+  <g filter="url(#softShadow)">
+    <line x1="304" y1="196" x2="304" y2="828" stroke="#94a3b8" stroke-width="58" stroke-linecap="round"/>
+    <line x1="304" y1="500" x2="304" y2="828" stroke="#2563eb" stroke-width="58" stroke-linecap="round"/>
+    <line x1="512" y1="260" x2="512" y2="828" stroke="#db2777" stroke-width="58" stroke-linecap="round"/>
+    <path d="M 304 500 C 304 640, 720 572, 720 732" fill="none" stroke="#16a34a" stroke-width="58" stroke-linecap="round"/>
+    <circle cx="304" cy="500" r="78" fill="#ffffff" stroke="#2563eb" stroke-width="44"/>
+    <circle cx="512" cy="268" r="78" fill="#ffffff" stroke="#db2777" stroke-width="44"/>
+    <circle cx="720" cy="732" r="78" fill="#ffffff" stroke="#16a34a" stroke-width="44"/>
+  </g>
+</svg>

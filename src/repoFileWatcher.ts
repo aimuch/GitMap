@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Logger } from './logger';
-import { isRemoteRepo } from './remote/repoTransport';
+import { isRemoteRepo, parseRemoteRepo } from './remote/repoTransport';
+import { sshManager } from './remote/sshManager';
 import { getPathFromUri } from './utils';
 
 const FILE_CHANGE_REGEX = /(^\.git\/(config|index|HEAD|packed-refs|BISECT_START|MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD|rebase-merge.*|rebase-apply.*|refs\/stash|refs\/bisect\/.*|refs\/heads\/.*|refs\/remotes\/.*|refs\/tags\/.*)$)|(^(?!\.git).*$)|(^\.git[^\/]+$)/;
@@ -17,12 +18,24 @@ const MAX_CHANGED_PATHS = 5000;
  * Watches a Git repository for file events.
  */
 export class RepoFileWatcher {
+	private static readonly activeRemoteWatchers = new Set<RepoFileWatcher>();
+
+	public static notifyPossibleRemoteChange(delayMs: number = 650) {
+		for (const watcher of RepoFileWatcher.activeRemoteWatchers) {
+			watcher.scheduleRemoteProbe(delayMs);
+		}
+	}
+
 	private readonly logger: Logger;
 	private readonly repoChangeCallback: (changedPaths: string[] | null) => void;
 	private changedPaths: Set<string> | null = new Set(); // The files (relative to the repository) that changed since the callback was last invoked (NULL => unknown)
 	private repo: string | null = null;
 	private fsWatcher: vscode.FileSystemWatcher | null = null;
 	private gitDirectoryWatchers: vscode.FileSystemWatcher[] = [];
+	private remotePollInterval: NodeJS.Timeout | null = null;
+	private remoteProbeTimeout: NodeJS.Timeout | null = null;
+	private remotePollingInFlight: boolean = false;
+	private lastRemoteSignature: string | null = null;
 	private watchId: number = 0;
 	private refreshTimeout: NodeJS.Timeout | null = null;
 	private muted: boolean = false;
@@ -45,14 +58,20 @@ export class RepoFileWatcher {
 	 * @param repo The path of the repository to watch.
 	 */
 	public start(repo: string) {
-		if (this.fsWatcher !== null) {
-			// If there is an existing File System Watcher, stop it
+		if (this.fsWatcher !== null || this.remotePollInterval !== null) {
 			this.stop();
 		}
 
 		this.repo = repo;
 		if (isRemoteRepo(repo)) {
-			// Remote SSH repositories use manual refresh or post-command refresh rather than local fs.watch
+			this.lastRemoteSignature = null;
+			RepoFileWatcher.activeRemoteWatchers.add(this);
+			this.scheduleRemoteProbe(400);
+			this.remotePollInterval = setInterval(() => {
+				void this.probeRemoteState();
+			}, 10000);
+			this.remotePollInterval.unref?.();
+			this.logger.log('Started remote state polling for repo: ' + repo);
 			return;
 		}
 		// Create a File System Watcher for all events within the specified repository
@@ -82,6 +101,16 @@ export class RepoFileWatcher {
 	 */
 	public stop() {
 		this.watchId++;
+		RepoFileWatcher.activeRemoteWatchers.delete(this);
+		if (this.remotePollInterval !== null) {
+			clearInterval(this.remotePollInterval);
+			this.remotePollInterval = null;
+		}
+		if (this.remoteProbeTimeout !== null) {
+			clearTimeout(this.remoteProbeTimeout);
+			this.remoteProbeTimeout = null;
+		}
+		this.lastRemoteSignature = null;
 		if (this.fsWatcher !== null) {
 			// If there is an existing File System Watcher, stop it
 			this.fsWatcher.dispose();
@@ -95,6 +124,38 @@ export class RepoFileWatcher {
 			// If a timeout is active, clear it
 			clearTimeout(this.refreshTimeout);
 			this.refreshTimeout = null;
+		}
+	}
+
+	private scheduleRemoteProbe(delayMs: number) {
+		if (this.remoteProbeTimeout !== null) {
+			clearTimeout(this.remoteProbeTimeout);
+		}
+		this.remoteProbeTimeout = setTimeout(() => {
+			this.remoteProbeTimeout = null;
+			void this.probeRemoteState();
+		}, delayMs);
+		this.remoteProbeTimeout.unref?.();
+	}
+
+	private async probeRemoteState() {
+		if (this.muted || Date.now() < this.resumeAt || this.remotePollingInFlight || !this.repo) return;
+		const parsed = parseRemoteRepo(this.repo);
+		if (!parsed || !sshManager.isConnected(parsed.hostId)) return;
+
+		const currentWatchId = this.watchId;
+		this.remotePollingInFlight = true;
+		try {
+			const sig = await sshManager.getRemoteRepoStateSignature(parsed.hostId, parsed.remotePath);
+			if (currentWatchId !== this.watchId || sig === null) return;
+			if (this.lastRemoteSignature === null) {
+				this.lastRemoteSignature = sig;
+			} else if (sig !== this.lastRemoteSignature) {
+				this.lastRemoteSignature = sig;
+				this.scheduleRefresh(null);
+			}
+		} finally {
+			this.remotePollingInFlight = false;
 		}
 	}
 

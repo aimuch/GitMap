@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#ecedf0"/>
+    </linearGradient>
+    <linearGradient id="topSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect x="56" y="56" width="912" height="912" rx="206" ry="206" fill="url(#bgGrad)" stroke="#d1d5db" stroke-width="14"/>
+  <rect x="63" y="63" width="898" height="898" rx="199" ry="199" fill="url(#topSheen)" pointer-events="none"/>
+  <g filter="url(#softShadow)">
+    <path d="M 364 648 C 364 496, 660 524, 660 368" fill="none" stroke="#52525b" stroke-width="60" stroke-linecap="round"/>
+    <line x1="364" y1="264" x2="364" y2="760" stroke="#18181b" stroke-width="64" stroke-linecap="round"/>
+    <circle cx="364" cy="264" r="74" fill="#18181b"/>
+    <circle cx="364" cy="760" r="68" fill="#ffffff" stroke="#18181b" stroke-width="42"/>
+    <circle cx="660" cy="368" r="68" fill="#ffffff" stroke="#18181b" stroke-width="42"/>
+  </g>
+</svg>

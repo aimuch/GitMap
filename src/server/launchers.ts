@@ -74,7 +74,18 @@ function whichSync(bin: string): string | null {
   if (path.isAbsolute(bin)) return fs.existsSync(bin) ? bin : null;
   const exts = PLATFORM === 'win32' ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';').concat(['']) : [''];
   const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
-  if (PLATFORM !== 'win32') dirs.push('/usr/local/bin', '/opt/homebrew/bin', '/usr/bin', '/snap/bin');
+  if (PLATFORM !== 'win32') {
+    dirs.push(
+      '/usr/local/bin',
+      '/opt/homebrew/bin',
+      '/usr/bin',
+      '/snap/bin',
+      path.join(os.homedir(), '.local', 'bin'),
+      path.join(os.homedir(), 'Library', 'Application Support', 'JetBrains', 'Toolbox', 'scripts')
+    );
+  } else if (process.env.LOCALAPPDATA) {
+    dirs.push(path.join(process.env.LOCALAPPDATA, 'JetBrains', 'Toolbox', 'scripts'));
+  }
   for (const dir of dirs) {
     for (const ext of exts) {
       const candidate = path.join(dir, bin + ext);
@@ -118,6 +129,29 @@ function spawnDetached(command: string, args: string[], options: cp.SpawnOptions
   });
 }
 
+/**
+ * Safely launch an executable or .cmd/.bat wrapper on Windows without shell-metacharacter injection.
+ * Arguments are passed strictly via environment variables (%GITMAP_A0% ...) so '&', '|', '%', and spaces
+ * in repository paths are never tokenized by cmd.exe.
+ */
+function spawnWinScriptSafe(cliPath: string, args: string[]): Promise<void> {
+  if (/\.(exe)$/i.test(cliPath)) {
+    return spawnDetached(cliPath, args);
+  }
+  const env: NodeJS.ProcessEnv = { ...process.env, GITMAP_CLI_BIN: cliPath };
+  const placeholders: string[] = [];
+  args.forEach((arg, idx) => {
+    const key = `GITMAP_CLI_ARG_${idx}`;
+    env[key] = arg;
+    placeholders.push(`"%${key}%"`);
+  });
+  const cmdLine = `"%GITMAP_CLI_BIN%" ${placeholders.join(' ')}`.trim();
+  return spawnDetached('cmd.exe', ['/d', '/s', '/c', `"${cmdLine}"`], {
+    windowsVerbatimArguments: true,
+    env
+  });
+}
+
 /** Run a command and wait for it (used for osascript / open, which return quickly). */
 function runAndWait(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -128,8 +162,28 @@ function runAndWait(command: string, args: string[]): Promise<void> {
   });
 }
 
+function assertSafeSshPart(val: string, label: string) {
+  if (!val || val.startsWith('-')) {
+    throw new Error(`Invalid SSH ${label}: "${val}"`);
+  }
+}
+
 function sshTarget(profile: SshHostProfile): string {
-  return profile.source === 'ssh-config' ? profile.id : `${profile.user}@${profile.host}`;
+  if (profile.source === 'ssh-config') {
+    assertSafeSshPart(profile.id, 'host alias');
+    return profile.id;
+  }
+  assertSafeSshPart(profile.user, 'user');
+  assertSafeSshPart(profile.host, 'host');
+  return `${profile.user}@${profile.host}`;
+}
+
+function vscodeSshAuthority(profile: SshHostProfile): string {
+  const base = sshTarget(profile);
+  if (profile.source !== 'ssh-config' && profile.port && profile.port !== 22) {
+    return `${base}:${profile.port}`;
+  }
+  return base;
 }
 
 /** The ssh arguments (without the remote command) that connect to the profile's host. */
@@ -138,7 +192,10 @@ function sshArgs(profile: SshHostProfile): string[] {
   if (profile.source !== 'ssh-config') {
     if (profile.port && profile.port !== 22) args.push('-p', String(profile.port));
     if (profile.privateKeyPath) args.push('-i', profile.privateKeyPath.replace(/^~(?=\/|\\|$)/, os.homedir()));
-    if (profile.proxyJump) args.push('-J', profile.proxyJump);
+    if (profile.proxyJump) {
+      assertSafeSshPart(profile.proxyJump, 'ProxyJump');
+      args.push('-J', profile.proxyJump);
+    }
   }
   args.push(sshTarget(profile));
   return args;
@@ -159,8 +216,13 @@ export function buildSshCommandLine(profile: SshHostProfile, remotePath: string)
 }
 
 function sshUri(profile: SshHostProfile, remotePath: string) {
+  const normPath = remotePath.startsWith('/') ? remotePath : '/' + remotePath;
+  if (profile.source === 'ssh-config') {
+    assertSafeSshPart(profile.id, 'host alias');
+    return `ssh://${profile.id}${normPath}`;
+  }
   const port = profile.port && profile.port !== 22 ? ':' + profile.port : '';
-  return `ssh://${profile.user}@${profile.host}${port}${remotePath.startsWith('/') ? remotePath : '/' + remotePath}`;
+  return `ssh://${profile.user}@${profile.host}${port}${normPath}`;
 }
 
 function appleScriptString(value: string) {
@@ -204,11 +266,16 @@ const TERMINAL_APPS: AppDefinition[] = [
     launch: async ({ target }) => {
       const command = target.isRemote ? buildSshCommandLine(target.profile!, target.path) : `cd ${quotePosixArg(target.path)}`;
       const script = [
+        'set wasRunning to application "iTerm" is running',
         'tell application "iTerm"',
         'activate',
-        'set newWindow to (create window with default profile)',
-        'tell current session of newWindow',
-        `write text ${appleScriptString(command)}`,
+        'if wasRunning or (count of windows) = 0 then',
+        '  set targetWin to (create window with default profile)',
+        'else',
+        '  set targetWin to current window',
+        'end if',
+        'tell current session of targetWin',
+        `  write text ${appleScriptString(command)}`,
         'end tell',
         'end tell'
       ].join('\n');
@@ -324,10 +391,22 @@ const TERMINAL_APPS: AppDefinition[] = [
     supportsRemote: true,
     launch: async ({ target }) => {
       if (target.isRemote) {
-        const remoteCmd = remoteShellCommand(target.path).replace(/"/g, '\\"');
-        await spawnDetached('cmd.exe', ['/c', 'start', 'cmd.exe', '/k', `ssh ${sshArgs(target.profile!).join(' ')} "${remoteCmd}"`]);
+        const sshArgList = sshArgs(target.profile!);
+        const env: NodeJS.ProcessEnv = { ...process.env, GITMAP_REMOTE_CMD: remoteShellCommand(target.path) };
+        const sshPlaceholders = sshArgList.map((a, idx) => {
+          const k = `GITMAP_SSH_A${idx}`;
+          env[k] = a;
+          return `"%${k}%"`;
+        });
+        await spawnDetached(
+          'cmd.exe',
+          ['/d', '/c', 'start', '""', 'cmd.exe', '/k', `ssh ${sshPlaceholders.join(' ')} "%GITMAP_REMOTE_CMD%"`],
+          { env }
+        );
       } else {
-        await spawnDetached('cmd.exe', ['/c', 'start', 'cmd.exe', '/k', `cd /d "${target.path}"`]);
+        await spawnDetached('cmd.exe', ['/d', '/c', 'start', '""', 'cmd.exe', '/k', 'cd /d "%GITMAP_CWD%"'], {
+          env: { ...process.env, GITMAP_CWD: target.path }
+        });
       }
     }
   },
@@ -413,20 +492,21 @@ function vscodeLike(id: string, name: string, macApp: string, cliName: string): 
     launch: async (ctx) => {
       const location = requireLocation(ctx, name);
       const cli = location.endsWith('.app') ? path.join(location, 'Contents', 'Resources', 'app', 'bin', cliName) : location;
+      const authority = ctx.target.isRemote ? vscodeSshAuthority(ctx.target.profile!) : '';
       const args = ctx.target.isRemote
-        ? ['--remote', `ssh-remote+${sshTarget(ctx.target.profile!)}`, ctx.target.path]
+        ? ['--remote', `ssh-remote+${authority}`, ctx.target.path]
         : [ctx.target.path];
       if (location.endsWith('.app') && !fs.existsSync(cli)) {
         if (ctx.target.isRemote) {
-          const uri = `vscode-remote://ssh-remote+${encodeURIComponent(sshTarget(ctx.target.profile!))}${ctx.target.path}`;
+          const uri = `vscode-remote://ssh-remote+${encodeURIComponent(authority)}${ctx.target.path}`;
           await runAndWait('open', ['-a', location, '--args', '--folder-uri', uri]);
         } else {
           await runAndWait('open', ['-a', location, ctx.target.path]);
         }
         return;
       }
-      // On Windows the CLI is a .cmd script, which must be started through the shell
-      await spawnDetached(cli, args, PLATFORM === 'win32' ? { shell: true } : {});
+      if (PLATFORM === 'win32') await spawnWinScriptSafe(cli, args);
+      else await spawnDetached(cli, args);
     }
   };
 }
@@ -442,7 +522,8 @@ function jetbrains(id: string, name: string, macApps: string[], bin: string): Ap
     launch: async (ctx) => {
       const location = requireLocation(ctx, name);
       if (location.endsWith('.app')) await runAndWait('open', ['-na', location, '--args', ctx.target.path]);
-      else await spawnDetached(location, [ctx.target.path], PLATFORM === 'win32' ? { shell: true } : {});
+      else if (PLATFORM === 'win32') await spawnWinScriptSafe(location, [ctx.target.path]);
+      else await spawnDetached(location, [ctx.target.path]);
     }
   };
 }
@@ -457,7 +538,7 @@ const EDITOR_APPS: AppDefinition[] = [
   {
     id: 'zed',
     name: 'Zed',
-    platforms: ['darwin', 'linux'],
+    platforms: ['darwin', 'win32', 'linux'],
     macApps: ['Zed'],
     bins: ['zed'],
     supportsRemote: true,
@@ -465,7 +546,8 @@ const EDITOR_APPS: AppDefinition[] = [
       const location = requireLocation(ctx, 'Zed');
       const cli = location.endsWith('.app') ? path.join(location, 'Contents', 'MacOS', 'cli') : location;
       const arg = ctx.target.isRemote ? sshUri(ctx.target.profile!, ctx.target.path) : ctx.target.path;
-      await spawnDetached(cli, [arg]);
+      if (PLATFORM === 'win32') await spawnWinScriptSafe(cli, [arg]);
+      else await spawnDetached(cli, [arg]);
     }
   },
   {

@@ -2,6 +2,8 @@ import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { FastExportFilter, FastExportFilterStats, normaliseHistoryPath } from './historyFilter';
+import { isRemoteRepo, parseRemoteRepo } from './remote/repoTransport';
+import { sshManager } from './remote/sshManager';
 
 /**
  * What the History Rewriter needs to run Git (implemented by the DataSource).
@@ -241,6 +243,15 @@ export class HistoryRewriter {
 	 */
 	public async createBackup(repo: string, bundlePath: string, cancellation: CancellationRequest) {
 		await fs.promises.mkdir(path.dirname(bundlePath), { recursive: true });
+		if (isRemoteRepo(repo)) {
+			const result = await this.run(repo, ['bundle', 'create', '-', '--all'], null, cancellation);
+			if (result.code !== 0 || cancellation.isCancellationRequested) {
+				if (cancellation.isCancellationRequested) throw new HistoryRewriteCancelledError();
+				throw new Error(result.stderr || 'Unable to create the backup.');
+			}
+			await fs.promises.writeFile(bundlePath, result.stdout);
+			return;
+		}
 		const result = await this.run(repo, ['bundle', 'create', bundlePath, '--all'], null, cancellation);
 		if (result.code !== 0 || cancellation.isCancellationRequested) {
 			await fs.promises.unlink(bundlePath).catch(() => { });
@@ -385,10 +396,25 @@ export class HistoryRewriter {
 		// Allow restoring immediately after Remove Files from History added the removed paths to .gitignore
 		const dirtyLines = status.stdout.toString().split(/\r?\n/).filter((line) => line !== '' && !/^[ M]{2} \.gitignore$/.test(line));
 		if (status.code !== 0 || dirtyLines.length > 0) throw new Error(UNCOMMITTED_CHANGES_ERROR);
-		const fetch = await this.run(repo, ['fetch', '--force', '--update-head-ok', '--no-tags', bundlePath, '+refs/heads/*:refs/heads/*', '+refs/tags/*:refs/tags/*']);
-		if (fetch.code !== 0) throw new Error(fetch.stderr || 'Unable to read the backup.');
-		const reset = await this.run(repo, ['reset', '--hard', '--quiet']);
-		if (reset.code !== 0) throw new Error(reset.stderr);
+
+		const remote = parseRemoteRepo(repo);
+		let remoteTmpDir: string | null = null;
+		let fetchSource = bundlePath;
+		try {
+			if (remote !== null) {
+				const bundleBytes = await fs.promises.readFile(bundlePath);
+				remoteTmpDir = await sshManager.createRemoteTempDir(remote.hostId, 'git-map-bundle-', { 'backup.bundle': bundleBytes });
+				fetchSource = remoteTmpDir + '/backup.bundle';
+			}
+			const fetch = await this.run(repo, ['fetch', '--force', '--update-head-ok', '--no-tags', fetchSource, '+refs/heads/*:refs/heads/*', '+refs/tags/*:refs/tags/*']);
+			if (fetch.code !== 0) throw new Error(fetch.stderr || 'Unable to read the backup.');
+			const reset = await this.run(repo, ['reset', '--hard', '--quiet']);
+			if (reset.code !== 0) throw new Error(reset.stderr);
+		} finally {
+			if (remote !== null && remoteTmpDir !== null) {
+				await sshManager.removeRemoteDir(remote.hostId, remoteTmpDir).catch(() => {});
+			}
+		}
 	}
 
 	/**

@@ -1,6 +1,7 @@
 import * as cp from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { AI_PROVIDER_VALUES } from './aiProviders';
@@ -262,10 +263,14 @@ export function getSortedRepositoryPaths(repos: GitRepoSet, order: RepoDropdownO
  * @returns A promise resolving to the ErrorInfo of the executed command.
  */
 export function archive(repo: string, ref: string, dataSource: DataSource): Thenable<ErrorInfo> {
+	const safeRef = ref.replace(/[\\/:*?"<>|]/g, '-');
+	const defaultFile = isRemoteRepo(repo)
+		? path.join(os.homedir(), `${getRepoName(repo)}-${safeRef}.zip`)
+		: path.join(path.dirname(repo), `${getRepoName(repo)}-${safeRef}.zip`);
 	return vscode.window.showSaveDialog({
-		defaultUri: vscode.Uri.file(repo),
+		defaultUri: vscode.Uri.file(defaultFile),
 		saveLabel: t('Create Archive'),
-		filters: { [t('TAR Archive')]: ['tar'], [t('ZIP Archive')]: ['zip'] }
+		filters: { [t('ZIP Archive')]: ['zip'], [t('TAR Archive')]: ['tar'] }
 	}).then(
 		(uri) => {
 			if (uri) {
@@ -500,9 +505,13 @@ export function updateExtensionSetting(key: string, value: string | boolean | Re
 			return null;
 		});
 	}
-	return updateConfigResilient(config, key, normalisedValue, !key.startsWith('ai.')).then(
-		(wrote) => wrote ? null : t('Visual Studio Code was unable to update the Extension Setting "{0}".', 'git-map.' + key)
-	);
+	return updateConfigResilient(config, key, normalisedValue, !key.startsWith('ai.')).then(async (wrote) => {
+		if (wrote && key === 'ai.provider') {
+			await updateConfigResilient(config, 'ai.apiFormat', '', false);
+			await updateConfigResilient(config, 'ai.endpointPath', '', false);
+		}
+		return wrote ? null : t('Visual Studio Code was unable to update the Extension Setting "{0}".', 'git-map.' + key);
+	});
 }
 
 /**
@@ -895,7 +904,8 @@ export function resolveSpawnOutput(cmd: cp.ChildProcess, options?: SpawnOutputOp
 		new Promise<string>((resolve) => {
 			// stderr promise
 			let stderr = '';
-			cmd.stderr!.on('data', (d) => {
+			cmd.stderr!.setEncoding('utf8');
+			cmd.stderr!.on('data', (d: string) => {
 				if (stderr.length < 65536) stderr += d;
 			});
 			cmd.stderr!.on('close', () => resolve(stderr));

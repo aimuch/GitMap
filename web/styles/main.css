@@ -1485,6 +1485,18 @@ svg.openFolderIcon, svg.closedFolderIcon, svg.fileIcon{
 	background-color:var(--vscode-list-activeSelectionBackground, var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,0.25)));
 	color:var(--vscode-list-activeSelectionForeground, inherit);
 }
+body.vscode-light #commitTable tr.commit.commitDetailsOpen,
+body.vscode-light #commitTable tr.commit.commitDetailsOpen:hover,
+body.vscode-light #commitTable tr.commit.commitDetailsOpen.contextMenuActive,
+body.vscode-light #commitTable tr.commit.commitDetailsOpen.dialogActive,
+body.vscode-light #commitTable tr.commit.commitDetailsOpen.graphVertexActive,
+body.vscode-light #commitTable tr.commit.commitDetailsOpen.rowActionsTarget{
+	background-color:color-mix(in srgb, var(--vscode-focusBorder, #005fb8) 14%, var(--vscode-editor-background, #ffffff));
+	color:var(--vscode-editor-foreground, #1f2328);
+}
+#commitTable tr.commit.commitDetailsOpen td:first-child{
+	box-shadow:inset 3px 0 0 var(--vscode-focusBorder, #0078d4);
+}
 
 /* The commits selected with Shift (+ Ctrl / Cmd) + click */
 #commitTable tr.commit.multiSelected, #commitTable tr.commit.multiSelected:hover{
@@ -1500,19 +1512,36 @@ svg.openFolderIcon, svg.closedFolderIcon, svg.fileIcon{
 #commitTable td.descriptionCol{
 	position:relative;
 }
-#rowActions{
+#rowActions, #cdvFileFloatingBar{
 	position:absolute;
-	z-index:3; /* Above the graph, below the frozen column headers */
+	z-index:12; /* Above the graph & file rows, below the frozen column headers */
 	display:flex;
 	align-items:center;
-	gap:1px;
-	height:min(28px, calc(var(--git-graph-rowHeight) - 2px));
-	padding:0 3px;
+	gap:3px;
+	height:min(27px, calc(var(--git-graph-rowHeight, 26px) - 1px));
+	padding:0 5px;
 	box-sizing:border-box;
-	border-radius:7px;
-	border:1px solid color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 70%, transparent);
-	background:color-mix(in srgb, var(--vscode-foreground, #ccc) 15%, var(--vscode-editor-background, #1e1e1e));
-	box-shadow:0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,0.45));
+	border-radius:8px;
+	border:1.5px solid var(--gm-floating-bar-border, #4d8bf5);
+	background:var(--gm-floating-bar-bg, #263142);
+	box-shadow:var(--gm-floating-bar-shadow, 0 8px 24px rgba(0,0,0,0.55));
+}
+#cdvFileFloatingBar.hidden{
+	display:none !important;
+}
+#cdvFileFloatingBar .rowAction svg{
+	width:13px;
+	height:13px;
+	fill:currentColor;
+}
+.hasFloatingFileBar{
+	position:relative !important;
+}
+.hasFloatingFileBar .fileTreeFileAction{
+	display:none !important;
+}
+.fileTreeFileRecord.rowActionsTarget{
+	background-color:var(--vscode-list-hoverBackground, rgba(128,128,128,0.15));
 }
 /* The row keeps its hover background while the mouse is over its buttons (which aren't inside it) */
 #commitTable tr.commit.rowActionsTarget{
@@ -1656,8 +1685,19 @@ body.vscode-high-contrast #commitTable tr.commit.findCurrentCommit{
 	font-size:11px;
 	font-weight:600;
 	color:var(--git-graph-color);
-	filter:brightness(1.25);
 	white-space:nowrap;
+}
+body.vscode-dark .gitRefTrack{
+	filter:brightness(1.25);
+}
+body.vscode-light .gitRefTrack{
+	filter:brightness(0.76) saturate(1.15);
+}
+
+/* Standalone shell already provides Sidebar repository switcher & TopBar terminal button */
+body.gitmap-standalone #repoControl,
+body.gitmap-standalone #terminalBtn{
+	display:none !important;
 }
 
 /* The Branches / Tags column (on the left of the graph) */
@@ -3035,6 +3075,11 @@ input[type=checkbox], input[type=radio]{
 
 label:hover > .customCheckbox, label:hover > .customRadio{
 	background-color:rgba(128,128,128,0.2);
+}
+
+label > input:focus-visible ~ .customCheckbox, label > input:focus-visible ~ .customRadio{
+	outline:2px solid var(--vscode-focusBorder);
+	outline-offset:1px;
 }
 
 .customCheckbox:after, .customRadio:after{

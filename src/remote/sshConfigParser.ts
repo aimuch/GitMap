@@ -8,6 +8,8 @@ export interface SshConfigHostEntry {
   user?: string;
   port: number;
   identityFiles: string[];
+  identityAgent?: string;
+  identitiesOnly?: boolean;
   proxyJump?: string;
   forwardAgent?: boolean;
   sourceFile: string;
@@ -72,7 +74,7 @@ function tokenizeLine(line: string): string[] {
   let inQuotes = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
-    if (ch === '#' && !inQuotes) {
+    if (ch === '#' && !inQuotes && (i === 0 || line[i - 1] === ' ' || line[i - 1] === '\t')) {
       break;
     }
     if (ch === '"') {
@@ -95,7 +97,12 @@ function tokenizeLine(line: string): string[] {
   return tokens;
 }
 
-function parseConfigFileRecursive(filePath: string, visited: Set<string>, blocks: RawHostBlock[]): void {
+function parseConfigFileRecursive(
+  filePath: string,
+  visited: Set<string>,
+  blocks: RawHostBlock[],
+  initialPatterns: string[] = ['*']
+): void {
   let real: string;
   try {
     real = fs.realpathSync(filePath);
@@ -114,7 +121,7 @@ function parseConfigFileRecursive(filePath: string, visited: Set<string>, blocks
 
   const baseDir = path.dirname(real);
   let currentBlock: RawHostBlock = {
-    patterns: ['*'],
+    patterns: initialPatterns.slice(),
     options: {},
     sourceFile: real
   };
@@ -129,9 +136,10 @@ function parseConfigFileRecursive(filePath: string, visited: Set<string>, blocks
     const values = tokens.slice(1);
 
     if (key === 'include') {
+      const inherited = currentBlock.patterns.length > 0 ? currentBlock.patterns : ['*'];
       for (const incPat of values) {
         for (const incFile of expandIncludeGlob(incPat, baseDir)) {
-          parseConfigFileRecursive(incFile, visited, blocks);
+          parseConfigFileRecursive(incFile, visited, blocks, inherited);
         }
       }
       continue;
@@ -148,7 +156,6 @@ function parseConfigFileRecursive(filePath: string, visited: Set<string>, blocks
     }
 
     if (key === 'match') {
-      // Skip complex Match blocks cleanly
       currentBlock = {
         patterns: [],
         options: {},
@@ -164,16 +171,29 @@ function parseConfigFileRecursive(filePath: string, visited: Set<string>, blocks
   }
 }
 
-function expandSshTokens(value: string, hostName: string, port: number, user: string): string {
+function expandSshTokens(
+  value: string,
+  hostName: string,
+  port: number,
+  remoteUser: string,
+  originalAlias: string
+): string {
+  const homeDir = os.homedir();
+  const localUser = os.userInfo().username;
   return expandTilde(
     value
       .replace(/%%/g, '\0')
+      .replace(/%d/g, homeDir)
+      .replace(/%u/g, localUser)
+      .replace(/%n/g, originalAlias)
       .replace(/%h/g, hostName)
       .replace(/%p/g, String(port))
-      .replace(/%r/g, user)
+      .replace(/%r/g, remoteUser)
       .replace(/\0/g, '%')
   );
 }
+
+let defaultConfigCache: { at: number; mtimeMs: number; entries: SshConfigHostEntry[] } | null = null;
 
 /**
  * Parse the user's ~/.ssh/config (including Include files) and return all concrete Host entries.
@@ -182,13 +202,23 @@ export function parseUserSshConfig(customConfigPath?: string): SshConfigHostEntr
   const sshConfigPath = customConfigPath || path.join(os.homedir(), '.ssh', 'config');
   if (!fs.existsSync(sshConfigPath)) return [];
 
+  if (!customConfigPath) {
+    try {
+      const st = fs.statSync(sshConfigPath);
+      const now = Date.now();
+      if (defaultConfigCache && now - defaultConfigCache.at < 2000 && defaultConfigCache.mtimeMs === st.mtimeMs) {
+        return defaultConfigCache.entries;
+      }
+    } catch (_) {}
+  }
+
   const blocks: RawHostBlock[] = [];
   parseConfigFileRecursive(sshConfigPath, new Set<string>(), blocks);
 
   const concreteAliases = new Map<string, string>();
   for (const block of blocks) {
     for (const pat of block.patterns) {
-      if (!pat.includes('*') && !pat.includes('?') && !pat.startsWith('!')) {
+      if (!pat.includes('*') && !pat.includes('?') && !pat.startsWith('!') && !pat.startsWith('-')) {
         if (!concreteAliases.has(pat)) {
           concreteAliases.set(pat, block.sourceFile);
         }
@@ -218,11 +248,25 @@ export function parseUserSshConfig(customConfigPath?: string): SshConfigHostEntr
     const port = parseInt(merged['port']?.[0] || '22', 10) || 22;
     const user = merged['user']?.[0] || undefined;
     const effectiveUser = user || defaultSystemUser;
-    const hostName = expandSshTokens(rawHostName, alias, port, effectiveUser);
+    const hostName = expandSshTokens(rawHostName, alias, port, effectiveUser, alias);
 
     const identityFiles = (merged['identityfile'] || [])
-      .map((f) => expandSshTokens(f, hostName, port, effectiveUser))
+      .map((f) => expandSshTokens(f, hostName, port, effectiveUser, alias))
       .filter((f) => fs.existsSync(f));
+
+    const rawAgent = merged['identityagent']?.[0];
+    let identityAgent: string | undefined;
+    if (rawAgent) {
+      if (rawAgent.toLowerCase() === 'none') {
+        identityAgent = 'none';
+      } else if (rawAgent === 'SSH_AUTH_SOCK') {
+        identityAgent = process.env.SSH_AUTH_SOCK;
+      } else {
+        identityAgent = expandSshTokens(rawAgent, hostName, port, effectiveUser, alias);
+      }
+    }
+
+    const identitiesOnly = merged['identitiesonly']?.[0]?.toLowerCase() === 'yes';
 
     const proxyJump = merged['proxyjump']?.[0] && merged['proxyjump'][0].toLowerCase() !== 'none'
       ? merged['proxyjump'][0]
@@ -235,10 +279,19 @@ export function parseUserSshConfig(customConfigPath?: string): SshConfigHostEntr
       user,
       port,
       identityFiles,
+      identityAgent,
+      identitiesOnly,
       proxyJump,
       forwardAgent,
       sourceFile
     });
+  }
+
+  if (!customConfigPath) {
+    try {
+      const st = fs.statSync(sshConfigPath);
+      defaultConfigCache = { at: Date.now(), mtimeMs: st.mtimeMs, entries: results };
+    } catch (_) {}
   }
 
   return results;

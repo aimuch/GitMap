@@ -1036,7 +1036,7 @@ class Graph {
 
 	private showTooltip(id: number, vertexScreenY: number) {
 		if (this.tooltipVertex !== null) {
-			this.tooltipVertex.setAttribute('r', this.tooltipVertex.classList.contains('stashOuter') ? '5.5' : '5');
+			this.tooltipVertex.setAttribute('r', this.tooltipVertex.classList.contains('avatar') ? '10' : this.tooltipVertex.classList.contains('stashOuter') ? '5.5' : '5');
 		}
 
 		const children = this.getAllChildren(id);
@@ -1136,7 +1136,7 @@ class Graph {
 		}
 
 		if (this.tooltipVertex !== null) {
-			this.tooltipVertex.setAttribute('r', this.tooltipVertex.classList.contains('stashOuter') ? '4.5' : '4');
+			this.tooltipVertex.setAttribute('r', this.tooltipVertex.classList.contains('avatar') ? '9' : this.tooltipVertex.classList.contains('stashOuter') ? '4.5' : '4');
 			this.tooltipVertex = null;
 		}
 	}

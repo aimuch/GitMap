@@ -8,10 +8,10 @@ const ROW_ACTION_ICONS: { readonly [action: string]: string } = {
 
 /** The horizontal gap between the pointer and the buttons (they're never under the pointer, so that clicking a row doesn't press one). */
 const ROW_ACTIONS_POINTER_GAP = 16;
-/** How far the pointer can move away from the buttons (along the row) before they move back next to it. */
-const ROW_ACTIONS_FOLLOW_DISTANCE = 72;
-/** The margin kept between the buttons and the edges of the view. */
-const ROW_ACTIONS_EDGE_MARGIN = 4;
+/** Tight approach zone around the floating bar: moving toward/onto the bar keeps it steady for clicking; moving away follows the pointer immediately. */
+const ROW_ACTIONS_APPROACH_PAD = 24;
+/** The margin kept between the buttons and the edges of the view (clears scrollbar & overview markers). */
+const ROW_ACTIONS_EDGE_MARGIN = 18;
 
 /**
  * Implements the buttons of the most common actions on a commit, shown on its row while the mouse is over it (as in GitLens), and a
@@ -70,7 +70,13 @@ class RowActions {
 		}
 		const commit = this.view.getCommitOfElem(commitElem);
 		const contentElem = document.getElementById('content');
-		if (commit === null || commit.hash === UNCOMMITTED || commit.stash !== null || contentElem === null) {
+		if (
+			commit === null ||
+			commit.hash === UNCOMMITTED ||
+			commit.stash !== null ||
+			contentElem === null ||
+			commitElem.getBoundingClientRect().top < this.view.getVisibleCommitsTop() - 4
+		) {
 			this.hide();
 			return;
 		}
@@ -86,8 +92,12 @@ class RowActions {
 		this.actions = actions;
 		this.shown = shown;
 
-		// The titles are HTML (e.g. "&#8230;"), as in the context menu
-		const button = (action: string, title: string, icon: string) => '<button type="button" class="rowAction" data-action="' + action + '" title="' + title + '" aria-label="' + title + '" tabindex="-1">' + icon + '</button>';
+		// The titles are HTML (e.g. "&#8230;"), as in the context menu — sanitize quotes/tags for HTML attributes
+		const safeAttr = (raw: string) => raw.replace(/<[^>]*>/g, '').replace(/"/g, '&quot;');
+		const button = (action: string, title: string, icon: string) => {
+			const clean = safeAttr(title);
+			return '<button type="button" class="rowAction" data-action="' + action + '" title="' + clean + '" aria-label="' + clean + '" tabindex="-1">' + icon + '</button>';
+		};
 		this.elem.innerHTML = shown.map((action, index) => button(String(index), action.title, ROW_ACTION_ICONS[action.id!] || action.icon || '')).join('') +
 			button('more', t('More Actions') + ELLIPSIS, ROW_ACTION_ICONS.more);
 
@@ -98,14 +108,20 @@ class RowActions {
 		this.place(clientX, true);
 	}
 
+	public isShownFor(commitElem: HTMLElement) {
+		return this.commitElem === commitElem && this.elem.isConnected;
+	}
+
 	/**
-	 * Move the buttons back next to the pointer when it has moved far away from them along the row (only when they follow the pointer).
+	 * Move the buttons back next to the pointer when the pointer moves away from the bar's immediate click approach zone.
 	 * @param clientX The horizontal position of the pointer.
 	 */
 	public follow(clientX: number) {
 		if (this.commitElem === null || !this.elem.isConnected) return;
 		const bounds = this.elem.getBoundingClientRect();
-		if (clientX < bounds.left - ROW_ACTIONS_FOLLOW_DISTANCE || clientX > bounds.right + ROW_ACTIONS_FOLLOW_DISTANCE) this.place(clientX, false);
+		if (clientX < bounds.left - ROW_ACTIONS_APPROACH_PAD || clientX > bounds.right + ROW_ACTIONS_APPROACH_PAD) {
+			this.place(clientX, false);
+		}
 	}
 
 	/**
@@ -118,9 +134,13 @@ class RowActions {
 		if (commitElem === null || contentElem === null) return;
 		const position = this.view.getRowActionsConfig().position;
 		const contentBounds = contentElem.getBoundingClientRect(), rowBounds = commitElem.getBoundingClientRect(), viewBounds = this.view.viewElem.getBoundingClientRect();
+		const cdvElem = document.getElementById('cdv');
+		const cdvLeft = cdvElem !== null && cdvElem.classList.contains('docked') && cdvElem.classList.contains('right')
+			? cdvElem.getBoundingClientRect().left
+			: Infinity;
 		const width = this.elem.offsetWidth;
 		const minLeft = Math.max(viewBounds.left, rowBounds.left) + ROW_ACTIONS_EDGE_MARGIN;
-		const maxLeft = Math.min(viewBounds.right, rowBounds.right) - ROW_ACTIONS_EDGE_MARGIN - width;
+		const maxLeft = Math.max(minLeft, Math.min(viewBounds.right, rowBounds.right, cdvLeft) - ROW_ACTIONS_EDGE_MARGIN - width);
 
 		let left: number;
 		if (position === 'Pointer') {

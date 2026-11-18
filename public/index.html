@@ -4,30 +4,22 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GitMap</title>
-  <link rel="icon" type="image/png" href="/resources/icon.png" />
+  <link id="appFavicon" rel="icon" type="image/png" href="/resources/icons/classic-dark.png" />
   <link rel="stylesheet" href="/webview-theme.css" />
   <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
   <link rel="stylesheet" href="/app.css" />
 </head>
 <body class="vscode-dark theme-dark">
-  <script>
-    // Apply the saved theme before first paint (avoids a dark flash in light mode)
-    (function () {
-      var pref = 'system';
-      try { pref = localStorage.getItem('gitmap.theme') || 'system'; } catch (_) {}
-      var theme = pref === 'light' || pref === 'dark' ? pref : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-      document.body.className = theme === 'light' ? 'vscode-light theme-light' : 'vscode-dark theme-dark';
-    })();
-  </script>
+  <script src="/theme-init.js"></script>
   <div id="appShell">
     <!-- Top Title / Command Bar -->
     <header id="topBar">
       <div class="topbar-left">
         <button id="toggleSidebarBtn" class="icon-btn" title="Toggle Sidebar (Cmd/Ctrl+B)" aria-label="Toggle Sidebar">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><line x1="6" y1="2.5" x2="6" y2="13.5"/></svg>
+          <span class="icon-slot" data-icon="sidebar"></span>
         </button>
-        <div class="brand">
-          <img src="/resources/icon.png" alt="GitMap" class="brand-icon" />
+        <div class="brand" id="brandLogoBtn" title="点击切换应用图标 / Click to switch app icon">
+          <img id="brandIconImg" src="/resources/icons/classic-dark.svg" alt="GitMap" class="brand-icon" />
           <span class="brand-name">GitMap</span>
         </div>
         <div id="activeRepoBadge" class="repo-location-pill hidden" title="Click to copy repository path"></div>
@@ -35,16 +27,36 @@
 
       <div class="topbar-right">
         <button id="btnAddLocal" class="top-pill-btn">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.8h4.5A1.5 1.5 0 0 1 14 6.3v6.2a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5z"/></svg>
+          <span class="icon-slot" data-icon="folder"></span>
           <span data-i18n="addLocal">本地仓库</span>
         </button>
         <button id="btnConnectSsh" class="top-pill-btn primary-pill">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 4L1.5 7.5 5 11"/><path d="M11 5l3.5 3.5L11 12"/><line x1="2" y1="7.5" x2="9" y2="7.5"/><line x1="7" y1="8.5" x2="14" y2="8.5"/></svg>
+          <span class="icon-slot" data-icon="remote"></span>
           <span data-i18n="remoteSsh">Remote - SSH</span>
         </button>
+        <button id="btnOpenRepoFiles" class="top-pill-btn" title="Browse & Manage Repository Files (Cmd/Ctrl+E)">
+          <span class="icon-slot" data-icon="folderOpen"></span>
+          <span data-i18n="repoFilesBtn">仓库文件</span>
+        </button>
+        <button id="btnOpenScm" class="top-pill-btn" title="Stage & Commit Working Tree (Cmd/Ctrl+Shift+G)">
+          <span class="icon-slot" data-icon="commit"></span>
+          <span data-i18n="scmCommit">暂存与提交</span>
+          <span id="scmDirtyBadge" class="inline-count-badge hidden">0</span>
+        </button>
+        <div class="tools-menu-anchor">
+          <button id="btnToolsMenu" class="top-pill-btn" title="Git & AI Advanced Tools" aria-haspopup="menu">
+            <span class="icon-slot" data-icon="layers"></span>
+            <span data-i18n="toolsMenu">工具箱</span>
+            <span class="icon-slot" data-icon="chevronDown"></span>
+          </button>
+          <div id="toolsPopover" class="tools-popover hidden" role="menu"></div>
+        </div>
         <button id="btnToggleTerminal" class="top-pill-btn" title="Toggle Integrated Terminal (Ctrl+`)">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M4.8 6l2.5 2-2.5 2"/><line x1="8.2" y1="10" x2="11.2" y2="10"/></svg>
+          <span class="icon-slot" data-icon="terminal"></span>
           <span data-i18n="terminal">终端</span>
+        </button>
+        <button id="btnCommandPalette" class="icon-btn" title="Command Palette (Cmd/Ctrl+P)" aria-label="Command Palette">
+          <span class="icon-slot" data-icon="command"></span>
         </button>
         <button id="btnTransfers" class="icon-btn hidden" title="Transfers" aria-label="Transfers">
           <span class="icon-slot" data-icon="transfers"></span><span id="transfersBadge" class="icon-badge hidden">0</span>
@@ -55,7 +67,7 @@
       </div>
     </header>
 
-    <!-- Main Body Split: Sidebar + Workspace -->
+    <!-- Main Body Split: Sidebar + Resizer + Workspace -->
     <div id="mainSplit">
       <aside id="sidebar">
         <label class="sidebar-search">
@@ -70,7 +82,9 @@
             <div class="sidebar-section-header">
               <button type="button" class="section-toggle"><span class="chev icon-slot" data-icon="chevronDown"></span><span data-i18n="localRepos">本地仓库</span><span class="section-count" id="localRepoCount"></span></button>
               <span class="sidebar-section-actions">
-                <button id="sidebarAddLocalBtn" class="mini-icon-btn" title="Add Local Repository"><span class="icon-slot" data-icon="plus"></span></button>
+                <button id="sidebarFetchAllBtn" class="mini-icon-btn" title="同步全部仓库 / Fetch All Repositories"><span class="icon-slot" data-icon="refresh"></span></button>
+                <button id="sidebarCloneBtn" class="mini-icon-btn" title="克隆 Git 仓库 / Clone Repository"><span class="icon-slot" data-icon="gitClone"></span></button>
+                <button id="sidebarAddLocalBtn" class="mini-icon-btn" title="添加本地仓库 / Add Local Repository"><span class="icon-slot" data-icon="plus"></span></button>
               </span>
             </div>
             <div id="localRepoList" class="sidebar-list"></div>
@@ -81,27 +95,82 @@
             <div class="sidebar-section-header">
               <button type="button" class="section-toggle"><span class="chev icon-slot" data-icon="chevronDown"></span><span data-i18n="remoteServers">远程服务器</span><span class="section-count" id="remoteRepoCount"></span></button>
               <span class="sidebar-section-actions">
-                <button id="sidebarRefreshSshBtn" class="mini-icon-btn" title="Manage SSH Hosts"><span class="icon-slot" data-icon="settings"></span></button>
-                <button id="sidebarAddRemoteBtn" class="mini-icon-btn" title="Browse Remote Repository Paths"><span class="icon-slot" data-icon="plus"></span></button>
+                <button id="sidebarRefreshSshBtn" class="mini-icon-btn" title="新增 SSH 服务器 / Add SSH Server"><span class="icon-slot" data-icon="serverPlus"></span></button>
+                <button id="sidebarAddRemoteBtn" class="mini-icon-btn" title="浏览远程目录与打开仓库 / Browse Remote Repositories"><span class="icon-slot" data-icon="folderSearch"></span></button>
               </span>
             </div>
             <div id="remoteTagFilter" class="tag-filter hidden"></div>
             <div id="remoteRepoList" class="sidebar-list host-tree"></div>
           </section>
         </div>
-        <div id="sidebarResizer" title="Drag to resize"></div>
       </aside>
+      <div id="sidebarResizer" title="Drag to resize sidebar"></div>
 
-      <!-- Workspace Area: Tabs + Content + Bottom Terminal -->
+      <!-- Workspace Area: Operation Banner + Tabs/Layout Bar + Content + Bottom Terminal -->
       <main id="workspaceArea">
-        <div id="tabBar" role="tablist"></div>
+        <div id="repoOperationBanner" class="repo-op-banner hidden"></div>
+        <div id="wsHeaderBar" class="ws-header-bar">
+          <div id="tabBar" role="tablist"></div>
+          <div id="wsLayoutControls" class="ws-layout-controls" role="group" aria-label="Workspace Layout">
+            <button type="button" class="ws-layout-btn active" data-ws-layout="tabs" title="单栏标签页模式 / Single-Pane Tabs">
+              <span class="icon-slot" data-icon="layoutTabs"></span>
+              <span data-i18n="layoutTabsShort">单栏</span>
+            </button>
+            <button type="button" class="ws-layout-btn" data-ws-layout="split-lr" title="左右分栏（提交历史 + 仓库文件） / Split Left-Right (Cmd/Ctrl+\)">
+              <span class="icon-slot" data-icon="splitHorizontal"></span>
+              <span data-i18n="layoutSplitLrShort">左右分栏</span>
+            </button>
+            <button type="button" class="ws-layout-btn" data-ws-layout="split-tb" title="上下分栏（提交历史 + 仓库文件） / Split Top-Bottom">
+              <span class="icon-slot" data-icon="splitVertical"></span>
+              <span data-i18n="layoutSplitTbShort">上下分栏</span>
+            </button>
+            <button type="button" id="btnSwapSplitPanes" class="ws-layout-btn ws-swap-btn hidden" title="调换两栏位置（左⇄右 / 上⇄下） / Swap Split Panes">
+              <span class="icon-slot" data-icon="swapPanes"></span>
+              <span data-i18n="swapPanesShort">调换位置</span>
+            </button>
+          </div>
+        </div>
 
         <div id="tabPanels">
-          <!-- Permanent Git Map Graph Panel -->
-          <div id="panel-graph" class="tab-panel active">
-            <iframe id="gitMapFrame" src="/webview/git-map" title="Git Map Graph"></iframe>
+          <div id="coreSplitStage" class="core-split-stage mode-tabs active">
+            <!-- Permanent Git Map Graph Panel -->
+            <div id="panel-graph" class="tab-panel core-pane active" data-tab-id="graph">
+              <div class="split-pane-header" draggable="true" data-pane-tab="graph" title="可拖拽或右键切换分栏位置 / Drag or right-click to move pane">
+                <span class="split-pane-pos-badge"></span>
+                <span class="icon-slot" data-icon="branch"></span>
+                <span data-i18n="commitHistoryPane">提交历史 (Git Map)</span>
+                <span class="split-pane-spacer"></span>
+                <button type="button" class="mini-icon-btn act-swap-panes" title="调换两栏位置 / Swap Panes"><span class="icon-slot" data-icon="swapPanes"></span></button>
+                <button type="button" class="mini-icon-btn act-max-pane" data-tab="graph" title="单栏全屏显示提交历史 / Maximize Commit History"><span class="icon-slot" data-icon="layoutTabs"></span></button>
+              </div>
+              <iframe id="gitMapFrame" src="/webview/git-map" title="Git Map Graph"></iframe>
+            </div>
+
+            <div id="workspaceSplitResizer" class="ws-split-resizer" title="拖拽调整分栏大小，双击恢复 50:50 / Drag to resize, double-click to reset 50:50"></div>
+
+            <!-- Permanent Repository File Explorer Panel -->
+            <div id="panel-files" class="tab-panel repo-files-panel core-pane" data-tab-id="files">
+              <div class="split-pane-header" draggable="true" data-pane-tab="files" title="可拖拽或右键切换分栏位置 / Drag or right-click to move pane">
+                <span class="split-pane-pos-badge"></span>
+                <span class="icon-slot" data-icon="folderOpen"></span>
+                <span data-i18n="repoFilesPane">仓库文件资源管理器</span>
+                <span class="split-pane-spacer"></span>
+                <button type="button" class="mini-icon-btn act-swap-panes" title="调换两栏位置 / Swap Panes"><span class="icon-slot" data-icon="swapPanes"></span></button>
+                <button type="button" class="mini-icon-btn act-max-pane" data-tab="files" title="单栏全屏显示仓库文件 / Maximize Repo Files"><span class="icon-slot" data-icon="layoutTabs"></span></button>
+              </div>
+              <div id="repoFilesEmpty" class="browser-empty-state">
+                <p data-i18n="noActiveRepoForFiles">请先在左侧选择或添加一个本地 / Remote-SSH 仓库，即可在此浏览并管理仓库文件。</p>
+              </div>
+              <div id="repoFilesSplitBody" class="repo-files-split-body hidden">
+                <div id="repoFilesBrowserRoot" class="fb-root repo-files-fb"></div>
+                <div id="repoFilesPreviewPane" class="repo-files-preview-pane hidden"></div>
+              </div>
+            </div>
+            <!-- Dynamic Diff / File / VisualHistory / TimeMachine panels appended here -->
           </div>
-          <!-- Dynamic Diff / File / VisualHistory panels appended here -->
+          <div id="wsDropOverlay" class="ws-drop-overlay hidden" aria-hidden="true">
+            <div class="ws-drop-preview"><span class="ws-drop-label"></span></div>
+          </div>
         </div>
 
         <!-- Bottom Collapsible Integrated Terminal Drawer -->
@@ -112,7 +181,7 @@
             <div class="terminal-actions">
               <button id="btnNewRepoTerm" class="mini-btn" data-i18n="newRepoShell">+ 当前仓库终端</button>
               <button id="btnOpenSysTerm" class="mini-btn" data-i18n="openSysTerm">↗ 系统终端</button>
-              <button id="btnCloseTermDrawer" class="mini-icon-btn" title="Hide Terminal">✕</button>
+              <button id="btnCloseTermDrawer" class="mini-icon-btn" title="Hide Terminal" aria-label="Hide Terminal"><span class="icon-slot" data-icon="close"></span></button>
             </div>
           </div>
           <div id="terminalContainers" class="terminal-containers"></div>
@@ -123,13 +192,13 @@
 
   <!-- Remote - SSH Host Manager & Path Browser Modal -->
   <div id="sshModal" class="modal-backdrop hidden">
-    <div class="modal-window modal-xl">
+    <div class="modal-window modal-xl" role="dialog" aria-modal="true" aria-labelledby="sshModalHeading">
       <div class="modal-header">
         <div class="modal-title-group">
           <span class="remote-badge">SSH</span>
-          <h3 data-i18n="sshModalTitle">Remote - SSH 远程仓库路径浏览</h3>
+          <h3 id="sshModalHeading" data-i18n="sshModalTitle">Remote - SSH 远程仓库路径浏览</h3>
         </div>
-        <button class="icon-btn modal-close" data-close="sshModal">✕</button>
+        <button class="icon-btn modal-close" data-close="sshModal" aria-label="Close"><span class="icon-slot" data-icon="close"></span></button>
       </div>
       <div class="ssh-modal-body">
         <!-- Left Column: SSH Hosts & Add Form -->
@@ -163,7 +232,13 @@
                 </select>
               </label>
             </div>
-            <label id="sshKeyField"><span data-i18n="privateKeyPath">私钥路径 (可选)</span><input type="text" id="sshFormKey" placeholder="~/.ssh/id_ed25519" /></label>
+            <label id="sshKeyField">
+              <span data-i18n="privateKeyPath">私钥路径 (可选)</span>
+              <span class="input-with-btn">
+                <input type="text" id="sshFormKey" placeholder="~/.ssh/id_ed25519" />
+                <button type="button" id="btnBrowseSshKey" class="mini-btn hidden" title="Browse Private Key File">…</button>
+              </span>
+            </label>
             <label id="sshPasswordField"><span data-i18n="passwordOpt">密码 (可选，留空则在连接时询问)</span><input type="password" id="sshFormPassword" placeholder="••••••••" /></label>
             <div class="form-row-2">
               <label><span>ProxyJump (可选)</span><input type="text" id="sshFormJump" placeholder="bastion-host" /></label>
@@ -190,16 +265,31 @@
 
   <!-- Local Repository / Directory Browser Modal -->
   <div id="localModal" class="modal-backdrop hidden">
-    <div class="modal-window modal-lg">
+    <div class="modal-window modal-lg" role="dialog" aria-modal="true" aria-labelledby="localModalHeading">
       <div class="modal-header">
         <div class="modal-title-group">
-          <h3 data-i18n="localModalTitle">添加本地 Git 仓库</h3>
+          <h3 id="localModalHeading" data-i18n="localModalTitle">添加本地 Git 仓库</h3>
         </div>
-        <button class="icon-btn modal-close" data-close="localModal">✕</button>
+        <button class="icon-btn modal-close" data-close="localModal" aria-label="Close"><span class="icon-slot" data-icon="close"></span></button>
       </div>
       <div class="local-modal-body">
         <div id="localBrowserRoot" class="fb-root"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- Working Tree Stage & Commit Modal -->
+  <div id="scmModal" class="modal-backdrop hidden">
+    <div class="modal-window modal-md" role="dialog" aria-modal="true" aria-labelledby="scmModalTitle">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="icon-slot" data-icon="commit"></span>
+          <h3 id="scmModalTitle" data-i18n="scmModalTitle">暂存与提交更改</h3>
+          <span id="scmBranchBadge" class="branch-pill"></span>
+        </div>
+        <button class="icon-btn modal-close" data-close="scmModal" aria-label="Close"><span class="icon-slot" data-icon="close"></span></button>
+      </div>
+      <div id="scmModalBody" class="scm-modal-body"></div>
     </div>
   </div>
 
@@ -212,9 +302,9 @@
       </div>
       <div class="settings-layout">
         <nav class="settings-nav" role="tablist">
-          <button type="button" class="settings-nav-item active" data-section="appearance"><span class="icon-slot" data-icon="sun"></span><span data-i18n="navAppearance">外观</span></button>
+          <button type="button" class="settings-nav-item active" data-section="appearance"><span class="icon-slot" id="navAppearanceIcon" data-icon="sun"></span><span data-i18n="navAppearance">外观</span></button>
           <button type="button" class="settings-nav-item" data-section="tools"><span class="icon-slot" data-icon="terminal"></span><span data-i18n="navTools">终端与编辑器</span></button>
-          <button type="button" class="settings-nav-item" data-section="ai"><span class="icon-slot" data-icon="editor"></span><span data-i18n="navAi">AI</span></button>
+          <button type="button" class="settings-nav-item" data-section="ai"><span class="icon-slot" data-icon="sparkle"></span><span data-i18n="navAi">AI</span></button>
         </nav>
         <div class="settings-modal-body">
           <section class="settings-section active" data-section="appearance">
@@ -266,6 +356,24 @@
                   <option value="off" data-i18n="optOff">关闭</option>
                 </select>
               </label>
+            </div>
+
+            <div class="icon-picker-section" id="appIconPickerSection">
+              <div class="icon-picker-head">
+                <h4 data-i18n="appIconHeader" style="margin:0;">应用图标</h4>
+                <div class="icon-mode-seg" id="cfgIconThemeSeg" role="radiogroup" aria-label="Icon Brightness Mode">
+                  <button type="button" class="icon-mode-btn active" data-icon-theme="auto" data-i18n="iconThemeAuto">跟随主题</button>
+                  <button type="button" class="icon-mode-btn" data-icon-theme="dark" data-i18n="iconThemeDark">深色图标</button>
+                  <button type="button" class="icon-mode-btn" data-icon-theme="light" data-i18n="iconThemeLight">浅色图标</button>
+                </div>
+              </div>
+              <p class="settings-hint" data-i18n="appIconHint" style="margin:4px 0 8px;">点击任意款式立即应用到顶栏、浏览器标签页与桌面 Dock / 任务栏图标（每款均含深浅双色）。</p>
+              <div id="cfgIconStyleGrid" class="icon-style-grid"></div>
+            </div>
+
+            <div class="settings-inline-actions" style="margin-top:10px;">
+              <button type="button" id="btnOpenLogsFromSettings" class="mini-btn"><span class="icon-slot" data-icon="terminal"></span><span data-i18n="viewLogs">查看诊断日志</span></button>
+              <button type="button" id="btnRestoreHistoryBackup" class="mini-btn"><span class="icon-slot" data-icon="undo"></span><span data-i18n="restoreHistoryBackup">恢复历史备份</span></button>
             </div>
           </section>
 
@@ -384,19 +492,59 @@
     </div>
   </div>
 
-  <!-- Generic Host Prompt Modal (InputBox / QuickPick / Confirmation / File Save) -->
-  <div id="promptModal" class="modal-backdrop hidden" style="z-index: 900;">
-    <div class="modal-window modal-sm">
+  <!-- Client-Initiated Dialog Modal (Confirm / Input / Scan Checklist / Host Meta — isolated from server #promptModal) -->
+  <div id="clientDialogModal" class="modal-backdrop hidden" style="z-index: 880;">
+    <div class="modal-window modal-sm" role="dialog" aria-modal="true" aria-labelledby="clientDialogTitle">
+      <div class="modal-header">
+        <h3 id="clientDialogTitle">GitMap</h3>
+        <button id="clientDialogCloseBtn" class="icon-btn" aria-label="Close"><span class="icon-slot" data-icon="close"></span></button>
+      </div>
+      <div id="clientDialogBody" class="prompt-body"></div>
+      <div id="clientDialogFooter" class="form-actions"></div>
+    </div>
+  </div>
+
+  <!-- Generic Host Prompt Modal (Server RPC InputBox / QuickPick / Confirmation / File Save — FIFO queued) -->
+  <div id="promptModal" class="modal-backdrop hidden" style="z-index: 920;">
+    <div class="modal-window modal-sm" role="dialog" aria-modal="true" aria-labelledby="promptTitle">
       <div class="modal-header">
         <h3 id="promptTitle">GitMap</h3>
-        <button id="promptCloseBtn" class="icon-btn">✕</button>
+        <button id="promptCloseBtn" class="icon-btn" aria-label="Close"><span class="icon-slot" data-icon="close"></span></button>
       </div>
       <div id="promptBody" class="prompt-body"></div>
       <div id="promptFooter" class="form-actions"></div>
     </div>
   </div>
 
-  <!-- File Transfers Panel -->
+  <!-- Advanced Feature Modal (Worktrees / Interactive Rebase / PRs / AI Review / Release Notes / NL Search / Reflog / Bisect / Port Forward) -->
+  <div id="featureModal" class="modal-backdrop hidden" style="z-index: 840;">
+    <div class="modal-window modal-lg feature-modal-window" role="dialog" aria-modal="true" aria-labelledby="featureModalTitle">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span id="featureModalIcon" class="icon-slot"></span>
+          <h3 id="featureModalTitle">GitMap</h3>
+          <span id="featureModalBadge" class="branch-pill hidden"></span>
+        </div>
+        <button id="featureModalCloseBtn" class="icon-btn modal-close" data-close="featureModal" aria-label="Close"><span class="icon-slot" data-icon="close"></span></button>
+      </div>
+      <div id="featureModalBody" class="feature-modal-body"></div>
+      <div id="featureModalFooter" class="form-actions feature-modal-footer"></div>
+    </div>
+  </div>
+
+  <!-- Global Command Palette (Cmd/Ctrl+P) -->
+  <div id="commandPaletteModal" class="modal-backdrop cmd-palette-backdrop hidden" style="z-index: 960;">
+    <div class="cmd-palette-window" role="dialog" aria-modal="true" aria-label="Command Palette">
+      <div class="cmd-palette-input-wrap">
+        <span class="icon-slot" data-icon="search"></span>
+        <input type="text" id="cmdPaletteInput" spellcheck="false" autocomplete="off" placeholder="输入命令、仓库名或分支…" />
+        <kbd>ESC</kbd>
+      </div>
+      <div id="cmdPaletteList" class="cmd-palette-list" role="listbox"></div>
+    </div>
+  </div>
+
+  <!-- File Transfers Popover Panel (anchored below topbar #btnTransfers, never colliding with bottom-right toasts) -->
   <section id="transferPanel" class="transfer-panel hidden" aria-label="Transfers">
     <header class="transfer-panel-header">
       <strong data-i18n="transfersTitle">传输</strong>
@@ -404,23 +552,31 @@
       <span class="transfer-panel-actions">
         <button type="button" id="btnTransfersPauseAll" class="mini-icon-btn" title="Pause All"><span class="icon-slot" data-icon="pause"></span></button>
         <button type="button" id="btnTransfersResumeAll" class="mini-icon-btn" title="Resume All"><span class="icon-slot" data-icon="play"></span></button>
-        <button type="button" id="btnTransfersClear" class="mini-icon-btn" title="Clear Finished"><span class="icon-slot" data-icon="check"></span></button>
-        <button type="button" id="btnTransfersClose" class="mini-icon-btn" title="Hide"><span class="icon-slot" data-icon="chevronDown"></span></button>
+        <button type="button" id="btnTransfersClear" class="mini-icon-btn" title="Clear Finished"><span class="icon-slot" data-icon="trash"></span></button>
+        <button type="button" id="btnTransfersClose" class="mini-icon-btn" title="Hide"><span class="icon-slot" data-icon="close"></span></button>
       </span>
     </header>
     <div id="transferList" class="transfer-list"></div>
   </section>
 
+  <!-- Hidden file input for Browser (--web) uploads -->
+  <input type="file" id="webUploadInput" class="hidden" multiple />
+
   <datalist id="gmTagSuggestions"></datalist>
 
+  <!-- Tab Context Menu (Split Left / Right / Top / Bottom / Reorder / Close) -->
+  <div id="tabContextMenu" class="ws-context-menu hidden" role="menu"></div>
+
   <!-- Toast Container -->
-  <div id="toastContainer"></div>
+  <div id="toastContainer" role="status" aria-live="polite"></div>
 
   <script src="/icons.js"></script>
   <script src="/vendor/hljs/highlight.bundle.js"></script>
   <script src="/syntax.js"></script>
   <script src="/vendor/xterm/xterm.js"></script>
   <script src="/vendor/xterm/addon-fit.js"></script>
+  <script src="/fsm.js"></script>
   <script src="/app.js"></script>
+  <script src="/features.js"></script>
 </body>
 </html>

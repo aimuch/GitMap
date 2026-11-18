@@ -4,13 +4,26 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
+import { pipeline } from 'stream/promises';
 import { WebSocket, WebSocketServer } from 'ws';
-import { AiProvider, DEFAULT_AI_TIMEOUT_SECONDS, clearApiKey, getApiKey, loadAiSettingsSnapshot, parseAiRequestSettings, previewAiRequest, setAiSecretStorage, setApiKey, testAiConnection } from '../aiProviders';
+import {
+  AiProvider,
+  DEFAULT_AI_TIMEOUT_SECONDS,
+  clearApiKey,
+  getApiKey,
+  loadAiSettingsSnapshot,
+  parseAiRequestSettings,
+  previewAiRequest,
+  setAiSecretStorage,
+  setApiKey,
+  testAiConnection
+} from '../aiProviders';
 import { AvatarManager } from '../avatarManager';
 import { setSettingFallbackStorage } from '../config';
 import { DataSource } from '../dataSource';
 import { DiffDocProvider } from '../diffDocProvider';
 import { ExtensionState } from '../extensionState';
+import { FileTimeMachine } from '../fileTimeMachine';
 import { GitGraphView } from '../gitGraphView';
 import { Logger } from '../logger';
 import {
@@ -23,22 +36,28 @@ import * as vscode from '../platform/vscode';
 import {
   dispatchMessageToGitMapPanel,
   dispatchMessageToPanel,
+  disposeStandalonePanel,
   getAllStandaloneSettings,
   initStandaloneConfig,
   JsonFileMemento,
   JsonSecretStorage,
-  updateStandaloneSetting
+  SecretCipher,
+  updateStandaloneSetting,
+  updateStandaloneSettingsBatch
 } from '../platform/vscode';
 import { formatRemoteRepoUri, isRemoteRepo, parseRemoteRepo } from '../remote/repoTransport';
 import { quotePosixArg, RemoteDirectoryEntry, sshManager } from '../remote/sshManager';
 import { TransferDirection, transferManager } from '../remote/transferManager';
 import { RemoveFromHistory } from '../removeFromHistory';
+import { RepoFileWatcher } from '../repoFileWatcher';
 import { RepoManager } from '../repoManager';
 import { findGit, getPathFromStr, getRepoName, GitExecutable } from '../utils';
 import { EventEmitter as GitMapEventEmitter } from '../utils/event';
-import { FileTimeMachine } from '../fileTimeMachine';
+import { fsmRegistry } from '../utils/fsm';
 import { VisualFileHistory } from '../visualFileHistory';
 import { DiffService } from './diffService';
+import { buildPartialHunkPatch, GitWorkflowService } from './gitWorkflowService';
+import { HostingProviderKind, HostingService } from './hostingService';
 import { LauncherSettings, listLaunchers, openInEditor, openInTerminal } from './launchers';
 import { TerminalManager } from './terminalManager';
 
@@ -54,6 +73,9 @@ export interface GitMapServerOptions {
   host?: string;
   dataDir?: string;
   initialRepos?: string[];
+  requireAuth?: boolean;
+  authToken?: string;
+  secretCipher?: SecretCipher;
   desktopHooks?: DesktopNativeHooks;
 }
 
@@ -69,16 +91,55 @@ const MIME_TYPES: { [ext: string]: string } = {
   '.ico': 'image/x-icon'
 };
 
+const SESSION_COOKIE_NAME = 'gitmap_session';
+
+const SHELL_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: https: http:",
+  "font-src 'self' data:",
+  "connect-src 'self' ws: wss:",
+  "frame-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'"
+].join('; ');
+
+function safeEqualStrings(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function parseCookies(cookieHeader: string | undefined): { [name: string]: string } {
+  const out: { [name: string]: string } = {};
+  if (!cookieHeader) return out;
+  for (const pair of cookieHeader.split(';')) {
+    const eq = pair.indexOf('=');
+    if (eq === -1) continue;
+    const k = pair.substring(0, eq).trim();
+    const v = pair.substring(eq + 1).trim();
+    if (k) out[k] = v;
+  }
+  return out;
+}
+
 export class GitMapServer {
   private readonly rootDir: string;
   private readonly dataDir: string;
   private readonly host: string;
   private requestedPort: number;
   private desktopHooks: DesktopNativeHooks;
+  private readonly authEnabled: boolean;
+  private readonly authToken: string;
+  private readonly sessionSecret: string;
+  private pkgVersion: string = '1.0.0';
 
   private server!: http.Server;
   private wss!: WebSocketServer;
   private readonly clients = new Set<WebSocket>();
+  private readonly uiClients = new Set<WebSocket>();
   private readonly pendingPrompts = new Map<string, (value: any) => void>();
   private readonly vfhPages = new Map<string, VisualFileHistoryOpenPayload>();
 
@@ -88,6 +149,8 @@ export class GitMapServer {
   public avatarManager!: AvatarManager;
   public repoManager!: RepoManager;
   public diffService!: DiffService;
+  public workflowService!: GitWorkflowService;
+  public hostingService!: HostingService;
   public terminalManager!: TerminalManager;
   private actualPort: number = 0;
 
@@ -97,6 +160,10 @@ export class GitMapServer {
     this.host = options.host || '127.0.0.1';
     this.requestedPort = typeof options.port === 'number' ? options.port : 3847;
     this.desktopHooks = options.desktopHooks || {};
+    // Non-loopback bindings ALWAYS enforce token authentication so LAN/public interfaces are never exposed
+    this.authEnabled = !this.isLoopbackBinding() || !!options.requireAuth || typeof options.authToken === 'string';
+    this.authToken = options.authToken || crypto.randomBytes(32).toString('hex');
+    this.sessionSecret = crypto.createHmac('sha256', this.authToken).update('gitmap-session-v1').digest('hex');
   }
 
   public setDesktopHooks(hooks: DesktopNativeHooks) {
@@ -107,27 +174,47 @@ export class GitMapServer {
     return this.actualPort;
   }
 
+  public getAuthToken(): string | null {
+    return this.authEnabled ? this.authToken : null;
+  }
+
   public getUrl(): string {
     const displayHost = this.host === '0.0.0.0' ? '127.0.0.1' : this.host;
     return `http://${displayHost}:${this.actualPort}`;
   }
 
+  public getAuthUrl(): string {
+    if (!this.authEnabled) return this.getUrl();
+    return `${this.getUrl()}/?token=${encodeURIComponent(this.authToken)}`;
+  }
+
   public async start(): Promise<string> {
-    await fs.promises.mkdir(this.dataDir, { recursive: true });
+    await fs.promises.mkdir(this.dataDir, { recursive: true, mode: 0o700 });
     initStandaloneConfig(this.dataDir);
 
     const globalState = new JsonFileMemento(path.join(this.dataDir, 'global-state.json'));
     const workspaceState = new JsonFileMemento(path.join(this.dataDir, 'workspace-state.json'));
-    const secrets = new JsonSecretStorage(path.join(this.dataDir, 'secrets.json'));
+    const secrets = new JsonSecretStorage(path.join(this.dataDir, 'secrets.json'), this.options.secretCipher);
     const storageDir = path.join(this.dataDir, 'storage');
-    await fs.promises.mkdir(storageDir, { recursive: true });
+    await fs.promises.mkdir(storageDir, { recursive: true, mode: 0o700 });
 
     setSettingFallbackStorage(globalState);
     setAiSecretStorage(secrets);
-    sshManager.init(this.dataDir, secrets);
-    transferManager.init(this.dataDir, (transfers) => this.broadcast({ type: 'transfers:update', transfers }));
+    sshManager.init(this.dataDir, secrets, () => this.uiClients.size > 0);
+    sshManager.setOnHostsChanged(() => {
+      this.broadcast({ type: 'ssh:hostsChanged', sshHosts: sshManager.listHosts() });
+    });
+    transferManager.init(this.dataDir, (transfers) => {
+      this.broadcast({ type: 'transfers:update', transfers });
+      if (transfers.some((t) => t.state === 'completed' || t.state === 'undone')) {
+        RepoFileWatcher.notifyPossibleRemoteChange(450);
+      }
+    });
 
     const pkgJson = JSON.parse(fs.readFileSync(path.join(this.rootDir, 'package.json'), 'utf8'));
+    if (typeof pkgJson.version === 'string') {
+      this.pkgVersion = pkgJson.version;
+    }
 
     const context: vscode.ExtensionContext = {
       subscriptions: [],
@@ -162,6 +249,9 @@ export class GitMapServer {
     this.avatarManager = new AvatarManager(this.dataSource, this.extensionState, this.logger);
     this.repoManager = new RepoManager(this.dataSource, this.extensionState, configChangeEmitter.subscribe, this.logger);
     this.diffService = new DiffService(this.dataSource);
+    this.workflowService = new GitWorkflowService(this.dataSource);
+    this.hostingService = new HostingService(this.dataSource);
+    this.hostingService.setSecretStorage(secrets);
     this.terminalManager = new TerminalManager();
 
     const diffDocProvider = new DiffDocProvider(this.dataSource);
@@ -200,14 +290,12 @@ export class GitMapServer {
       }
     });
 
-    // Register initial repos if passed on CLI
     if (this.options.initialRepos && this.options.initialRepos.length > 0) {
       for (const r of this.options.initialRepos) {
         await this.repoManager.registerRepo(isRemoteRepo(r) ? r : path.resolve(r), true);
       }
     }
 
-    // Subscribe to repo list changes to push live sidebar updates to UI
     this.repoManager.onDidChangeRepos(() => {
       this.broadcast({
         type: 'repos:changed',
@@ -216,7 +304,6 @@ export class GitMapServer {
       });
     });
 
-    // Initialize the primary GitGraphView instance so HTML & message handlers are ready
     this.ensureGraphViewCreated();
 
     // Start HTTP + WebSocket Server
@@ -228,12 +315,11 @@ export class GitMapServer {
       }
       this.handleHttpRequest(req, res);
     });
+
     this.wss = new WebSocketServer({
       server: this.server,
       path: '/ws',
       maxPayload: 64 * 1024 * 1024,
-      // Only the GitMap page itself may connect: a web page on another origin (or a DNS-rebound host name) must not be
-      // able to drive terminals, SSH sessions & Git through this socket.
       verifyClient: (info: { origin: string; req: http.IncomingMessage }) => this.isAllowedWsClient(info.origin, info.req)
     });
     this.wss.on('connection', (ws) => this.handleWsConnection(ws));
@@ -251,19 +337,28 @@ export class GitMapServer {
   }
 
   public async stop(): Promise<void> {
+    sshManager.setOnHostsChanged(null);
     transferManager.dispose();
     this.terminalManager?.closeAll();
     sshManager.disconnectAll();
+    for (const resolver of this.pendingPrompts.values()) {
+      try {
+        resolver(undefined);
+      } catch (_) {}
+    }
+    this.pendingPrompts.clear();
     for (const client of this.clients) {
       try {
         client.close();
       } catch (_) {}
     }
     this.clients.clear();
-    if (this.wss) {
+    this.uiClients.clear();
+    if (this.wss && this.server?.listening) {
       await new Promise<void>((resolve) => this.wss.close(() => resolve()));
     }
-    if (this.server) {
+    if (this.server?.listening) {
+      (this.server as any).closeAllConnections?.();
       await new Promise<void>((resolve) => this.server.close(() => resolve()));
     }
     GitGraphView.currentPanel?.dispose();
@@ -278,9 +373,6 @@ export class GitMapServer {
     return this.host === '127.0.0.1' || this.host === 'localhost' || this.host === '::1';
   }
 
-  /**
-   * When bound to the loopback interface, only accept loopback host names (defends against DNS rebinding).
-   */
   private isAllowedHost(hostHeader: string | undefined) {
     if (!this.isLoopbackBinding()) return true;
     if (!hostHeader) return false;
@@ -288,9 +380,28 @@ export class GitMapServer {
     return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1';
   }
 
+  private isRequestAuthenticated(req: http.IncomingMessage, parsedUrl?: URL): boolean {
+    if (!this.authEnabled) return true;
+    const cookies = parseCookies(req.headers.cookie);
+    if (cookies[SESSION_COOKIE_NAME] && safeEqualStrings(cookies[SESSION_COOKIE_NAME], this.sessionSecret)) {
+      return true;
+    }
+    const authHeader = req.headers.authorization;
+    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      const bearer = authHeader.substring(7).trim();
+      if (safeEqualStrings(bearer, this.authToken)) return true;
+    }
+    const urlObj = parsedUrl || new URL(req.url || '/', 'http://127.0.0.1');
+    const queryToken = urlObj.searchParams.get('token');
+    if (queryToken && safeEqualStrings(queryToken, this.authToken)) {
+      return true;
+    }
+    return false;
+  }
+
   private isAllowedWsClient(origin: string | undefined, req: http.IncomingMessage) {
     if (!this.isAllowedHost(req.headers.host)) return false;
-    // Non-browser clients (no Origin header) can't be driven by a web page
+    if (!this.isRequestAuthenticated(req)) return false;
     if (!origin) return true;
     try {
       const o = new URL(origin);
@@ -341,7 +452,7 @@ export class GitMapServer {
         this.vfhPages.set(payload.panelId, payload);
         this.broadcast({
           type: 'tab:openVfh',
-          payload: { title: payload.title, panelId: payload.panelId }
+          payload: { title: payload.title, panelId: payload.panelId, viewType: payload.viewType }
         });
       },
       onOpenDiff: (payload) => {
@@ -357,9 +468,14 @@ export class GitMapServer {
         this.broadcast({ type: 'terminal:requestOpen', payload });
       },
       onOpenSettingsUi: (query) => {
-        // "@ext:aimdev.git-map ai" opens the AI section
         const section = typeof query === 'string' && /\bai\b/.test(query.replace(/^@ext:\S+/, '')) ? 'ai' : undefined;
         this.broadcast({ type: 'shell:openAppSettings', section });
+      },
+      onOpenScm: (draftMessage) => {
+        this.broadcast({ type: 'shell:openScm', draftMessage: draftMessage || '' });
+      },
+      onSettingsChanged: (settings) => {
+        this.broadcast({ type: 'settings:changed', settings });
       },
       onClipboardWrite: async (text) => {
         if (this.desktopHooks.writeClipboard) {
@@ -414,6 +530,7 @@ export class GitMapServer {
           resolve(undefined);
         }
       }, 300000);
+      timer.unref?.();
       this.pendingPrompts.set(promptId, (val) => {
         clearTimeout(timer);
         resolve(val);
@@ -434,12 +551,69 @@ export class GitMapServer {
   /* HTTP Request Handling */
 
   private handleHttpRequest(req: http.IncomingMessage, res: http.ServerResponse) {
-    const parsedUrl = new URL(req.url || '/', 'http://127.0.0.1');
-    const pathname = decodeURIComponent(parsedUrl.pathname);
+    let parsedUrl: URL;
+    let pathname: string;
+    try {
+      parsedUrl = new URL(req.url || '/', 'http://127.0.0.1');
+      pathname = decodeURIComponent(parsedUrl.pathname);
+    } catch (_) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Bad Request');
+      return;
+    }
+
+    if (pathname.includes('\0')) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Bad Request');
+      return;
+    }
 
     if (pathname === '/api/health') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, version: '1.0.0' }));
+      res.end(JSON.stringify({ ok: true, version: this.pkgVersion }));
+      return;
+    }
+
+    // Exchange initial URL ?token=... into an HttpOnly session cookie and strip the token from the URL
+    if (this.authEnabled) {
+      const queryToken = parsedUrl.searchParams.get('token');
+      if (queryToken && safeEqualStrings(queryToken, this.authToken)) {
+        parsedUrl.searchParams.delete('token');
+        const cleanTarget = parsedUrl.pathname + (parsedUrl.search || '');
+        res.writeHead(302, {
+          'Set-Cookie': `${SESSION_COOKIE_NAME}=${this.sessionSecret}; HttpOnly; SameSite=Strict; Path=/`,
+          Location: cleanTarget || '/'
+        });
+        res.end();
+        return;
+      }
+      if (!this.isRequestAuthenticated(req, parsedUrl)) {
+        res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Unauthorized: valid launch token or session cookie required.');
+        return;
+      }
+    }
+
+    // Browser-mode streaming SFTP & Local upload / download endpoints (for --web clients without host filesystem access)
+    if (pathname === '/api/diagnostics' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(this.buildDiagnosticsSnapshot()));
+      return;
+    }
+    if (pathname === '/api/transfer/web-download' && req.method === 'GET') {
+      void this.handleWebDownload(parsedUrl, res);
+      return;
+    }
+    if (pathname === '/api/transfer/web-upload' && req.method === 'POST') {
+      void this.handleWebUpload(parsedUrl, req, res);
+      return;
+    }
+    if (pathname === '/api/local/web-download' && req.method === 'GET') {
+      void this.handleLocalWebDownload(parsedUrl, res);
+      return;
+    }
+    if (pathname === '/api/local/web-upload' && req.method === 'POST') {
+      void this.handleLocalWebUpload(parsedUrl, req, res);
       return;
     }
 
@@ -459,10 +633,9 @@ export class GitMapServer {
       const page = this.vfhPages.get(panelId);
       if (!page) {
         res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Visual File History panel not found.');
+        res.end('Auxiliary panel not found.');
         return;
       }
-      // Inject panelId query so vfh-bridge knows its panelId
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store'
@@ -471,7 +644,6 @@ export class GitMapServer {
       return;
     }
 
-    // Serve static directories safely
     if (pathname.startsWith('/media/')) {
       return this.serveSafeStatic(path.join(this.rootDir, 'media'), pathname.substring('/media/'.length), res);
     }
@@ -480,10 +652,282 @@ export class GitMapServer {
     }
 
     const publicFile = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
-    return this.serveSafeStatic(path.join(this.rootDir, 'public'), publicFile, res);
+    return this.serveSafeStatic(
+      path.join(this.rootDir, 'public'),
+      publicFile,
+      res,
+      publicFile === 'index.html' ? { 'Content-Security-Policy': SHELL_CSP } : undefined
+    );
   }
 
-  private serveSafeStatic(baseDir: string, relFile: string, res: http.ServerResponse) {
+  private async handleWebDownload(parsedUrl: URL, res: http.ServerResponse) {
+    try {
+      const hostId = parsedUrl.searchParams.get('hostId') || '';
+      const remotePath = parsedUrl.searchParams.get('path') || '';
+      if (!hostId || !remotePath.startsWith('/')) {
+        res.writeHead(400);
+        res.end('Missing hostId or path.');
+        return;
+      }
+      const sftp = await sshManager.getSftp(hostId);
+      const stat = await new Promise<{ size: number; isDirectory: boolean }>((resolve, reject) => {
+        sftp.stat(remotePath, (err, st) => (err || !st ? reject(err || new Error('Not found')) : resolve({ size: st.size, isDirectory: st.isDirectory() })));
+      });
+      if (stat.isDirectory) {
+        const session = await sshManager.ensureConnected(hostId);
+        const parentDir = path.posix.dirname(remotePath);
+        const folderBase = path.posix.basename(remotePath) || 'folder';
+        const cmd = `tar -czf - -C ${quotePosixArg(parentDir)} -- ${quotePosixArg(folderBase)}`;
+        res.writeHead(200, {
+          'Content-Type': 'application/gzip',
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(folderBase + '.tar.gz')}`
+        });
+        await new Promise<void>((resolve, reject) => {
+          session.client.exec(cmd, (err, stream) => {
+            if (err || !stream) return reject(err || new Error('Failed to start remote archive stream.'));
+            stream.on('error', reject);
+            res.on('close', () => {
+              try { stream.close(); } catch (_) {}
+            });
+            stream.pipe(res);
+            stream.on('close', () => resolve());
+          });
+        });
+        return;
+      }
+      const fileName = path.posix.basename(remotePath) || 'download';
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(stat.size),
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      });
+      await pipeline(sftp.createReadStream(remotePath), res);
+    } catch (err) {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(err instanceof Error ? err.message : String(err));
+      } else {
+        res.destroy();
+      }
+    }
+  }
+
+  private async handleWebUpload(parsedUrl: URL, req: http.IncomingMessage, res: http.ServerResponse) {
+    try {
+      const hostId = parsedUrl.searchParams.get('hostId') || '';
+      const destDirRaw = parsedUrl.searchParams.get('destDir') || '~';
+      const rawName = (parsedUrl.searchParams.get('name') || '').trim();
+      if (!hostId || !rawName || rawName.includes('/') || rawName === '.' || rawName === '..') {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'Invalid upload target.' }));
+        return;
+      }
+      const destDir = await sshManager.resolveRemotePath(hostId, destDirRaw);
+      const sftp = await sshManager.getSftp(hostId);
+      const exists = (p: string) =>
+        new Promise<boolean>((resolve) => sftp.stat(p, (err) => resolve(!err)));
+      let finalName = rawName;
+      if (await exists(path.posix.join(destDir, finalName))) {
+        const dot = rawName.lastIndexOf('.');
+        const base = dot > 0 ? rawName.substring(0, dot) : rawName;
+        const ext = dot > 0 ? rawName.substring(dot) : '';
+        for (let i = 1; i < 500; i++) {
+          const cand = `${base} (${i})${ext}`;
+          if (!(await exists(path.posix.join(destDir, cand)))) {
+            finalName = cand;
+            break;
+          }
+        }
+      }
+      const destPath = path.posix.join(destDir, finalName);
+      await pipeline(req, sftp.createWriteStream(destPath));
+      RepoFileWatcher.notifyPossibleRemoteChange(400);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, path: destPath, name: finalName }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+    }
+  }
+
+  private resolveExistingRealPath(p: string): string {
+    let cur = path.resolve(p);
+    const tail: string[] = [];
+    while (!fs.existsSync(cur)) {
+      const parent = path.dirname(cur);
+      if (parent === cur) break;
+      tail.unshift(path.basename(cur));
+      cur = parent;
+    }
+    try {
+      const realBase = fs.realpathSync(cur);
+      return tail.length > 0 ? path.join(realBase, ...tail) : realBase;
+    } catch (_) {
+      return path.resolve(p);
+    }
+  }
+
+  private assertAllowedLocalPath(rawPath: string): string {
+    const expanded = rawPath.startsWith('~/') ? path.join(os.homedir(), rawPath.slice(2)) : rawPath === '~' ? os.homedir() : rawPath;
+    const resolved = path.resolve(expanded);
+    const resolvedData = path.resolve(this.dataDir);
+    if (resolved === resolvedData || resolved.startsWith(resolvedData + path.sep)) {
+      throw new Error('Access to internal application state files is denied.');
+    }
+    const realTarget = this.resolveExistingRealPath(resolved);
+    const realData = this.resolveExistingRealPath(resolvedData);
+    if (realTarget === realData || realTarget.startsWith(realData + path.sep)) {
+      throw new Error('Access to internal application state files is denied.');
+    }
+    return resolved;
+  }
+
+  private classifyRpcError(err: unknown): { errorCode: string; retriable: boolean } {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/Unknown RPC method/i.test(msg)) return { errorCode: 'UNKNOWN_METHOD', retriable: false };
+    if (/Access to internal application state files is denied|symlink escape blocked|Refusing to delete protected/i.test(msg)) {
+      return { errorCode: 'ACCESS_DENIED', retriable: false };
+    }
+    if (/REMOTE HOST IDENTIFICATION HAS CHANGED|Host key verification|authentication methods failed|Incorrect passphrase/i.test(msg)) {
+      return { errorCode: 'SSH_AUTH_FAILED', retriable: false };
+    }
+    if (/SSH connection|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH/i.test(msg)) {
+      return { errorCode: 'SSH_DISCONNECTED', retriable: true };
+    }
+    if (/ENOENT|doesn't exist|not found/i.test(msg)) {
+      return { errorCode: 'NOT_FOUND', retriable: false };
+    }
+    if (/CONFLICT|merge conflict|unresolved/i.test(msg)) {
+      return { errorCode: 'GIT_CONFLICT', retriable: false };
+    }
+    if (/is required|Invalid |can't be empty|must be between/i.test(msg)) {
+      return { errorCode: 'VALIDATION_ERROR', retriable: false };
+    }
+    return { errorCode: 'INTERNAL_ERROR', retriable: false };
+  }
+
+  private buildDiagnosticsSnapshot() {
+    const repos = this.repoManager?.getRepos() || {};
+    return {
+      ok: true,
+      version: this.pkgVersion,
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.version,
+      uptimeSeconds: Math.round(process.uptime()),
+      memoryMB: Math.round((process.memoryUsage().rss / (1024 * 1024)) * 10) / 10,
+      activeRepo: this.extensionState?.getLastActiveRepo() || null,
+      repoCount: Object.keys(repos).length,
+      wsClientCount: this.clients.size,
+      uiClientCount: this.uiClients.size,
+      pendingPromptCount: this.pendingPrompts.size,
+      sshHosts: sshManager.listHosts().map((h) => ({
+        id: h.id,
+        connected: !!h.connected,
+        connectionState: h.connectionState || 'disconnected',
+        gitVersion: h.gitVersion || null
+      })),
+      tunnels: sshManager.listTunnels(),
+      transfers: transferManager.list(),
+      terminals: this.terminalManager?.listSessions() || [],
+      fsm: {
+        instances: fsmRegistry.listInstances(),
+        recentTransitions: fsmRegistry.getTrace(80)
+      }
+    };
+  }
+
+  private async copyLocalEntryDedup(srcRaw: string, destDirResolved: string): Promise<string> {
+    const srcResolved = this.assertAllowedLocalPath(srcRaw);
+    const baseName = path.basename(srcResolved);
+    let finalName = baseName;
+    const dot = baseName.lastIndexOf('.');
+    const stem = dot > 0 ? baseName.slice(0, dot) : baseName;
+    const ext = dot > 0 ? baseName.slice(dot) : '';
+    for (let i = 1; i < 500 && fs.existsSync(path.join(destDirResolved, finalName)); i++) {
+      finalName = `${stem} (${i})${ext}`;
+    }
+    const destTarget = path.join(destDirResolved, finalName);
+    await fs.promises.cp(srcResolved, destTarget, { recursive: true });
+    return getPathFromStr(destTarget);
+  }
+
+  private async handleLocalWebDownload(parsedUrl: URL, res: http.ServerResponse) {
+    try {
+      const targetRaw = parsedUrl.searchParams.get('path') || '';
+      if (!targetRaw) {
+        res.writeHead(400);
+        res.end('Missing path.');
+        return;
+      }
+      const resolved = this.assertAllowedLocalPath(targetRaw);
+      const stat = await fs.promises.stat(resolved);
+      if (stat.isDirectory()) {
+        const parentDir = path.dirname(resolved);
+        const folderBase = path.basename(resolved) || 'folder';
+        res.writeHead(200, {
+          'Content-Type': 'application/gzip',
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(folderBase + '.tar.gz')}`
+        });
+        const tarProc = cp.spawn('tar', ['-czf', '-', '-C', parentDir, folderBase]);
+        tarProc.on('error', () => res.destroy());
+        res.on('close', () => {
+          try { tarProc.kill(); } catch (_) {}
+        });
+        await pipeline(tarProc.stdout, res);
+        return;
+      }
+      const fileName = path.basename(resolved) || 'download';
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(stat.size),
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      });
+      await pipeline(fs.createReadStream(resolved), res);
+    } catch (err) {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(err instanceof Error ? err.message : String(err));
+      } else {
+        res.destroy();
+      }
+    }
+  }
+
+  private async handleLocalWebUpload(parsedUrl: URL, req: http.IncomingMessage, res: http.ServerResponse) {
+    try {
+      const destDirRaw = parsedUrl.searchParams.get('destDir') || '~';
+      const rawName = (parsedUrl.searchParams.get('name') || '').trim();
+      if (!rawName || rawName.includes('/') || rawName.includes('\\') || rawName === '.' || rawName === '..') {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'Invalid upload file name.' }));
+        return;
+      }
+      const destDir = this.assertAllowedLocalPath(destDirRaw);
+      await fs.promises.mkdir(destDir, { recursive: true });
+      let finalName = rawName;
+      const dot = rawName.lastIndexOf('.');
+      const stem = dot > 0 ? rawName.slice(0, dot) : rawName;
+      const ext = dot > 0 ? rawName.slice(dot) : '';
+      for (let i = 1; i < 500 && fs.existsSync(path.join(destDir, finalName)); i++) {
+        finalName = `${stem} (${i})${ext}`;
+      }
+      const destPath = path.join(destDir, finalName);
+      await pipeline(req, fs.createWriteStream(destPath));
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, path: getPathFromStr(destPath), name: finalName }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+    }
+  }
+
+  private serveSafeStatic(
+    baseDir: string,
+    relFile: string,
+    res: http.ServerResponse,
+    extraHeaders?: { [name: string]: string }
+  ) {
     const resolvedBase = path.resolve(baseDir);
     const resolvedTarget = path.resolve(resolvedBase, relFile);
     if (resolvedTarget !== resolvedBase && !resolvedTarget.startsWith(resolvedBase + path.sep)) {
@@ -500,7 +944,8 @@ export class GitMapServer {
       const ext = path.extname(resolvedTarget).toLowerCase();
       res.writeHead(200, {
         'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
-        'Cache-Control': 'no-cache'
+        'Cache-Control': 'no-cache',
+        ...(extraHeaders || {})
       });
       fs.createReadStream(resolvedTarget).pipe(res);
     });
@@ -511,7 +956,6 @@ export class GitMapServer {
   private handleWsConnection(ws: WebSocket) {
     this.clients.add(ws);
 
-    // Send initial bootstrap snapshot immediately
     ws.send(
       JSON.stringify({
         type: 'init',
@@ -533,7 +977,17 @@ export class GitMapServer {
       }
       if (!msg || typeof msg !== 'object') return;
 
-      // Prompt response
+      if (msg.type === 'ui:ready') {
+        this.uiClients.add(ws);
+        return;
+      }
+
+      if (msg.type === 'panel:close' && typeof msg.panelId === 'string') {
+        this.vfhPages.delete(msg.panelId);
+        disposeStandalonePanel(msg.panelId);
+        return;
+      }
+
       if (msg.type === 'ui:promptResponse' && typeof msg.promptId === 'string') {
         const resolver = this.pendingPrompts.get(msg.promptId);
         if (resolver) {
@@ -543,21 +997,22 @@ export class GitMapServer {
         return;
       }
 
-      // Forward message from GitGraphView iframe
       if (msg.type === 'graph:request' && msg.payload) {
         dispatchMessageToGitMapPanel(msg.payload);
         return;
       }
 
-      // Forward message from VisualFileHistory iframe
       if (msg.type === 'vfh:request' && typeof msg.panelId === 'string' && msg.payload) {
         dispatchMessageToPanel(msg.panelId, msg.payload);
         return;
       }
 
-      // Direct terminal write/resize without RPC roundtrip overhead
       if (msg.type === 'term:input' && typeof msg.id === 'string') {
-        this.terminalManager.write(msg.id, String(msg.data || ''));
+        const data = String(msg.data || '');
+        this.terminalManager.write(msg.id, data);
+        if (data.includes('\r') || data.includes('\n')) {
+          RepoFileWatcher.notifyPossibleRemoteChange(800);
+        }
         return;
       }
       if (msg.type === 'term:resize' && typeof msg.id === 'string') {
@@ -569,17 +1024,20 @@ export class GitMapServer {
         return;
       }
 
-      // RPC Request / Response
       if (msg.type === 'rpc' && typeof msg.reqId === 'string' && typeof msg.method === 'string') {
+        const startedAt = Date.now();
         try {
           const result = await this.handleRpcMethod(ws, msg.method, msg.params || {});
+          const durationMs = Date.now() - startedAt;
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'rpc:res', reqId: msg.reqId, ok: true, result }));
+            ws.send(JSON.stringify({ type: 'rpc:res', reqId: msg.reqId, ok: true, result, durationMs }));
           }
         } catch (err) {
+          const durationMs = Date.now() - startedAt;
           const errorMsg = err instanceof Error ? err.message : String(err);
+          const { errorCode, retriable } = this.classifyRpcError(err);
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'rpc:res', reqId: msg.reqId, ok: false, error: errorMsg }));
+            ws.send(JSON.stringify({ type: 'rpc:res', reqId: msg.reqId, ok: false, error: errorMsg, errorCode, retriable, durationMs }));
           }
         }
       }
@@ -587,6 +1045,8 @@ export class GitMapServer {
 
     ws.on('close', () => {
       this.clients.delete(ws);
+      this.uiClients.delete(ws);
+      this.terminalManager.detachOwner(ws, 6000);
     });
   }
 
@@ -634,8 +1094,12 @@ export class GitMapServer {
       case 'repos:scanLocal': {
         const folder = String(params.path || '').trim();
         if (!folder) throw new Error('Folder path is required.');
-        const resolved = folder.startsWith('~/') ? path.join(os.homedir(), folder.slice(2)) : path.resolve(folder);
-        const depth = typeof params.maxDepth === 'number' ? params.maxDepth : 3;
+        const resolved = this.assertAllowedLocalPath(folder);
+        const rawDepth = typeof params.maxDepth === 'number' ? params.maxDepth : 3;
+        const depth = Math.max(1, Math.min(6, Math.floor(rawDepth) || 3));
+        if (params.previewOnly) {
+          return { repos: await this.discoverLocalRepos(resolved, depth) };
+        }
         const added = await this.repoManager.scanFolderForRepos(resolved, depth);
         return { added, repos: this.repoManager.getRepos() };
       }
@@ -655,7 +1119,333 @@ export class GitMapServer {
         return { ok: true };
       }
 
-      /* Local Directory Browser (for Web Mode & Unified Picker) */
+      case 'repos:pokeRemoteWatch': {
+        RepoFileWatcher.notifyPossibleRemoteChange(200);
+        return { ok: true };
+      }
+
+      case 'git:clone': {
+        const url = String(params.url || '').trim();
+        const targetDirRaw = String(params.targetDir || '').trim();
+        const hostId = params.hostId ? String(params.hostId).trim() : '';
+        if (!url || url.startsWith('-')) throw new Error('A valid repository clone URL is required.');
+        if (!targetDirRaw || targetDirRaw.startsWith('-')) throw new Error('Destination folder is required.');
+
+        const repoFolderName =
+          String(params.folderName || '').trim() ||
+          url.replace(/\/+$/, '').split(/[/:]/).pop()?.replace(/\.git$/i, '') ||
+          'cloned-repo';
+        if (repoFolderName.includes('/') || repoFolderName.includes('\\') || repoFolderName === '..') {
+          throw new Error('Invalid repository folder name.');
+        }
+
+        if (hostId) {
+          const parentRemote = await sshManager.resolveRemotePath(hostId, targetDirRaw);
+          const fullRemote = path.posix.join(parentRemote, repoFolderName);
+          const res = await sshManager.execRemoteGit(hostId, parentRemote, ['clone', '--', url, fullRemote]);
+          if (res.code !== 0) throw new Error(res.stderr.trim() || 'Remote git clone failed.');
+          const sshUri = formatRemoteRepoUri(hostId, fullRemote);
+          await this.repoManager.registerRepo(sshUri, true);
+          this.extensionState.setLastActiveRepo(sshUri);
+          this.openViewTo({ repo: sshUri });
+          return { root: sshUri, repos: this.repoManager.getRepos() };
+        }
+
+        const localParent = targetDirRaw.startsWith('~/')
+          ? path.join(os.homedir(), targetDirRaw.slice(2))
+          : path.resolve(targetDirRaw);
+        await fs.promises.mkdir(localParent, { recursive: true });
+        const fullLocal = path.join(localParent, repoFolderName);
+        await new Promise<void>((resolve, reject) => {
+          cp.execFile('git', ['clone', '--', url, fullLocal], { cwd: localParent }, (err, _stdout, stderr) => {
+            if (err) reject(new Error(String(stderr || err.message).trim()));
+            else resolve();
+          });
+        });
+        const normRoot = getPathFromStr(fullLocal);
+        await this.repoManager.registerRepo(normRoot, true);
+        this.extensionState.setLastActiveRepo(normRoot);
+        this.openViewTo({ repo: normRoot });
+        return { root: normRoot, repos: this.repoManager.getRepos() };
+      }
+
+      /* Working Tree Stage & Commit */
+      case 'scm:status': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        return { repo, ...(await this.dataSource.getWorkingTreeStatus(repo)) };
+      }
+
+      case 'scm:stage': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const paths: string[] = Array.isArray(params.paths) ? params.paths.map(String) : [];
+        const err = params.all ? await this.dataSource.stageAll(repo) : await this.dataSource.stageFiles(repo, paths);
+        if (err) throw new Error(err);
+        RepoFileWatcher.notifyPossibleRemoteChange(200);
+        return { repo, ...(await this.dataSource.getWorkingTreeStatus(repo)) };
+      }
+
+      case 'scm:unstage': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const paths: string[] = Array.isArray(params.paths) ? params.paths.map(String) : [];
+        const err = params.all ? await this.dataSource.unstageAll(repo) : await this.dataSource.unstageFiles(repo, paths);
+        if (err) throw new Error(err);
+        RepoFileWatcher.notifyPossibleRemoteChange(200);
+        return { repo, ...(await this.dataSource.getWorkingTreeStatus(repo)) };
+      }
+
+      case 'scm:commit': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const message = String(params.message || '');
+        const amend = !!params.amend;
+        const err = await this.dataSource.commitWorkingTree(repo, message, amend);
+        if (err) throw new Error(err);
+        RepoFileWatcher.notifyPossibleRemoteChange(200);
+        this.openViewTo({ repo });
+        return { ok: true, repo, ...(await this.dataSource.getWorkingTreeStatus(repo)) };
+      }
+
+      case 'scm:discard': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const files: Array<{ path: string; status?: string }> = Array.isArray(params.files)
+          ? params.files.map((f: any) => (typeof f === 'string' ? { path: f } : { path: String(f.path || ''), status: f.status ? String(f.status) : undefined }))
+          : [];
+        await this.workflowService.discardFiles(repo, files);
+        return { repo, ...(await this.dataSource.getWorkingTreeStatus(repo)) };
+      }
+
+      case 'scm:hunks': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const filePath = String(params.filePath || '');
+        const staged = !!params.staged;
+        return this.workflowService.getFileDiffHunks(repo, filePath, staged);
+      }
+
+      case 'scm:applyHunk': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const mode: 'stage' | 'unstage' | 'discard' =
+          params.mode === 'unstage' ? 'unstage' : params.mode === 'discard' ? 'discard' : 'stage';
+        let patch = typeof params.patch === 'string' ? params.patch : '';
+        if (!patch && params.hunk && Array.isArray(params.fileHeader) && Array.isArray(params.selectedIndices)) {
+          patch = buildPartialHunkPatch(params.fileHeader, params.hunk, params.selectedIndices.map(Number), mode);
+        }
+        await this.workflowService.applyPatch(repo, patch, mode);
+        return { repo, ...(await this.dataSource.getWorkingTreeStatus(repo)) };
+      }
+
+      /* 3-Way Merge Conflict Resolver & Ongoing Operations */
+      case 'git:operationState': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) return { mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false, bisectInProgress: false, conflictCount: 0 };
+        return this.workflowService.getOperationState(repo);
+      }
+
+      case 'conflict:read': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const filePath = String(params.filePath || '');
+        return this.workflowService.readConflictFile(repo, filePath);
+      }
+
+      case 'conflict:resolve': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const filePath = String(params.filePath || '');
+        const content = String(params.content ?? '');
+        await this.workflowService.resolveConflictFile(repo, filePath, content);
+        return { repo, ...(await this.dataSource.getWorkingTreeStatus(repo)) };
+      }
+
+      case 'conflict:aiMerge': {
+        const merged = await this.workflowService.aiMergeConflictBlock({
+          filePath: String(params.filePath || ''),
+          ours: String(params.ours ?? ''),
+          base: params.base != null ? String(params.base) : null,
+          theirs: String(params.theirs ?? ''),
+          contextBefore: params.contextBefore ? String(params.contextBefore) : undefined,
+          contextAfter: params.contextAfter ? String(params.contextAfter) : undefined
+        });
+        return { merged };
+      }
+
+      case 'conflict:continueOrAbort': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const operation: 'merge' | 'rebase' | 'cherry-pick' | 'revert' =
+          params.operation === 'rebase'
+            ? 'rebase'
+            : params.operation === 'cherry-pick'
+              ? 'cherry-pick'
+              : params.operation === 'revert'
+                ? 'revert'
+                : 'merge';
+        const action: 'continue' | 'abort' = params.action === 'abort' ? 'abort' : 'continue';
+        await this.workflowService.continueOrAbortOperation(repo, operation, action);
+        this.openViewTo({ repo });
+        return { ok: true, state: await this.workflowService.getOperationState(repo) };
+      }
+
+      /* Visual Interactive Rebase */
+      case 'rebase:prepare': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        return this.workflowService.prepareInteractiveRebase(repo, params.base);
+      }
+
+      case 'rebase:execute': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const baseHash = String(params.baseHash || '');
+        const steps = Array.isArray(params.steps) ? params.steps : [];
+        const res = await this.workflowService.executeInteractiveRebase(repo, baseHash, steps);
+        this.openViewTo({ repo });
+        return { ok: true, ...res };
+      }
+
+      /* Git Worktree Management */
+      case 'worktree:list': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        return { worktrees: await this.workflowService.listWorktrees(repo) };
+      }
+
+      case 'worktree:add': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const wtUri = await this.workflowService.addWorktree({
+          repo,
+          targetPath: String(params.targetPath || ''),
+          branch: String(params.branch || ''),
+          createBranch: !!params.createBranch,
+          baseRef: params.baseRef ? String(params.baseRef) : undefined
+        });
+        await this.repoManager.registerRepo(wtUri, true);
+        return { root: wtUri, repos: this.repoManager.getRepos(), worktrees: await this.workflowService.listWorktrees(repo) };
+      }
+
+      case 'worktree:remove': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const removedUri = await this.workflowService.removeWorktree(repo, String(params.path || ''), !!params.force);
+        this.repoManager.removeKnownRepo(removedUri);
+        return { removed: removedUri, repos: this.repoManager.getRepos(), worktrees: await this.workflowService.listWorktrees(repo) };
+      }
+
+      /* Multi-Repo Status Badges & Batch Fetch */
+      case 'repos:quickStatuses': {
+        const keys = Array.isArray(params.repos) ? params.repos.map(String) : Object.keys(this.repoManager.getRepos());
+        return { statuses: await this.workflowService.getQuickStatuses(keys) };
+      }
+
+      case 'repos:fetchAll': {
+        const keys = Object.keys(this.repoManager.getRepos());
+        return this.workflowService.fetchAllRepos(keys);
+      }
+
+      /* Git Branches, Tags & Checkout (for Command Palette & Release Notes) */
+      case 'git:refs': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) return { branches: [], tags: [], head: null };
+        const info = await this.dataSource.getRepoInfo(repo, true, false, []);
+        const tagsOut = await this.dataSource
+          .execGitRaw(repo, ['tag', '--sort=-creatordate'], { ignoreExitCode: true })
+          .then((r) => r.stdout.toString('utf8').trim().split(/\r?\n/).filter(Boolean), () => []);
+        return { branches: info.branches || [], head: info.head || null, tags: tagsOut };
+      }
+
+      case 'git:checkout': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const ref = String(params.ref || '').trim();
+        if (!ref || ref.startsWith('-')) throw new Error('Invalid branch or commit reference.');
+        await this.dataSource.execGitRaw(repo, ['checkout', ref]);
+        RepoFileWatcher.notifyPossibleRemoteChange(200);
+        this.openViewTo({ repo });
+        return { ok: true };
+      }
+
+      /* Git Reflog & Visual Bisect */
+      case 'reflog:list': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        return { entries: await this.workflowService.listReflog(repo, Number(params.limit) || 120) };
+      }
+
+      case 'bisect:status': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        return this.workflowService.getBisectStatus(repo);
+      }
+
+      case 'bisect:start': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const res = await this.workflowService.startBisect(repo, String(params.badRef || 'HEAD'), String(params.goodRef || ''));
+        this.openViewTo({ repo });
+        return res;
+      }
+
+      case 'bisect:step': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const verdict: 'good' | 'bad' | 'skip' =
+          params.verdict === 'bad' ? 'bad' : params.verdict === 'skip' ? 'skip' : 'good';
+        const res = await this.workflowService.stepBisect(repo, verdict);
+        this.openViewTo({ repo });
+        return res;
+      }
+
+      case 'bisect:reset': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        await this.workflowService.resetBisect(repo);
+        this.openViewTo({ repo });
+        return { ok: true, status: await this.workflowService.getBisectStatus(repo) };
+      }
+
+      /* GitHub / GitLab / Gitea PR & MR Integration */
+      case 'hosting:listPrs': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const override = params.provider ? (String(params.provider) as HostingProviderKind) : undefined;
+        return this.hostingService.listPullRequests(repo, override);
+      }
+
+      case 'hosting:setToken': {
+        await this.hostingService.setHostToken(String(params.host || ''), String(params.token || ''));
+        return { ok: true, hasToken: await this.hostingService.hasHostToken(String(params.host || '')) };
+      }
+
+      case 'hosting:checkoutPr': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const override = params.provider ? (String(params.provider) as HostingProviderKind) : undefined;
+        const res = await this.hostingService.checkoutPullRequest(repo, Number(params.number), override);
+        this.openViewTo({ repo });
+        return res;
+      }
+
+      case 'hosting:generatePrDraft': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        return this.hostingService.generatePrDraft({
+          repo,
+          baseBranch: String(params.baseBranch || 'main'),
+          headBranch: String(params.headBranch || 'HEAD'),
+          lang: params.lang ? String(params.lang) : undefined
+        });
+      }
+
+      case 'hosting:createPr': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const override = params.provider ? (String(params.provider) as HostingProviderKind) : undefined;
+        return this.hostingService.createPullRequest({
+          repo,
+          baseBranch: String(params.baseBranch || 'main'),
+          headBranch: String(params.headBranch || 'HEAD'),
+          title: String(params.title || ''),
+          body: String(params.body || ''),
+          draft: !!params.draft,
+          providerOverride: override
+        });
+      }
+
+      /* History Rewrite Maintenance Commands */
+      case 'history:restoreBackup': {
+        await vscode.commands.executeCommand('git-map.restoreHistoryBackup');
+        return { ok: true };
+      }
+
+      case 'history:cleanUp': {
+        await vscode.commands.executeCommand('git-map.cleanUpRemovedFiles');
+        return { ok: true };
+      }
+
+      /* Local Directory Browser */
       case 'local:browsePath': {
         return this.browseLocalDirectory(params.path, !!params.showHidden);
       }
@@ -704,6 +1494,27 @@ export class GitMapServer {
         return { disconnected: true, hosts: sshManager.listHosts() };
       }
 
+      case 'ssh:listTunnels': {
+        return { tunnels: sshManager.listTunnels(params.hostId ? String(params.hostId) : undefined) };
+      }
+
+      case 'ssh:startTunnel': {
+        const tunnel = await sshManager.startTunnel({
+          hostId: String(params.hostId || ''),
+          localPort: Number(params.localPort),
+          remoteHost: params.remoteHost ? String(params.remoteHost) : '127.0.0.1',
+          remotePort: Number(params.remotePort),
+          localHost: params.localHost ? String(params.localHost) : '127.0.0.1',
+          label: params.label ? String(params.label) : undefined
+        });
+        return { tunnel, tunnels: sshManager.listTunnels() };
+      }
+
+      case 'ssh:stopTunnel': {
+        const stopped = await sshManager.stopTunnel(String(params.id || ''));
+        return { stopped, tunnels: sshManager.listTunnels() };
+      }
+
       case 'ssh:browsePath': {
         const hostId = String(params.hostId || '');
         const listing = await sshManager.listRemoteDirectory(hostId, params.path, !!params.showHidden);
@@ -732,12 +1543,134 @@ export class GitMapServer {
       case 'ssh:mkdir': {
         const hostId = String(params.hostId || '');
         const dir = await sshManager.resolveRemotePath(hostId, String(params.path || ''));
-        const name = String(params.name || '').trim();
-        if (!name || name.includes('/') || name === '.' || name === '..') throw new Error('Invalid folder name.');
+        const name = String(params.name || '').trim().replace(/^\/+|\/+$/g, '');
+        if (!name || name.split('/').some((seg) => !seg || seg === '.' || seg === '..')) {
+          throw new Error('Invalid folder name.');
+        }
         const target = path.posix.join(dir, name);
-        const res = await sshManager.execRemote(hostId, `mkdir ${quotePosixArg(target)}`);
+        const res = await sshManager.execRemote(hostId, `mkdir -p ${quotePosixArg(target)}`);
         if (res.code !== 0) throw new Error(res.stderr.trim() || 'Unable to create the folder.');
+        RepoFileWatcher.notifyPossibleRemoteChange(250);
         return { path: target };
+      }
+
+      case 'ssh:createFile': {
+        const hostId = String(params.hostId || '');
+        const dir = await sshManager.resolveRemotePath(hostId, String(params.path || ''));
+        const name = String(params.name || '').trim().replace(/^\/+/, '');
+        if (!name || name.endsWith('/') || name.split('/').some((seg) => !seg || seg === '.' || seg === '..')) {
+          throw new Error('Invalid file name.');
+        }
+        const target = path.posix.join(dir, name);
+        const parentDir = path.posix.dirname(target);
+        const checkCmd = `if [ -e ${quotePosixArg(target)} ]; then echo 'File or folder already exists.' >&2; exit 1; fi; mkdir -p ${quotePosixArg(parentDir)}`;
+        const checkRes = await sshManager.execRemote(hostId, checkCmd);
+        if (checkRes.code !== 0) throw new Error(checkRes.stderr.trim() || 'Unable to create file.');
+        await sshManager.writeRemoteFile(hostId, target, typeof params.content === 'string' ? params.content : '');
+        RepoFileWatcher.notifyPossibleRemoteChange(250);
+        return { path: target };
+      }
+
+      case 'local:mkdir': {
+        const baseDir = this.assertAllowedLocalPath(String(params.path || os.homedir()));
+        const name = String(params.name || '').trim().replace(/^[\\/]+|[\\/]+$/g, '');
+        if (!name || name.split(/[\\/]+/).some((seg) => !seg || seg === '.' || seg === '..')) {
+          throw new Error('Invalid folder name.');
+        }
+        const target = this.assertAllowedLocalPath(path.join(baseDir, name));
+        await fs.promises.mkdir(target, { recursive: true });
+        return { path: getPathFromStr(target) };
+      }
+
+      case 'local:createFile': {
+        const baseDir = this.assertAllowedLocalPath(String(params.path || os.homedir()));
+        const name = String(params.name || '').trim().replace(/^[\\/]+/, '');
+        if (!name || /[\\/]$/.test(name) || name.split(/[\\/]+/).some((seg) => !seg || seg === '.' || seg === '..')) {
+          throw new Error('Invalid file name.');
+        }
+        const target = this.assertAllowedLocalPath(path.join(baseDir, name));
+        if (fs.existsSync(target)) throw new Error('A file or folder with that name already exists.');
+        await fs.promises.mkdir(path.dirname(target), { recursive: true });
+        await fs.promises.writeFile(target, typeof params.content === 'string' ? params.content : '', { encoding: 'utf8', flag: 'wx' });
+        return { path: getPathFromStr(target) };
+      }
+
+      case 'local:rename': {
+        const from = this.assertAllowedLocalPath(String(params.path || ''));
+        const name = String(params.name || '').trim();
+        if (!name || name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
+          throw new Error('Invalid name.');
+        }
+        const to = this.assertAllowedLocalPath(path.join(path.dirname(from), name));
+        if (fs.existsSync(to)) throw new Error('A file or folder with that name already exists.');
+        await fs.promises.rename(from, to);
+        return { path: getPathFromStr(to) };
+      }
+
+      case 'local:delete': {
+        const rawPaths: string[] = Array.isArray(params.paths) ? params.paths.map(String) : [];
+        const homeResolved = path.resolve(os.homedir());
+        let deleted = 0;
+        for (const p of rawPaths) {
+          const norm = this.assertAllowedLocalPath(p);
+          const parsedRoot = path.parse(norm).root;
+          if (norm === parsedRoot || norm === homeResolved || norm.split(path.sep).filter(Boolean).length < 2) {
+            throw new Error(`Refusing to delete protected directory "${p}".`);
+          }
+          await fs.promises.rm(norm, { recursive: true, force: false });
+          deleted++;
+        }
+        return { deleted };
+      }
+
+      case 'local:importPaths': {
+        const destDir = this.assertAllowedLocalPath(String(params.destDir || os.homedir()));
+        const sources: string[] = Array.isArray(params.sources) ? params.sources.map(String) : [];
+        await fs.promises.mkdir(destDir, { recursive: true });
+        const copied: string[] = [];
+        for (const src of sources) {
+          copied.push(await this.copyLocalEntryDedup(src, destDir));
+        }
+        return { copied };
+      }
+
+      case 'local:pickImport': {
+        const destDir = this.assertAllowedLocalPath(String(params.destDir || os.homedir()));
+        const picked = await hostBridge.getHandlers().onOpenDialog?.({
+          canSelectFiles: params.folders !== true,
+          canSelectFolders: params.folders === true || params.both === true,
+          canSelectMany: true,
+          defaultPath: os.homedir(),
+          openLabel: 'Import / Copy Here'
+        });
+        if (!picked || picked.length === 0) return { copied: [] };
+        await fs.promises.mkdir(destDir, { recursive: true });
+        const copied: string[] = [];
+        for (const src of picked) {
+          copied.push(await this.copyLocalEntryDedup(src, destDir));
+        }
+        return { copied };
+      }
+
+      case 'local:pickExport': {
+        const sources: string[] = Array.isArray(params.sources) ? params.sources.map(String) : [];
+        if (sources.length === 0) throw new Error('Nothing selected to export.');
+        const downloads = path.join(os.homedir(), 'Downloads');
+        const picked = await hostBridge.getHandlers().onOpenDialog?.({
+          canSelectFiles: false,
+          canSelectFolders: true,
+          canSelectMany: false,
+          defaultPath: fs.existsSync(downloads) ? downloads : os.homedir(),
+          openLabel: 'Download / Save Here'
+        });
+        if (!picked || picked.length === 0) return { exported: [] };
+        const destDir = this.assertAllowedLocalPath(picked[0]);
+        await fs.promises.mkdir(destDir, { recursive: true });
+        const exported: string[] = [];
+        for (const src of sources) {
+          exported.push(await this.copyLocalEntryDedup(src, destDir));
+        }
+        return { exported };
       }
 
       case 'ssh:rename': {
@@ -754,7 +1687,6 @@ export class GitMapServer {
       case 'ssh:delete': {
         const hostId = String(params.hostId || '');
         const paths: string[] = Array.isArray(params.paths) ? params.paths.map(String) : [];
-        // Only absolute paths below the root, never "/" or a home directory itself
         const session = await sshManager.ensureConnected(hostId);
         for (const p of paths) {
           const norm = path.posix.normalize(p);
@@ -765,6 +1697,7 @@ export class GitMapServer {
         if (paths.length === 0) return { deleted: 0 };
         const res = await sshManager.execRemote(hostId, 'rm -rf -- ' + paths.map((p) => quotePosixArg(path.posix.normalize(p))).join(' '));
         if (res.code !== 0) throw new Error(res.stderr.trim() || 'Unable to delete.');
+        RepoFileWatcher.notifyPossibleRemoteChange(300);
         return { deleted: paths.length };
       }
 
@@ -786,7 +1719,6 @@ export class GitMapServer {
       }
 
       case 'transfer:pickUpload': {
-        // Ask for local files / folders (native dialog in the desktop app), then upload them
         const hostId = String(params.hostId || '');
         const destDir = await sshManager.resolveRemotePath(hostId, String(params.destDir || '~'));
         const picked = await hostBridge.getHandlers().onOpenDialog?.({
@@ -866,7 +1798,7 @@ export class GitMapServer {
         let filePath = String(params.filePath || '');
         const commit: string | null = params.commit ? String(params.commit) : null;
 
-        if (!repo && filePath) {
+        if (!repo && filePath && !isRemoteRepo(filePath)) {
           const found = await this.repoManager.getRepoAndPathOfFile(filePath.replace(/\\/g, '/'));
           if (found) {
             repo = found.repo;
@@ -876,8 +1808,8 @@ export class GitMapServer {
 
         if (repo) {
           const textRes = await this.diffService.readRevisionText(repo, commit, filePath);
-          const blame = params.includeBlame && (!commit || commit === '*')
-            ? await this.diffService.loadFileBlame(repo, filePath)
+          const blame = params.includeBlame
+            ? await this.diffService.loadFileBlame(repo, filePath, commit)
             : null;
           return {
             repo,
@@ -885,13 +1817,12 @@ export class GitMapServer {
             commit,
             content: textRes.content,
             isBinary: textRes.isBinary,
+            truncated: textRes.truncated,
             error: textRes.error,
             blame
           };
         }
 
-        // Standalone file outside registered repo (e.g. bisect log, or a file opened from a path browser).
-        // Read at most MAX_STANDALONE_BYTES, and don't decode binary files.
         const MAX_STANDALONE_BYTES = 5 * 1024 * 1024;
         let buf: Buffer;
         let shownPath = filePath;
@@ -900,10 +1831,13 @@ export class GitMapServer {
           shownPath = parsed.remotePath;
           buf = await sshManager.readRemoteFile(parsed.hostId, parsed.remotePath, MAX_STANDALONE_BYTES + 1);
         } else {
-          const fh = await fs.promises.open(filePath, 'r');
+          const resolvedFile = this.assertAllowedLocalPath(filePath);
+          const fh = await fs.promises.open(resolvedFile, 'r');
           try {
-            const chunk = Buffer.alloc(MAX_STANDALONE_BYTES + 1);
-            const { bytesRead } = await fh.read(chunk, 0, chunk.length, 0);
+            const st = await fh.stat();
+            const allocLen = Math.min(MAX_STANDALONE_BYTES + 1, Math.max(0, st.size));
+            const chunk = Buffer.allocUnsafe(allocLen);
+            const { bytesRead } = allocLen > 0 ? await fh.read(chunk, 0, allocLen, 0) : { bytesRead: 0 };
             buf = chunk.subarray(0, bytesRead);
           } finally {
             await fh.close();
@@ -914,6 +1848,7 @@ export class GitMapServer {
         return {
           repo: '',
           filePath: shownPath,
+          sourceUri: filePath,
           commit: null,
           content: isBinary ? '' : buf.subarray(0, MAX_STANDALONE_BYTES).toString('utf8'),
           isBinary,
@@ -923,10 +1858,31 @@ export class GitMapServer {
         };
       }
 
+      case 'file:write': {
+        const repo = String(params.repo || '');
+        const filePath = String(params.filePath || '');
+        const content = String(params.content ?? '');
+        if (repo) {
+          await this.workflowService.writeRepoWorkingFile(repo, filePath, content);
+          return { ok: true };
+        }
+        if (!filePath) throw new Error('File path is required.');
+        if (isRemoteRepo(filePath)) {
+          const parsed = parseRemoteRepo(filePath)!;
+          await sshManager.writeRemoteFile(parsed.hostId, parsed.remotePath, content);
+          RepoFileWatcher.notifyPossibleRemoteChange(250);
+          return { ok: true };
+        }
+        const resolvedFile = this.assertAllowedLocalPath(filePath);
+        await fs.promises.writeFile(resolvedFile, content, 'utf8');
+        return { ok: true };
+      }
+
       case 'file:blame': {
         const repo = String(params.repo || '');
         const filePath = String(params.filePath || '');
-        const blame = await this.diffService.loadFileBlame(repo, filePath);
+        const commit = params.commit ? String(params.commit) : null;
+        const blame = await this.diffService.loadFileBlame(repo, filePath, commit);
         return { blame };
       }
 
@@ -953,6 +1909,15 @@ export class GitMapServer {
         return { ok: true };
       }
 
+      case 'file:timeMachine': {
+        await vscode.commands.executeCommand('git-map.fileTimeMachine', {
+          repo: String(params.repo || ''),
+          filePath: String(params.filePath || ''),
+          commitHash: params.commitHash ? String(params.commitHash) : undefined
+        });
+        return { ok: true };
+      }
+
       /* Terminal Sessions */
       case 'term:create': {
         const repo = String(params.repo || this.extensionState.getLastActiveRepo() || os.homedir());
@@ -971,10 +1936,37 @@ export class GitMapServer {
             if (ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({ type: 'term:exit', id, code }));
             }
-          }
+          },
+          ws,
+          params.shellPath ? String(params.shellPath) : null
         );
+        if (ws.readyState !== WebSocket.OPEN) {
+          this.terminalManager.detachOwner(ws, 6000);
+        }
         return { session: info };
       }
+
+      case 'term:attach': {
+        const id = String(params.id || '');
+        const attached = this.terminalManager.attachSession(
+          id,
+          ws,
+          (tid, chunk) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'term:data', id: tid, data: chunk }));
+            }
+          },
+          (tid, code) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'term:exit', id: tid, code }));
+            }
+          }
+        );
+        return { attached: attached !== null, session: attached?.session || null, scrollback: attached?.scrollback || '' };
+      }
+
+      case 'term:list':
+        return { sessions: this.terminalManager.listSessions() };
 
       case 'term:openSystem': {
         const location = String(params.repo || this.extensionState.getLastActiveRepo() || os.homedir());
@@ -1007,11 +1999,15 @@ export class GitMapServer {
         for (const preset of snapshot.presets) {
           if (preset.requiresApiKey) keys[preset.id] = (await getApiKey(preset.id as AiProvider)) !== null;
         }
-        return { ...snapshot, presets: snapshot.presets.filter((p) => p.id !== AiProvider.VsCode), keys, defaultTimeoutSeconds: DEFAULT_AI_TIMEOUT_SECONDS };
+        return {
+          ...snapshot,
+          presets: snapshot.presets.filter((p) => p.id !== AiProvider.VsCode),
+          keys,
+          defaultTimeoutSeconds: DEFAULT_AI_TIMEOUT_SECONDS
+        };
       }
 
       case 'ai:preview': {
-        // Describe the request the (unsaved) values in Settings would send
         const provider = String(params.provider || '');
         const options = parseAiRequestSettings(provider, params.request || {});
         const preview = previewAiRequest(provider, String(params.baseUrl || ''), String(params.model || ''), options);
@@ -1023,7 +2019,7 @@ export class GitMapServer {
 
       case 'ai:setApiKey': {
         const key = typeof params.key === 'string' ? params.key.trim() : '';
-        if (!key) throw new Error('The API key can\'t be empty.');
+        if (!key) throw new Error("The API key can't be empty.");
         const stored = await setApiKey(key);
         if (!stored) throw new Error('Choose an AI provider that needs an API key first.');
         return { ok: true };
@@ -1032,6 +2028,32 @@ export class GitMapServer {
       case 'ai:clearApiKey':
         await clearApiKey();
         return { ok: true };
+
+      case 'ai:reviewChanges': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const scope = ['staged', 'unstaged', 'all', 'commit'].includes(params.scope) ? params.scope : 'all';
+        return this.workflowService.reviewChangesWithAi({
+          repo,
+          scope,
+          commitHash: params.commitHash ? String(params.commitHash) : undefined,
+          lang: params.lang ? String(params.lang) : undefined
+        });
+      }
+
+      case 'ai:releaseNotes': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        return this.workflowService.generateReleaseNotes({
+          repo,
+          fromRef: params.fromRef ? String(params.fromRef) : undefined,
+          toRef: params.toRef ? String(params.toRef) : 'HEAD',
+          lang: params.lang ? String(params.lang) : undefined
+        });
+      }
+
+      case 'git:nlSearch': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        return this.workflowService.naturalLanguageCommitSearch(repo, String(params.query || ''));
+      }
 
       /* Settings & Logs */
       case 'settings:get':
@@ -1043,8 +2065,17 @@ export class GitMapServer {
         return { settings: getAllStandaloneSettings() };
       }
 
+      case 'settings:updateBatch': {
+        const updates = params.updates && typeof params.updates === 'object' ? params.updates : {};
+        await updateStandaloneSettingsBatch(updates);
+        return { settings: getAllStandaloneSettings() };
+      }
+
       case 'logs:get':
         return { logs: hostBridge.getLogs() };
+
+      case 'system:diagnostics':
+        return this.buildDiagnosticsSnapshot();
 
       default:
         throw new Error(`Unknown RPC method: ${method}`);
@@ -1061,6 +2092,39 @@ export class GitMapServer {
     };
   }
 
+  private async discoverLocalRepos(rootFolder: string, maxDepth: number): Promise<Array<{ name: string; path: string; branch: string | null }>> {
+    const discovered: Array<{ name: string; path: string; branch: string | null }> = [];
+    const seen = new Set<string>();
+    const walk = async (dir: string, depth: number) => {
+      if (depth > maxDepth || discovered.length >= 150) return;
+      let dirents: fs.Dirent[];
+      try {
+        dirents = await fs.promises.readdir(dir, { withFileTypes: true });
+      } catch (_) {
+        return;
+      }
+      if (dirents.some((d) => d.name === '.git')) {
+        const norm = getPathFromStr(dir);
+        if (!seen.has(norm)) {
+          seen.add(norm);
+          let branch: string | null = null;
+          try {
+            const headText = (await fs.promises.readFile(path.join(dir, '.git', 'HEAD'), 'utf8')).trim();
+            branch = headText.startsWith('ref: refs/heads/') ? headText.substring(16) : headText.substring(0, 8);
+          } catch (_) {}
+          discovered.push({ name: getRepoName(norm), path: norm, branch });
+        }
+        return;
+      }
+      for (const d of dirents) {
+        if (!d.isDirectory() || d.name.startsWith('.') || d.name === 'node_modules' || d.name === 'Library') continue;
+        await walk(path.join(dir, d.name), depth + 1);
+      }
+    };
+    await walk(rootFolder, 0);
+    return discovered.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
   private async completeLocalPath(partial: string, showHidden: boolean) {
     const raw = partial.trim() === '' ? '~/' : partial;
     const expanded = raw === '~' ? os.homedir() + path.sep : raw.startsWith('~/') || raw.startsWith('~\\') ? path.join(os.homedir(), raw.slice(2)) + (/[\\/]$/.test(raw) ? path.sep : '') : raw;
@@ -1071,20 +2135,22 @@ export class GitMapServer {
     const lower = prefix.toLowerCase();
     let matched = dirents.filter((d) => d.name.startsWith(prefix));
     if (matched.length === 0) matched = dirents.filter((d) => d.name.toLowerCase().startsWith(lower));
-    const entries = matched
-      .filter((d) => showHidden || prefix.startsWith('.') || !d.name.startsWith('.'))
-      .slice(0, 200)
-      .map((d) => {
-        const full = path.join(path.resolve(dir), d.name);
-        let isDirectory = d.isDirectory();
-        if (d.isSymbolicLink()) {
-          try {
-            isDirectory = fs.statSync(full).isDirectory();
-          } catch (_) {}
-        }
-        return { name: d.name, path: getPathFromStr(full), isDirectory };
-      })
-      .sort((a, b) => (a.isDirectory !== b.isDirectory ? (a.isDirectory ? -1 : 1) : a.name.localeCompare(b.name)));
+    const entries = await Promise.all(
+      matched
+        .filter((d) => showHidden || prefix.startsWith('.') || !d.name.startsWith('.'))
+        .slice(0, 200)
+        .map(async (d) => {
+          const full = path.join(path.resolve(dir), d.name);
+          let isDirectory = d.isDirectory();
+          if (d.isSymbolicLink()) {
+            try {
+              isDirectory = (await fs.promises.stat(full)).isDirectory();
+            } catch (_) {}
+          }
+          return { name: d.name, path: getPathFromStr(full), isDirectory };
+        })
+    );
+    entries.sort((a, b) => (a.isDirectory !== b.isDirectory ? (a.isDirectory ? -1 : 1) : a.name.localeCompare(b.name)));
     return { dir: getPathFromStr(path.resolve(dir)), prefix, entries };
   }
 
@@ -1097,68 +2163,62 @@ export class GitMapServer {
         : path.resolve(raw);
 
     const dirents = await fs.promises.readdir(resolved, { withFileTypes: true });
-    const entries: RemoteDirectoryEntry[] = [];
+    const filtered = dirents.filter((d) => showHidden || !d.name.startsWith('.'));
 
-    for (const d of dirents) {
-      if (!showHidden && d.name.startsWith('.')) continue;
-      const fullPath = path.join(resolved, d.name);
-      let isDir = d.isDirectory();
-      const isSym = d.isSymbolicLink();
-      if (isSym) {
+    const entries: RemoteDirectoryEntry[] = await Promise.all(
+      filtered.map(async (d) => {
+        const fullPath = path.join(resolved, d.name);
+        const isSym = d.isSymbolicLink();
+        let isDir = d.isDirectory();
+        let size = 0;
+        let mtime = 0;
         try {
-          isDir = (await fs.promises.stat(fullPath)).isDirectory();
-        } catch (_) {
-          isDir = false;
-        }
-      }
-      let size = 0;
-      let mtime = 0;
-      try {
-        const st = await fs.promises.stat(fullPath);
-        size = st.isFile() ? st.size : 0;
-        mtime = Math.floor(st.mtimeMs / 1000);
-      } catch (_) {}
-      let isGitRepo = false;
-      let gitBranch: string | null = null;
-      if (isDir) {
-        const dotGit = path.join(fullPath, '.git');
-        if (fs.existsSync(dotGit)) {
-          isGitRepo = true;
+          const st = await fs.promises.stat(fullPath);
+          isDir = st.isDirectory();
+          size = st.isFile() ? st.size : 0;
+          mtime = Math.floor(st.mtimeMs / 1000);
+        } catch (_) {}
+
+        let isGitRepo = false;
+        let gitBranch: string | null = null;
+        if (isDir) {
+          const dotGit = path.join(fullPath, '.git');
           try {
-            const headFile = fs.statSync(dotGit).isDirectory() ? path.join(dotGit, 'HEAD') : null;
-            if (headFile && fs.existsSync(headFile)) {
-              const headText = fs.readFileSync(headFile, 'utf8').trim();
+            const gitStat = await fs.promises.stat(dotGit);
+            isGitRepo = true;
+            if (gitStat.isDirectory()) {
+              const headText = (await fs.promises.readFile(path.join(dotGit, 'HEAD'), 'utf8')).trim();
               gitBranch = headText.startsWith('ref: refs/heads/') ? headText.substring(16) : headText.substring(0, 8);
             }
           } catch (_) {}
         }
-      }
-      entries.push({
-        name: d.name,
-        path: getPathFromStr(fullPath),
-        isDirectory: isDir,
-        isSymlink: isSym,
-        isGitRepo,
-        gitBranch,
-        size,
-        mtime
-      });
-    }
+
+        return {
+          name: d.name,
+          path: getPathFromStr(fullPath),
+          isDirectory: isDir,
+          isSymlink: isSym,
+          isGitRepo,
+          gitBranch,
+          size,
+          mtime
+        };
+      })
+    );
 
     entries.sort((a, b) => (a.isDirectory !== b.isDirectory ? (a.isDirectory ? -1 : 1) : a.name.localeCompare(b.name)));
 
-    // Check if current folder itself is inside a git repo
     let currentRepoRoot: string | null = null;
     let currentRepoBranch: string | null = null;
-    if (fs.existsSync(path.join(resolved, '.git'))) {
+    try {
+      await fs.promises.stat(path.join(resolved, '.git'));
       currentRepoRoot = getPathFromStr(resolved);
-      // Don't block the event loop (and every other client request) on a git process
       currentRepoBranch = await new Promise<string | null>((resolve) => {
         cp.execFile('git', ['-C', resolved, 'symbolic-ref', '-q', '--short', 'HEAD'], { encoding: 'utf8', timeout: 5000 }, (err, stdout) => {
           resolve(err ? null : String(stdout).trim() || null);
         });
       });
-    }
+    } catch (_) {}
 
     const normCurrent = getPathFromStr(resolved);
     const parentRaw = path.dirname(resolved);

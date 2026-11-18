@@ -50,12 +50,14 @@ const askpassOut = path.join(DIST, 'askpass');
 if (fs.existsSync(askpassSrc)) {
   fs.mkdirSync(askpassOut, { recursive: true });
   for (const fileName of fs.readdirSync(askpassSrc)) {
-    if (fileName.endsWith('.sh')) {
+    if (fileName.endsWith('.sh') || fileName.endsWith('.bat')) {
       const target = path.join(askpassOut, fileName);
       fs.copyFileSync(path.join(askpassSrc, fileName), target);
-      try {
-        fs.chmodSync(target, 0o755);
-      } catch (_) {}
+      if (fileName.endsWith('.sh')) {
+        try {
+          fs.chmodSync(target, 0o755);
+        } catch (_) {}
+      }
     }
   }
 }

@@ -268,10 +268,15 @@ export class AvatarManager extends Disposable {
 						}
 						return;
 					}
-				} else if (res.statusCode === 403) {
-					// Rate limit reached, try again after timeout
-					this.queue.addItem(avatarRequest, this.githubTimeout, false);
-					return;
+				} else if (res.statusCode === 403 || res.statusCode === 429) {
+					// Rate limit or forbidden response: ensure a non-zero cooldown and cap retries to avoid tight loops
+					if (this.githubTimeout <= t) {
+						this.githubTimeout = t + 300000;
+					}
+					if (avatarRequest.attempts < 4) {
+						this.queue.addItem(avatarRequest, this.githubTimeout, true);
+						return;
+					}
 				} else if (res.statusCode === 422 && avatarRequest.commits.length > avatarRequest.attempts + 1 && avatarRequest.attempts < 4) {
 					// Commit not found on remote, try again with the next commit if less than 5 attempts have been made
 					this.queue.addItem(avatarRequest, 0, true);

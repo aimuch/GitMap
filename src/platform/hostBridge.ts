@@ -41,12 +41,14 @@ export interface VisualFileHistoryOpenPayload {
   title: string;
   html: string;
   panelId: string;
+  viewType?: string;
 }
 
 export interface TerminalOpenPayload {
   repo: string;
   name: string;
   initialCommand?: string | null;
+  shellPath?: string | null;
 }
 
 export interface ToastPayload {
@@ -103,6 +105,8 @@ export interface HostBridgeHandlers {
   onOpenFile?: (payload: FileOpenPayload) => void;
   onOpenTerminal?: (payload: TerminalOpenPayload) => void;
   onOpenSettingsUi?: (query?: string) => void;
+  onOpenScm?: (draftMessage?: string) => void;
+  onSettingsChanged?: (settings: { [key: string]: any }) => void;
   onClipboardWrite?: (text: string) => Promise<boolean>;
   onOpenExternal?: (url: string) => Promise<boolean>;
   onToast?: (payload: ToastPayload) => Promise<string | undefined>;
