@@ -2576,7 +2576,7 @@ class GitGraphView {
 			const commitElem = e.target instanceof Element ? <HTMLElement | null>e.target.closest('.commit') : null;
 			highlightBranchOfCommit(commitElem !== null && typeof commitElem.dataset.id === 'string' ? parseInt(commitElem.dataset.id) : null);
 			// The buttons of the most common actions on the commit are shown on its row (next to the pointer, by default)
-			if (commitElem !== null) {
+			if (commitElem !== null && !e.altKey && !contextMenu.isOpen() && !dialog.isOpen()) {
 				this.rowActions.show(commitElem, e.clientX);
 			} else {
 				this.rowActions.hide();
@@ -2584,7 +2584,7 @@ class GitGraphView {
 		});
 		this.tableElem.addEventListener('mousemove', (e: MouseEvent) => {
 			const commitElem = e.target instanceof Element ? <HTMLElement | null>e.target.closest('.commit') : null;
-			if (commitElem === null) {
+			if (commitElem === null || e.altKey || contextMenu.isOpen() || dialog.isOpen()) {
 				this.rowActions.hide();
 			} else if (this.getRowActionsConfig().position === 'Pointer' || !this.rowActions.isShownFor(commitElem)) {
 				this.rowActions.show(commitElem, e.clientX);
@@ -2638,6 +2638,7 @@ class GitGraphView {
 
 		// Register ContextMenu Event Handler
 		this.tableElem.addEventListener('contextmenu', (e: Event) => {
+			this.rowActions.hide();
 			if (e.target === null) return;
 			const eventTarget = <Element>e.target;
 			if (isUrlElem(eventTarget)) return;

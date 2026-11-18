@@ -278,16 +278,24 @@ class CdvFileView {
 				const minL = 10;
 				const maxL = Math.max(minL, hostRect.width - barW - 14);
 				const relX = clientX - hostRect.left;
-				let left = relX + 14;
-				if (left > maxL) left = relX - 14 - barW;
+				let left = relX + 18;
+				if (left > maxL) left = relX - 18 - barW;
 				left = Math.max(minL, Math.min(left, maxL));
-				barElem!.style.left = Math.round(left + filesElem.scrollLeft) + 'px';
 				if (updateVertical) {
+					barElem!.classList.remove('gliding');
+					barElem!.classList.toggle('tip-below', rowRect.top - hostRect.top < 28);
 					const top = rowRect.top - hostRect.top + filesElem.scrollTop + (rowRect.height - barH) / 2;
 					barElem!.style.top = Math.round(top) + 'px';
+				} else {
+					barElem!.classList.add('gliding');
 				}
+				barElem!.style.left = Math.round(left + filesElem.scrollLeft) + 'px';
 			};
 			filesElem.onmousemove = (ev: MouseEvent) => {
+				if (ev.altKey || contextMenu.isOpen()) {
+					hideBar();
+					return;
+				}
 				const targetEl = ev.target instanceof Element ? ev.target : null;
 				if (targetEl && barElem!.contains(targetEl)) return;
 				const rec = targetEl ? <HTMLElement | null>targetEl.closest('.fileTreeFileRecord') : null;
@@ -298,7 +306,7 @@ class CdvFileView {
 				}
 				if (rec === currentRecord && !barElem!.classList.contains('hidden')) {
 					const bRect = barElem!.getBoundingClientRect();
-					if (ev.clientX < bRect.left - 24 || ev.clientX > bRect.right + 24) {
+					if (ev.clientX < bRect.left - 22 || ev.clientX > bRect.right + 22) {
 						placeBar(ev.clientX, false);
 					}
 					return;
@@ -314,12 +322,12 @@ class CdvFileView {
 				const copyTitle = escapeHtml(t('Copy Absolute File Path to Clipboard'));
 				const revTitle = escapeHtml(t('View File at this Revision'));
 				const openTitle = escapeHtml(t('Open File'));
-				let html = '<button type="button" class="rowAction" data-cdv-act="copy" title="' + copyTitle + '" aria-label="' + copyTitle + '">' + SVG_ICONS.copy + '</button>';
+				let html = '<button type="button" class="rowAction" data-cdv-act="copy" data-tip="' + copyTitle + '" aria-label="' + copyTitle + '">' + SVG_ICONS.copy + '</button>';
 				if (file.type !== GG.GitFileStatus.Deleted) {
 					if (diffPossible && !isUncommitted) {
-						html += '<button type="button" class="rowAction" data-cdv-act="rev" title="' + revTitle + '" aria-label="' + revTitle + '">' + SVG_ICONS.commit + '</button>';
+						html += '<button type="button" class="rowAction" data-cdv-act="rev" data-tip="' + revTitle + '" aria-label="' + revTitle + '">' + SVG_ICONS.commit + '</button>';
 					}
-					html += '<button type="button" class="rowAction" data-cdv-act="open" title="' + openTitle + '" aria-label="' + openTitle + '">' + SVG_ICONS.openFile + '</button>';
+					html += '<button type="button" class="rowAction" data-cdv-act="open" data-tip="' + openTitle + '" aria-label="' + openTitle + '">' + SVG_ICONS.openFile + '</button>';
 				}
 				barElem!.innerHTML = html;
 				barElem!.classList.remove('hidden');

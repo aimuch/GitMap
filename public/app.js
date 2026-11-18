@@ -3763,55 +3763,126 @@
     let floatRowEl = null;
     let floatIdx = -1;
     let floatLeftPx = 0;
-    const FLOAT_POINTER_GAP = 16;
-    const FLOAT_APPROACH_PAD = 24;
+    const FLOAT_POINTER_GAP = 22;
+    const FLOAT_APPROACH_PAD = 22;
     const FLOAT_EDGE_MARGIN = 12;
 
     function hideFloatingBar() {
       if (floatRowEl) floatRowEl.classList.remove('float-target');
       floatRowEl = null;
       floatIdx = -1;
+      floatingBar.classList.remove('gliding', 'tip-below');
       floatingBar.classList.add('hidden');
       floatingBar.innerHTML = '';
     }
 
+    function buildEntryContextActions(entry) {
+      const zh = state.lang === 'zh';
+      const ctxActions = [];
+      if (entry.isDirectory) {
+        if (entry.isGitRepo && opts.showOpenRepo !== false && opts.onOpenRepo) {
+          ctxActions.push({ icon: ICONS.gitRepo, label: tr('openRepoBtn'), run: () => opts.onOpenRepo(entry.path) });
+        }
+        ctxActions.push({
+          icon: entry._expanded ? ICONS.chevronDown : ICONS.chevronRight,
+          label: entry._expanded ? (zh ? '折叠子目录' : 'Collapse Subfolder') : (zh ? '展开子目录' : 'Expand Subfolder'),
+          run: () => toggleExpandDir(entry)
+        });
+        ctxActions.push({
+          icon: ICONS.folderOpen,
+          label: zh ? '进入此文件夹' : 'Enter Folder',
+          run: () => openEntry(entry)
+        });
+        if (features.createFile && opts.createFile) {
+          ctxActions.push({ sep: true });
+          ctxActions.push({ icon: ICONS.filePlus || ICONS.plus, label: zh ? '在此新建文件…' : 'New File Here…', run: () => { fb.expandedDirs.add(entry.path); opts.createFile(entry.path); } });
+        }
+        if (features.mkdir && opts.mkdir) {
+          ctxActions.push({ icon: ICONS.folderPlus, label: zh ? '在此新建文件夹…' : 'New Folder Here…', run: () => { fb.expandedDirs.add(entry.path); opts.mkdir(entry.path); } });
+        }
+        if (features.transfer && opts.upload) {
+          ctxActions.push({ icon: ICONS.upload, label: zh ? '上传文件到此目录…' : 'Upload Files Here…', run: () => { fb.expandedDirs.add(entry.path); opts.upload(entry.path, false); } });
+        }
+      } else {
+        ctxActions.push({
+          icon: ICONS.fileCode || ICONS.file,
+          label: zh ? '预览 / 查看文件' : 'Preview / View File',
+          run: () => openEntry(entry)
+        });
+        if (opts.onDoubleClickFile) {
+          ctxActions.push({
+            icon: ICONS.layoutTabs,
+            label: zh ? '在独立标签页中打开' : 'Open in Full Tab',
+            run: () => opts.onDoubleClickFile(entry)
+          });
+        }
+      }
+      ctxActions.push({ sep: true });
+      if (features.transfer && opts.download) {
+        ctxActions.push({ icon: ICONS.download, label: zh ? '下载 / 导出…' : 'Download / Export…', run: () => opts.download([entry.path]) });
+      }
+      if (features.launch && entry.isDirectory && opts.openTerminal) {
+        ctxActions.push({ icon: ICONS.terminal, label: zh ? '在此打开终端' : 'Open Terminal Here', run: () => opts.openTerminal(entry.path) });
+      }
+      if (features.launch && opts.openEditor) {
+        ctxActions.push({ icon: ICONS.editor, label: tr('openInEditor'), run: () => opts.openEditor(entry.path) });
+      }
+      ctxActions.push({
+        icon: ICONS.copy,
+        label: zh ? '复制完整路径' : 'Copy Path',
+        run: () => {
+          navigator.clipboard?.writeText(entry.path).catch(() => {});
+          showToast(T('已复制：', 'Copied: ') + entry.path, 'status');
+        }
+      });
+      if (features.rename && opts.rename) {
+        ctxActions.push({ sep: true });
+        ctxActions.push({ icon: ICONS.pencil, label: zh ? '重命名…' : 'Rename…', run: () => opts.rename(entry) });
+      }
+      if (features.delete && opts.remove) {
+        ctxActions.push({ icon: ICONS.trash, label: zh ? '删除…' : 'Delete…', danger: true, run: () => opts.remove([entry]) });
+      }
+      return ctxActions;
+    }
+
     function buildFloatingActionsHtml(e) {
       const btns = [];
+      const tip = (zhText, enText) => {
+        const s = escapeHtml(T(zhText, enText));
+        return `data-tip="${s}" aria-label="${s}"`;
+      };
       if (e.isGitRepo && opts.showOpenRepo !== false) {
         btns.push(`<button type="button" class="mini-btn primary act-row-open-repo">${escapeHtml(tr('openRepoBtn'))}</button>`);
       }
       if (e.isDirectory) {
-        btns.push(`<button type="button" class="mini-btn act-row-toggle-expand" title="${escapeHtml(e._expanded ? T('收起此文件夹', 'Collapse folder') : T('展开此文件夹查看内容', 'Expand folder'))}">${e._expanded ? ICONS.chevronDown : ICONS.chevronRight}<span>${escapeHtml(e._expanded ? T('收起', 'Collapse') : T('展开', 'Expand'))}</span></button>`);
-        btns.push(`<button type="button" class="mini-btn act-row-enter" title="${escapeHtml(T('进入此目录作为根路径浏览', 'Enter folder'))}">${ICONS.folderOpen}<span>${escapeHtml(T('进入', 'Enter'))}</span></button>`);
+        btns.push(`<button type="button" class="mini-btn act-row-toggle-expand" ${tip(e._expanded ? '收起此文件夹' : '展开此文件夹', e._expanded ? 'Collapse folder' : 'Expand folder')}>${e._expanded ? ICONS.chevronDown : ICONS.chevronRight}<span>${escapeHtml(e._expanded ? T('收起', 'Collapse') : T('展开', 'Expand'))}</span></button>`);
+        btns.push(`<button type="button" class="mini-btn act-row-enter" ${tip('进入此目录', 'Enter folder')}>${ICONS.folderOpen}<span>${escapeHtml(T('进入', 'Enter'))}</span></button>`);
       } else {
-        btns.push(`<button type="button" class="mini-btn primary act-row-open-file" title="${escapeHtml(T('在独立标签页中查看或在线编辑文件', 'Open or edit file in tab'))}">${ICONS.fileCode}<span>${escapeHtml(T('查看/编辑', 'Open / Edit'))}</span></button>`);
+        btns.push(`<button type="button" class="mini-btn primary act-row-open-file" ${tip('独立标签页打开 / 编辑', 'Open or edit in tab')}>${ICONS.fileCode}<span>${escapeHtml(T('打开', 'Open'))}</span></button>`);
       }
       btns.push('<span class="fb-float-sep"></span>');
       if (e.isDirectory) {
         if (features.createFile) {
-          btns.push(`<button type="button" class="mini-icon-btn act-row-new-file" title="${escapeHtml(T('在此文件夹内新建文件', 'New File in Folder'))}">${ICONS.filePlus}</button>`);
+          btns.push(`<button type="button" class="mini-icon-btn act-row-new-file" ${tip('在此新建文件', 'New File Here')}>${ICONS.filePlus}</button>`);
         }
         if (features.mkdir) {
-          btns.push(`<button type="button" class="mini-icon-btn act-row-mkdir" title="${escapeHtml(T('在此文件夹内新建子文件夹', 'New Subfolder'))}">${ICONS.folderPlus}</button>`);
+          btns.push(`<button type="button" class="mini-icon-btn act-row-mkdir" ${tip('在此新建文件夹', 'New Folder Here')}>${ICONS.folderPlus}</button>`);
         }
         if (features.transfer) {
-          btns.push(`<button type="button" class="mini-icon-btn act-row-upload" title="${escapeHtml(T('上传文件到此文件夹', 'Upload into Folder'))}">${ICONS.upload}</button>`);
+          btns.push(`<button type="button" class="mini-icon-btn act-row-upload" ${tip('上传文件到此目录', 'Upload Files Here')}>${ICONS.upload}</button>`);
         }
       }
       if (features.transfer) {
-        btns.push(`<button type="button" class="mini-icon-btn act-row-download" title="${escapeHtml(T('下载 / 导出', 'Download / Export'))}">${ICONS.download}</button>`);
+        btns.push(`<button type="button" class="mini-icon-btn act-row-download" ${tip('下载 / 导出', 'Download / Export')}>${ICONS.download}</button>`);
       }
-      if (features.launch && e.isDirectory) {
-        btns.push(`<button type="button" class="mini-icon-btn act-row-term" title="${escapeHtml(tr('openInTerminal'))}">${ICONS.terminal}</button>`);
-        btns.push(`<button type="button" class="mini-icon-btn act-row-editor" title="${escapeHtml(tr('openInEditor'))}">${ICONS.editor}</button>`);
-      }
-      btns.push(`<button type="button" class="mini-icon-btn act-row-copy" title="${escapeHtml(T('复制完整路径', 'Copy Full Path'))}">${ICONS.copy}</button>`);
       if (features.rename) {
-        btns.push(`<button type="button" class="mini-icon-btn act-row-rename" title="${escapeHtml(T('重命名', 'Rename'))}">${ICONS.pencil}</button>`);
+        btns.push(`<button type="button" class="mini-icon-btn act-row-rename" ${tip('重命名', 'Rename')}>${ICONS.pencil}</button>`);
       }
       if (features.delete) {
-        btns.push(`<button type="button" class="mini-icon-btn danger act-row-delete" title="${escapeHtml(T('删除', 'Delete'))}">${ICONS.trash}</button>`);
+        btns.push(`<button type="button" class="mini-icon-btn danger act-row-delete" ${tip('删除', 'Delete')}>${ICONS.trash}</button>`);
       }
+      btns.push('<span class="fb-float-sep"></span>');
+      btns.push(`<button type="button" class="mini-icon-btn act-row-more" ${tip('更多操作…', 'More Actions…')}>${ICONS.more}</button>`);
       return btns.join('');
     }
 
@@ -3825,7 +3896,7 @@
         return;
       }
       const barWidth = floatingBar.offsetWidth;
-      const barHeight = floatingBar.offsetHeight || 30;
+      const barHeight = floatingBar.offsetHeight || 26;
       const minLeft = FLOAT_EDGE_MARGIN;
       const maxLeft = Math.max(minLeft, tableRect.width - barWidth - FLOAT_EDGE_MARGIN);
       const relMouseX = clientX - tableRect.left;
@@ -3833,11 +3904,15 @@
       if (left > maxLeft) left = relMouseX - FLOAT_POINTER_GAP - barWidth;
       left = Math.max(minLeft, Math.min(left, maxLeft));
       floatLeftPx = Math.round(left);
-      floatingBar.style.left = floatLeftPx + 'px';
       if (updateVertical) {
+        floatingBar.classList.remove('gliding');
         const top = rowRect.top - tableRect.top + (rowRect.height - barHeight) / 2;
+        floatingBar.classList.toggle('tip-below', top < 58);
         floatingBar.style.top = Math.round(top) + 'px';
+      } else {
+        floatingBar.classList.add('gliding');
       }
+      floatingBar.style.left = floatLeftPx + 'px';
     }
 
     function showOrFollowFloatingBar(rowEl, clientX) {
@@ -4344,11 +4419,20 @@
         opts.rename(entry);
       } else if (btn.classList.contains('act-row-delete') && opts.remove) {
         opts.remove([entry]);
+      } else if (btn.classList.contains('act-row-more')) {
+        const bRect = btn.getBoundingClientRect();
+        hideFloatingBar();
+        openGenericContextMenu(buildEntryContextActions(entry), bRect.left, bRect.bottom + 3);
       }
     }
 
     /* ---- Mouse-following Floating Action Bar & Row Delegation ---- */
     body.addEventListener('mousemove', (e) => {
+      const ctxMenu = document.getElementById('tabContextMenu');
+      if (e.altKey || (ctxMenu && !ctxMenu.classList.contains('hidden'))) {
+        hideFloatingBar();
+        return;
+      }
       const row = e.target.closest('.fb-row');
       if (!row) {
         hideFloatingBar();
@@ -4406,73 +4490,9 @@
       if (!entry) return;
       e.preventDefault();
       e.stopPropagation();
+      hideFloatingBar();
       setFocus(idx);
-      const zh = state.lang === 'zh';
-      const ctxActions = [];
-      if (entry.isDirectory) {
-        if (entry.isGitRepo && opts.showOpenRepo !== false && opts.onOpenRepo) {
-          ctxActions.push({ icon: ICONS.gitRepo, label: tr('openRepoBtn'), run: () => opts.onOpenRepo(entry.path) });
-        }
-        ctxActions.push({
-          icon: entry._expanded ? ICONS.chevronDown : ICONS.chevronRight,
-          label: entry._expanded ? (zh ? '折叠子目录' : 'Collapse Subfolder') : (zh ? '展开子目录' : 'Expand Subfolder'),
-          run: () => toggleExpandDir(entry)
-        });
-        ctxActions.push({
-          icon: ICONS.folderOpen,
-          label: zh ? '进入此文件夹' : 'Enter Folder',
-          run: () => openEntry(entry)
-        });
-        if (features.createFile && opts.createFile) {
-          ctxActions.push({ sep: true });
-          ctxActions.push({ icon: ICONS.filePlus || ICONS.plus, label: zh ? '在此新建文件…' : 'New File Here…', run: () => { fb.expandedDirs.add(entry.path); opts.createFile(entry.path); } });
-        }
-        if (features.mkdir && opts.mkdir) {
-          ctxActions.push({ icon: ICONS.folderPlus, label: zh ? '在此新建文件夹…' : 'New Folder Here…', run: () => { fb.expandedDirs.add(entry.path); opts.mkdir(entry.path); } });
-        }
-        if (features.transfer && opts.upload) {
-          ctxActions.push({ icon: ICONS.upload, label: zh ? '上传文件到此目录…' : 'Upload Files Here…', run: () => { fb.expandedDirs.add(entry.path); opts.upload(entry.path, false); } });
-        }
-      } else {
-        ctxActions.push({
-          icon: ICONS.fileCode || ICONS.file,
-          label: zh ? '预览 / 查看文件' : 'Preview / View File',
-          run: () => openEntry(entry)
-        });
-        if (opts.onDoubleClickFile) {
-          ctxActions.push({
-            icon: ICONS.layoutTabs,
-            label: zh ? '在独立标签页中打开' : 'Open in Full Tab',
-            run: () => opts.onDoubleClickFile(entry)
-          });
-        }
-      }
-      ctxActions.push({ sep: true });
-      if (features.transfer && opts.download) {
-        ctxActions.push({ icon: ICONS.download, label: zh ? '下载 / 导出…' : 'Download / Export…', run: () => opts.download([entry.path]) });
-      }
-      if (features.launch && entry.isDirectory && opts.openTerminal) {
-        ctxActions.push({ icon: ICONS.terminal, label: zh ? '在此打开终端' : 'Open Terminal Here', run: () => opts.openTerminal(entry.path) });
-      }
-      if (features.launch && opts.openEditor) {
-        ctxActions.push({ icon: ICONS.editor, label: tr('openInEditor'), run: () => opts.openEditor(entry.path) });
-      }
-      ctxActions.push({
-        icon: ICONS.copy,
-        label: zh ? '复制完整路径' : 'Copy Path',
-        run: () => {
-          navigator.clipboard?.writeText(entry.path).catch(() => {});
-          showToast(T('已复制：', 'Copied: ') + entry.path, 'status');
-        }
-      });
-      if (features.rename && opts.rename) {
-        ctxActions.push({ sep: true });
-        ctxActions.push({ icon: ICONS.pencil, label: zh ? '重命名…' : 'Rename…', run: () => opts.rename(entry) });
-      }
-      if (features.delete && opts.remove) {
-        ctxActions.push({ icon: ICONS.trash, label: zh ? '删除…' : 'Delete…', danger: true, run: () => opts.remove([entry]) });
-      }
-      openGenericContextMenu(ctxActions, e.clientX, e.clientY);
+      openGenericContextMenu(buildEntryContextActions(entry), e.clientX, e.clientY);
     });
     body.addEventListener('dblclick', (e) => {
       if (e.target.closest('button') || e.target.closest('.fb-col-chk')) return;

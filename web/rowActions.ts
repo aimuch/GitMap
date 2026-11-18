@@ -7,9 +7,9 @@ const ROW_ACTION_ICONS: { readonly [action: string]: string } = {
 };
 
 /** The horizontal gap between the pointer and the buttons (they're never under the pointer, so that clicking a row doesn't press one). */
-const ROW_ACTIONS_POINTER_GAP = 16;
+const ROW_ACTIONS_POINTER_GAP = 22;
 /** Tight approach zone around the floating bar: moving toward/onto the bar keeps it steady for clicking; moving away follows the pointer immediately. */
-const ROW_ACTIONS_APPROACH_PAD = 24;
+const ROW_ACTIONS_APPROACH_PAD = 22;
 /** The margin kept between the buttons and the edges of the view (clears scrollbar & overview markers). */
 const ROW_ACTIONS_EDGE_MARGIN = 18;
 
@@ -64,6 +64,10 @@ class RowActions {
 	 * @param clientX The horizontal position of the pointer.
 	 */
 	public show(commitElem: HTMLElement, clientX: number) {
+		if (contextMenu.isOpen() || dialog.isOpen()) {
+			this.hide();
+			return;
+		}
 		if (commitElem === this.commitElem && this.elem.isConnected) {
 			this.follow(clientX);
 			return;
@@ -92,13 +96,14 @@ class RowActions {
 		this.actions = actions;
 		this.shown = shown;
 
-		// The titles are HTML (e.g. "&#8230;"), as in the context menu — sanitize quotes/tags for HTML attributes
+		// Instant CSS micro-tooltips via data-tip (avoids slow OS native title tooltips & row-below occlusion)
 		const safeAttr = (raw: string) => raw.replace(/<[^>]*>/g, '').replace(/"/g, '&quot;');
 		const button = (action: string, title: string, icon: string) => {
 			const clean = safeAttr(title);
-			return '<button type="button" class="rowAction" data-action="' + action + '" title="' + clean + '" aria-label="' + clean + '" tabindex="-1">' + icon + '</button>';
+			return '<button type="button" class="rowAction" data-action="' + action + '" data-tip="' + clean + '" aria-label="' + clean + '" tabindex="-1">' + icon + '</button>';
 		};
 		this.elem.innerHTML = shown.map((action, index) => button(String(index), action.title, ROW_ACTION_ICONS[action.id!] || action.icon || '')).join('') +
+			(shown.length > 0 ? '<span class="rowActionSep"></span>' : '') +
 			button('more', t('More Actions') + ELLIPSIS, ROW_ACTION_ICONS.more);
 
 		if (this.commitElem !== null) this.commitElem.classList.remove('rowActionsTarget');
@@ -153,14 +158,21 @@ class RowActions {
 			left = right - ROW_ACTIONS_EDGE_MARGIN - width;
 		}
 		left = Math.max(minLeft, Math.min(left, maxLeft));
+		if (vertical) {
+			this.elem.classList.remove('gliding');
+			this.elem.classList.toggle('tip-below', rowBounds.top - this.view.getVisibleCommitsTop() < 28);
+			this.elem.style.top = Math.round(rowBounds.top - contentBounds.top + (rowBounds.height - this.elem.offsetHeight) / 2) + 'px';
+		} else {
+			this.elem.classList.add('gliding');
+		}
 		this.elem.style.left = Math.round(left - contentBounds.left) + 'px';
-		if (vertical) this.elem.style.top = Math.round(rowBounds.top - contentBounds.top + (rowBounds.height - this.elem.offsetHeight) / 2) + 'px';
 	}
 
 	/**
 	 * Hide the buttons.
 	 */
 	public hide() {
+		this.elem.classList.remove('gliding', 'tip-below');
 		this.elem.remove();
 		if (this.commitElem !== null) this.commitElem.classList.remove('rowActionsTarget');
 		this.commitElem = null;
@@ -183,7 +195,8 @@ class RowActions {
 				visible: true,
 				onClick: () => this.view.openCdvActionsCustomizer('row')
 			}]]);
-			contextMenu.show(moreActions, false, target, new MouseEvent('contextmenu', { clientX: Math.round(bounds.left), clientY: Math.round(bounds.bottom) }), this.view.viewElem);
+			this.hide();
+			contextMenu.show(moreActions, false, target, new MouseEvent('contextmenu', { clientX: Math.round(bounds.left), clientY: Math.round(bounds.bottom + 2) }), this.view.viewElem);
 		} else {
 			const item = this.shown[parseInt(action)];
 			if (typeof item !== 'undefined') item.onClick();

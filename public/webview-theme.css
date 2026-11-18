@@ -5,9 +5,12 @@ body.vscode-dark {
   --gm-tab-active-background: #181818;
   --gm-elevated-background: #2b2d34;
   --gm-elevated-border: #525866;
-  --gm-floating-bar-bg: #263142;
-  --gm-floating-bar-border: #4d8bf5;
-  --gm-floating-bar-shadow: 0 10px 28px rgba(0, 0, 0, 0.68), 0 2px 8px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  --gm-floating-bar-bg: rgba(32, 37, 46, 0.93);
+  --gm-floating-bar-border: rgba(112, 165, 255, 0.38);
+  --gm-floating-bar-shadow: 0 4px 14px rgba(0, 0, 0, 0.44), 0 1px 3px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --gm-context-menu-bg: rgba(35, 37, 42, 0.96);
+  --gm-context-menu-border: rgba(255, 255, 255, 0.13);
+  --gm-context-menu-shadow: 0 10px 28px rgba(0, 0, 0, 0.52), 0 2px 6px rgba(0, 0, 0, 0.3);
   --gm-popover-shadow: 0 14px 36px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
   --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -115,9 +118,12 @@ body.vscode-light {
   --gm-tab-active-background: #ffffff;
   --gm-elevated-background: #ffffff;
   --gm-elevated-border: #c9c9ce;
-  --gm-floating-bar-bg: #ffffff;
-  --gm-floating-bar-border: #4a8cf0;
-  --gm-floating-bar-shadow: 0 8px 24px rgba(15, 23, 42, 0.2), 0 2px 6px rgba(15, 23, 42, 0.1);
+  --gm-floating-bar-bg: rgba(255, 255, 255, 0.95);
+  --gm-floating-bar-border: rgba(37, 99, 235, 0.34);
+  --gm-floating-bar-shadow: 0 4px 14px rgba(15, 23, 42, 0.14), 0 1px 3px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --gm-context-menu-bg: rgba(255, 255, 255, 0.97);
+  --gm-context-menu-border: rgba(15, 23, 42, 0.12);
+  --gm-context-menu-shadow: 0 10px 28px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.08);
   --gm-popover-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
   color-scheme: light;
   --vscode-foreground: #3b3b3b;
@@ -229,4 +235,7 @@ html:has(> body.vscode-dark) {
 
 body {
   background-color: var(--vscode-editor-background);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: 13px;
 }

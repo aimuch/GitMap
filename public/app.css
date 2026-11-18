@@ -2380,52 +2380,133 @@ body.vscode-light .fb-icon.is-dir { color: #c09553; }
   pointer-events: none;
 }
 
-/* Mouse-following High-Contrast Floating Row Action Bar */
+/* Mouse-following Concentric Glass Floating Row Action Bar */
 .fb-floating-bar {
   position: absolute;
   z-index: 35;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 30px;
-  padding: 0 6px;
-  border-radius: 9px;
-  border: 1.5px solid var(--gm-floating-bar-border, #4d8bf5);
-  background: var(--gm-floating-bar-bg, #263142);
-  box-shadow: var(--gm-floating-bar-shadow, 0 10px 28px rgba(0, 0, 0, 0.68));
+  gap: 2px;
+  height: 26px;
+  padding: 2px 3px;
+  border-radius: 7px;
+  border: 1px solid var(--gm-floating-bar-border, rgba(112, 165, 255, 0.38));
+  background: var(--gm-floating-bar-bg, rgba(32, 37, 46, 0.93));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--gm-floating-bar-shadow, 0 4px 14px rgba(0, 0, 0, 0.44));
   white-space: nowrap;
   pointer-events: auto;
-  transition: top 0.05s ease-out;
+}
+
+.fb-floating-bar.gliding {
+  transition: left 0.08s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .fb-floating-bar .mini-icon-btn {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  color: var(--vscode-foreground);
+  position: relative;
+  width: 22px;
+  height: 20px;
+  border-radius: 5px;
+  color: color-mix(in srgb, var(--vscode-foreground) 90%, transparent);
+  transition: background-color 0.1s ease, color 0.1s ease, transform 0.08s ease;
+}
+
+.fb-floating-bar .mini-icon-btn .ui-icon {
+  width: 13px;
+  height: 13px;
 }
 
 .fb-floating-bar .mini-icon-btn:hover {
-  background: color-mix(in srgb, var(--vscode-focusBorder) 26%, transparent);
+  background: color-mix(in srgb, var(--vscode-focusBorder) 28%, rgba(255, 255, 255, 0.08));
+  color: #ffffff;
+}
+
+body.vscode-light .fb-floating-bar .mini-icon-btn:hover {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 14%, transparent);
+  color: var(--vscode-focusBorder);
+}
+
+.fb-floating-bar .mini-icon-btn:active {
+  transform: scale(0.93);
 }
 
 .fb-floating-bar .mini-icon-btn.danger:hover {
-  background: rgba(248, 81, 73, 0.2);
+  background: rgba(248, 81, 73, 0.22);
   color: var(--vscode-errorForeground);
+}
+
+.fb-floating-bar button[data-tip] {
+  position: relative;
+}
+
+.fb-floating-bar button[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(2px);
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-family: var(--vscode-font-family);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  color: var(--vscode-menu-foreground, #e5e7eb);
+  background: var(--gm-context-menu-bg, rgba(28, 30, 35, 0.96));
+  border: 1px solid var(--gm-context-menu-border, rgba(255, 255, 255, 0.14));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.36);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.09s ease, transform 0.09s ease;
+  z-index: 45;
+}
+
+.fb-floating-bar button[data-tip]:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.fb-floating-bar button[data-tip]:first-child::after {
+  left: 0;
+  transform: translateY(2px);
+}
+
+.fb-floating-bar button[data-tip]:first-child:hover::after {
+  transform: translateY(0);
+}
+
+.fb-floating-bar button[data-tip]:last-child::after {
+  left: auto;
+  right: 0;
+  transform: translateY(2px);
+}
+
+.fb-floating-bar button[data-tip]:last-child:hover::after {
+  transform: translateY(0);
+}
+
+.fb-floating-bar.tip-below button[data-tip]::after {
+  bottom: auto;
+  top: calc(100% + 6px);
 }
 
 .fb-floating-bar .fb-float-sep {
   width: 1px;
-  height: 15px;
+  height: 12px;
   margin: 0 2px;
   background: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
 }
 
 .fb-floating-bar .act-row-open-repo,
-.fb-floating-bar .act-row-enter {
-  height: 22px;
-  padding: 0 8px;
-  font-size: 11.5px;
+.fb-floating-bar .act-row-enter,
+.fb-floating-bar .act-row-toggle-expand,
+.fb-floating-bar .act-row-open-file {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11px;
   flex-shrink: 0;
 }
 
@@ -4594,15 +4675,19 @@ body.vscode-dark .cmd-palette-window {
 .ws-context-menu {
   position: fixed;
   z-index: 1200;
-  min-width: 210px;
-  padding: 5px;
-  border-radius: 9px;
-  border: 1.5px solid var(--gm-floating-bar-border, #4d8bf5);
-  background: var(--gm-floating-bar-bg, #263142);
-  box-shadow: var(--gm-floating-bar-shadow, 0 12px 32px rgba(0, 0, 0, 0.65));
+  min-width: 196px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--gm-context-menu-border, rgba(255, 255, 255, 0.13));
+  background: var(--gm-context-menu-bg, rgba(35, 37, 42, 0.96));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--gm-context-menu-shadow, 0 10px 28px rgba(0, 0, 0, 0.52));
   display: flex;
   flex-direction: column;
   gap: 1px;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .ws-ctx-item {
@@ -4610,12 +4695,12 @@ body.vscode-dark .cmd-palette-window {
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 28px;
-  padding: 4px 10px;
+  min-height: 25px;
+  padding: 3px 9px;
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
-  color: var(--vscode-foreground);
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
   font: inherit;
   font-size: 12px;
   text-align: left;
@@ -4623,25 +4708,39 @@ body.vscode-dark .cmd-palette-window {
 }
 
 .ws-ctx-item:hover {
-  background: color-mix(in srgb, var(--vscode-focusBorder) 26%, transparent);
+  background: var(--vscode-menu-selectionBackground, #0078d4);
+  color: var(--vscode-menu-selectionForeground, #ffffff);
+}
+
+.ws-ctx-item.danger-text {
+  color: var(--vscode-errorForeground);
+}
+
+.ws-ctx-item.danger-text:hover {
+  background: #c72e2e;
+  color: #ffffff;
 }
 
 .ws-ctx-item .ui-icon {
-  width: 14px;
-  height: 14px;
-  opacity: 0.9;
+  width: 13px;
+  height: 13px;
+  opacity: 0.85;
+}
+
+.ws-ctx-item:hover .ui-icon {
+  opacity: 1;
 }
 
 .ws-ctx-item-check {
   margin-left: auto;
-  color: var(--vscode-focusBorder);
+  color: currentColor;
   font-weight: 700;
 }
 
 .ws-ctx-sep {
   height: 1px;
-  margin: 4px 6px;
-  background: color-mix(in srgb, var(--vscode-foreground) 15%, transparent);
+  margin: 3px 5px;
+  background: var(--vscode-menu-separatorBackground, rgba(128, 128, 128, 0.25));
 }
 
 #workspaceSplitResizer:hover,
