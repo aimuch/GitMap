@@ -51,6 +51,14 @@ class GitGraphView {
 
 	public currentRepo!: string;
 	private currentRepoLoading: boolean = true;
+	private readonly repoSnapshotCache = new Map<string, {
+		commits: GG.GitCommit[];
+		head: string | null;
+		tags: ReadonlyArray<string>;
+		moreCommitsAvailable: boolean;
+		onlyFollowFirstParent: boolean;
+		savedAt: number;
+	}>();
 	private currentRepoRefreshState: {
 		inProgress: boolean;
 		hard: boolean;
@@ -315,6 +323,13 @@ class GitGraphView {
 				repo: this.currentRepo,
 				name: this.gitRepos[this.currentRepo].name || getRepoName(this.currentRepo)
 			}, t('Opening Terminal'));
+		});
+		window.addEventListener('gitmap-filter-by-file', (ev: Event) => {
+			const detail = (<CustomEvent<{ filePath?: string }>>ev).detail;
+			if (detail && detail.filePath) {
+				const fp = String(detail.filePath).replace(/^\/+/, '');
+				if (fp) this.findWidget.setQuery('file:' + fp);
+			}
 		});
 	}
 
@@ -809,6 +824,21 @@ class GitGraphView {
 		const refreshState = this.currentRepoRefreshState;
 		if (!refreshState.inProgress || refreshState.loadCommitsRefreshId !== msg.refreshId) return;
 		if (msg.error === null) {
+			if (msg.fileHistory === null && this.currentRepo && Array.isArray(msg.commits) && msg.commits.length > 0) {
+				if (this.repoSnapshotCache.size >= 10 && !this.repoSnapshotCache.has(this.currentRepo)) {
+					const oldestKey = this.repoSnapshotCache.keys().next().value;
+					if (oldestKey) this.repoSnapshotCache.delete(oldestKey);
+				}
+				this.repoSnapshotCache.delete(this.currentRepo);
+				this.repoSnapshotCache.set(this.currentRepo, {
+					commits: msg.commits,
+					head: msg.head,
+					tags: msg.tags,
+					moreCommitsAvailable: msg.moreCommitsAvailable,
+					onlyFollowFirstParent: msg.onlyFollowFirstParent,
+					savedAt: Date.now()
+				});
+			}
 			this.loadCommits(msg.commits, msg.head, msg.tags, msg.moreCommitsAvailable, msg.onlyFollowFirstParent, msg.fileHistory);
 		} else {
 			const error = this.gitBranches.length === 0 && msg.error.indexOf('bad revision \'HEAD\'') > -1
@@ -977,6 +1007,12 @@ class GitGraphView {
 
 	private requestLoadCommits() {
 		const repoState = this.gitRepos[this.currentRepo];
+		if (this.commits.length === 0 && this.fileHistory === null && this.currentRepo) {
+			const cached = this.repoSnapshotCache.get(this.currentRepo);
+			if (cached && (Date.now() - cached.savedAt) < 10 * 60 * 1000) {
+				this.loadCommits(cached.commits, cached.head, cached.tags, cached.moreCommitsAvailable, cached.onlyFollowFirstParent, null);
+			}
+		}
 		sendMessage({
 			command: 'loadCommits',
 			repo: this.currentRepo,

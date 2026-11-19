@@ -55,10 +55,19 @@ import { findGit, getPathFromStr, getRepoName, GitExecutable } from '../utils';
 import { EventEmitter as GitMapEventEmitter } from '../utils/event';
 import { fsmRegistry } from '../utils/fsm';
 import { VisualFileHistory } from '../visualFileHistory';
+import { AiAssistantService } from './aiAssistantService';
 import { DiffService } from './diffService';
+import { EnhancementsService } from './enhancementsService';
 import { buildPartialHunkPatch, GitWorkflowService } from './gitWorkflowService';
 import { HostingProviderKind, HostingService } from './hostingService';
 import { LauncherSettings, listLaunchers, openInEditor, openInTerminal } from './launchers';
+import {
+  BackupPayload,
+  checkGitHubUpdate,
+  createBackupEnvelope,
+  parseBackupEnvelope,
+  sanitizeSshHostsForExport
+} from './settingsBackupService';
 import { TerminalManager } from './terminalManager';
 
 export interface DesktopNativeHooks {
@@ -150,6 +159,8 @@ export class GitMapServer {
   public repoManager!: RepoManager;
   public diffService!: DiffService;
   public workflowService!: GitWorkflowService;
+  public enhancementsService!: EnhancementsService;
+  public aiAssistantService!: AiAssistantService;
   public hostingService!: HostingService;
   public terminalManager!: TerminalManager;
   private actualPort: number = 0;
@@ -250,6 +261,8 @@ export class GitMapServer {
     this.repoManager = new RepoManager(this.dataSource, this.extensionState, configChangeEmitter.subscribe, this.logger);
     this.diffService = new DiffService(this.dataSource);
     this.workflowService = new GitWorkflowService(this.dataSource);
+    this.enhancementsService = new EnhancementsService(this.dataSource);
+    this.aiAssistantService = new AiAssistantService(this.dataSource);
     this.hostingService = new HostingService(this.dataSource);
     this.hostingService.setSecretStorage(secrets);
     this.terminalManager = new TerminalManager();
@@ -598,6 +611,10 @@ export class GitMapServer {
     if (pathname === '/api/diagnostics' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(this.buildDiagnosticsSnapshot()));
+      return;
+    }
+    if (pathname === '/api/file-raw' && req.method === 'GET') {
+      void this.handleRawFilePreview(parsedUrl, res);
       return;
     }
     if (pathname === '/api/transfer/web-download' && req.method === 'GET') {
@@ -2077,6 +2094,164 @@ export class GitMapServer {
       case 'system:diagnostics':
         return this.buildDiagnosticsSnapshot();
 
+      /* Submodules & Git LFS */
+      case 'git:submodules': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        return { submodules: await this.enhancementsService.getSubmodules(repo) };
+      }
+
+      case 'git:submoduleAction': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const action = params.action === 'update' || params.action === 'sync' ? params.action : 'init';
+        const subPath = params.path ? String(params.path) : undefined;
+        return this.enhancementsService.runSubmoduleAction(repo, action, subPath);
+      }
+
+      case 'git:lfsStatus': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        return this.enhancementsService.getLfsStatus(repo);
+      }
+
+      case 'git:lfsAction': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const action = params.action === 'fetch' || params.action === 'install' ? params.action : 'pull';
+        return this.enhancementsService.runLfsAction(repo, action);
+      }
+
+      /* Multi-Repo Cross-Search */
+      case 'repos:searchCommits': {
+        const allRepos = Object.keys(this.repoManager.getRepos());
+        const targetRepos = Array.isArray(params.repos) && params.repos.length > 0
+          ? params.repos.map(String)
+          : allRepos;
+        const hits = await this.enhancementsService.searchAcrossRepos(
+          targetRepos,
+          String(params.query || ''),
+          params.author ? String(params.author) : undefined,
+          Number(params.limitPerRepo) || 25
+        );
+        return { hits };
+      }
+
+      /* Full-Text Content Search (Local & Remote-SSH) */
+      case 'search:content': {
+        const target = String(params.target || params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!target) throw new Error('Search target directory is required.');
+        if (!isRemoteRepo(target)) {
+          this.assertAllowedLocalPath(target);
+        }
+        return this.enhancementsService.searchContent(target, {
+          query: String(params.query || ''),
+          regex: !!params.regex,
+          caseSensitive: !!params.caseSensitive,
+          excludes: Array.isArray(params.excludes) ? params.excludes.map(String) : undefined,
+          maxMatches: Number(params.maxMatches) || 400
+        });
+      }
+
+      /* Remote SSH Host Resource Telemetry */
+      case 'ssh:hostStats': {
+        const hostId = String(params.hostId || '');
+        if (!hostId) throw new Error('hostId is required.');
+        const mountPath = params.mountPath ? String(params.mountPath) : undefined;
+        return this.enhancementsService.getRemoteHostStats(hostId, mountPath);
+      }
+
+      /* Folder / Repo Diff & Selective Sync */
+      case 'diff:folders': {
+        const left = String(params.left || '');
+        const right = String(params.right || '');
+        if (!left || !right) throw new Error('Both left and right paths are required.');
+        if (!isRemoteRepo(left)) this.assertAllowedLocalPath(left);
+        if (!isRemoteRepo(right)) this.assertAllowedLocalPath(right);
+        return this.enhancementsService.compareFolders(left, right, {
+          excludes: Array.isArray(params.excludes) ? params.excludes.map(String) : undefined,
+          maxFiles: Number(params.maxFiles) || 4000
+        });
+      }
+
+      case 'diff:syncFile': {
+        const source = String(params.source || '');
+        const target = String(params.target || '');
+        const relPath = String(params.relPath || '');
+        if (!source || !target || !relPath) throw new Error('source, target and relPath are required.');
+        if (!isRemoteRepo(source)) this.assertAllowedLocalPath(source);
+        if (!isRemoteRepo(target)) this.assertAllowedLocalPath(target);
+        return this.enhancementsService.syncFolderFile(source, target, relPath);
+      }
+
+      /* AI Commit Message */
+      case 'ai:commitMessage': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const language = params.language === 'en' ? 'en' : 'zh';
+        const style = params.style === 'concise' || params.style === 'detailed' ? params.style : 'conventional';
+        return this.aiAssistantService.generateCommitMessage(repo, { language, style });
+      }
+
+      /* Settings Export / Import (Sanitized or AES-256-GCM Encrypted) */
+      case 'settings:export': {
+        const passphrase = typeof params.passphrase === 'string' ? params.passphrase : undefined;
+        const clientPrefs = params.clientPrefs && typeof params.clientPrefs === 'object' ? params.clientPrefs : undefined;
+        const pkgVersion = this.getAppVersion();
+        const payload: BackupPayload = {
+          schemaVersion: 1,
+          exportedAt: new Date().toISOString(),
+          appVersion: pkgVersion,
+          settings: getAllStandaloneSettings(),
+          sshHosts: sanitizeSshHostsForExport(sshManager.listHosts()),
+          clientPrefs
+        };
+        const envelope = createBackupEnvelope(payload, passphrase);
+        return { envelope };
+      }
+
+      case 'settings:import': {
+        const raw = params.envelope ?? params.raw;
+        const passphrase = typeof params.passphrase === 'string' ? params.passphrase : undefined;
+        const payload = parseBackupEnvelope(raw, passphrase);
+        let restoredSettings = 0;
+        if (payload.settings && typeof payload.settings === 'object') {
+          await updateStandaloneSettingsBatch(payload.settings);
+          restoredSettings = Object.keys(payload.settings).length;
+        }
+        let restoredHosts = 0;
+        if (Array.isArray(payload.sshHosts)) {
+          const existing = new Map(sshManager.listHosts().map((h: any) => [`${h.username || ''}@${h.host}:${h.port || 22}`, h]));
+          for (const h of payload.sshHosts) {
+            if (!h || !h.host) continue;
+            const key = `${h.username || ''}@${h.host}:${h.port || 22}`;
+            if (!existing.has(key)) {
+              await sshManager.saveHost({
+                name: h.name || h.host,
+                host: h.host,
+                port: h.port || 22,
+                username: h.username || os.userInfo().username,
+                authType: (h.authType === 'password' || h.authType === 'agent' || h.authType === 'key' ? h.authType : 'agent') as any,
+                privateKeyPath: h.privateKeyPath,
+                jumpHost: h.jumpHost,
+                tags: h.tags,
+                defaultPath: h.defaultPath
+              } as any);
+              restoredHosts++;
+            }
+          }
+        }
+        return {
+          ok: true,
+          restoredSettings,
+          restoredHosts,
+          clientPrefs: payload.clientPrefs || null,
+          settings: getAllStandaloneSettings(),
+          hosts: sshManager.listHosts()
+        };
+      }
+
+      /* In-App Update Check */
+      case 'system:checkUpdate': {
+        const currentVersion = this.getAppVersion();
+        return checkGitHubUpdate(currentVersion);
+      }
+
       default:
         throw new Error(`Unknown RPC method: ${method}`);
     }
@@ -2233,5 +2408,93 @@ export class GitMapServer {
       repoNameSuggestion: getRepoName(normCurrent),
       entries
     };
+  }
+
+  private getAppVersion(): string {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(this.rootDir, 'package.json'), 'utf8'));
+      return typeof pkg.version === 'string' ? pkg.version : '1.0.0';
+    } catch {
+      return '1.0.0';
+    }
+  }
+
+  private async handleRawFilePreview(parsedUrl: URL, res: http.ServerResponse): Promise<void> {
+    const MIME_BY_EXT: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.ogg': 'audio/ogg',
+      '.m4a': 'audio/mp4',
+      '.flac': 'audio/flac',
+      '.mp4': 'video/mp4',
+      '.webm': 'video/webm',
+      '.mov': 'video/quicktime',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp'
+    };
+    const MAX_PREVIEW_BYTES = 50 * 1024 * 1024;
+    try {
+      const repo = parsedUrl.searchParams.get('repo') || '';
+      const hostIdParam = parsedUrl.searchParams.get('hostId') || '';
+      const filePathParam = parsedUrl.searchParams.get('path') || '';
+      if (!filePathParam) {
+        res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Missing path parameter');
+        return;
+      }
+      const ext = path.extname(filePathParam).toLowerCase();
+      const mime = MIME_BY_EXT[ext];
+      if (!mime) {
+        res.writeHead(415, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Unsupported media preview type');
+        return;
+      }
+
+      const remoteInfo = hostIdParam
+        ? { hostId: hostIdParam, remotePath: filePathParam }
+        : (repo ? parseRemoteRepo(repo) : null);
+
+      if (remoteInfo) {
+        const targetRemote = hostIdParam
+          ? filePathParam
+          : (filePathParam.startsWith('/') ? filePathParam : path.posix.join(remoteInfo.remotePath, filePathParam));
+        const buf = await sshManager.readRemoteFile(remoteInfo.hostId, targetRemote, MAX_PREVIEW_BYTES);
+        res.writeHead(200, {
+          'Content-Type': mime,
+          'Content-Length': String(buf.length),
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff'
+        });
+        res.end(buf);
+        return;
+      }
+
+      const fullLocal = repo && !path.isAbsolute(filePathParam)
+        ? path.resolve(repo, filePathParam)
+        : path.resolve(filePathParam);
+      this.assertAllowedLocalPath(fullLocal);
+      const st = await fs.promises.stat(fullLocal);
+      if (!st.isFile() || st.size > MAX_PREVIEW_BYTES) {
+        res.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('File too large or not a regular file');
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': mime,
+        'Content-Length': String(st.size),
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff'
+      });
+      await pipeline(fs.createReadStream(fullLocal), res);
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.writeHead(err?.message?.includes('Access denied') ? 403 : 500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      }
+      res.end(err?.message || 'Preview error');
+    }
   }
 }

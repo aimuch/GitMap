@@ -30,14 +30,29 @@
     if (ev.data && ev.data.__gitmapTheme) {
       applyTheme(ev.data.__gitmapTheme);
       ev.stopImmediatePropagation();
+    } else if (ev.data && typeof ev.data.__gitmapFilterByFile === 'string') {
+      window.dispatchEvent(new CustomEvent('gitmap-filter-by-file', { detail: { filePath: ev.data.__gitmapFilterByFile } }));
+      ev.stopImmediatePropagation();
     }
   }, true);
 
   // Forward unhandled Escape & shell shortcuts to the parent window when focus is inside the iframe
   document.addEventListener('keydown', function (ev) {
     if (ev.defaultPrevented) return;
+    var tag = ev.target && ev.target.tagName ? ev.target.tagName.toLowerCase() : '';
+    var isEditable = tag === 'input' || tag === 'textarea' || (ev.target && ev.target.isContentEditable);
     if (ev.key === 'Escape' && window.parent && window.parent !== window) {
       window.parent.postMessage({ type: 'gitmap-shell-key', key: 'Escape' }, targetOrigin);
+    } else if (!isEditable && !ev.metaKey && !ev.ctrlKey && !ev.altKey && ev.key === '?') {
+      if (window.parent && window.parent !== window) {
+        ev.preventDefault();
+        window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-shortcuts' }, targetOrigin);
+      }
+    } else if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && !ev.altKey && (ev.key === 'f' || ev.key === 'F')) {
+      if (window.parent && window.parent !== window) {
+        ev.preventDefault();
+        window.parent.postMessage({ type: 'gitmap-shell-action', action: 'open-content-search' }, targetOrigin);
+      }
     } else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'k' || ev.key === 'K') && !ev.shiftKey) {
       if (window.parent && window.parent !== window) {
         ev.preventDefault();

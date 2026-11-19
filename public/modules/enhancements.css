@@ -1,0 +1,475 @@
+/* GitMap Enhancements Stylesheet
+ * Covers: Upgraded Code Editor, Rich Inline Previewers, Full-Text Search,
+ * Submodule/LFS, Multi-Repo Dashboard, Folder Diff, SSH Resource Telemetry,
+ * Shortcut Cheat Sheet & Customizer, Config Backup, Update Checker, and Responsive Narrow-Pane Layout.
+ */
+
+/* ── 1. Upgraded Code Editor (Syntax Overlay + Line Numbers + Find/Replace) ── */
+.gm-editor-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 280px;
+  background: var(--bg-0, #0d1117);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.gm-editor-findbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-2, #1c2128);
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  font-size: 12px;
+}
+.gm-editor-findbar.hidden { display: none !important; }
+.gm-editor-findbar input {
+  background: var(--bg-1, #161b22);
+  color: var(--text-0, #e6edf3);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 12px;
+  min-width: 150px;
+  outline: none;
+}
+.gm-editor-findbar input:focus {
+  border-color: var(--accent, #2f81f7);
+}
+.gm-editor-findbar .gm-find-count {
+  color: var(--text-2, #8b949e);
+  font-variant-numeric: tabular-nums;
+  min-width: 56px;
+  text-align: center;
+}
+
+.gm-editor-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+  line-height: 20px;
+}
+
+.gm-editor-gutter {
+  flex: 0 0 52px;
+  padding: 10px 8px 10px 4px;
+  text-align: right;
+  user-select: none;
+  color: var(--text-2, #6e7681);
+  background: var(--bg-1, #13171e);
+  border-right: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+}
+
+.gm-editor-codewrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.gm-editor-highlight,
+.gm-editor-textarea {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 10px 14px;
+  border: 0;
+  outline: none;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+}
+
+.gm-editor-highlight {
+  pointer-events: none;
+  z-index: 1;
+  color: var(--text-0, #e6edf3);
+  background: transparent;
+}
+
+.gm-editor-textarea {
+  z-index: 2;
+  background: transparent !important;
+  color: transparent !important;
+  caret-color: var(--accent, #58a6ff);
+  resize: none;
+  -webkit-text-fill-color: transparent;
+}
+.gm-editor-textarea::selection {
+  background: rgba(56, 139, 253, 0.32);
+}
+
+.gm-editor-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-2, #8b949e);
+  background: var(--bg-1, #161b22);
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+
+/* ── 2. Rich Inline Previewers (Markdown / Table / Media) ── */
+.gm-rich-preview {
+  padding: 18px 24px;
+  overflow: auto;
+  height: 100%;
+  box-sizing: border-box;
+  color: var(--text-0, #e6edf3);
+  line-height: 1.65;
+  font-size: 13.5px;
+}
+.gm-md-body h1, .gm-md-body h2, .gm-md-body h3, .gm-md-body h4 {
+  margin: 18px 0 10px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.gm-md-body h1 { font-size: 1.65em; border-bottom: 1px solid var(--border, rgba(255,255,255,0.1)); padding-bottom: 6px; }
+.gm-md-body h2 { font-size: 1.35em; border-bottom: 1px solid var(--border, rgba(255,255,255,0.08)); padding-bottom: 4px; }
+.gm-md-body h3 { font-size: 1.15em; }
+.gm-md-body p { margin: 8px 0; }
+.gm-md-body ul, .gm-md-body ol { padding-left: 22px; margin: 8px 0; }
+.gm-md-body blockquote {
+  margin: 10px 0;
+  padding: 6px 14px;
+  border-left: 3px solid var(--accent, #2f81f7);
+  background: rgba(56, 139, 253, 0.07);
+  color: var(--text-1, #c9d1d9);
+  border-radius: 0 6px 6px 0;
+}
+.gm-md-body code {
+  background: rgba(128, 128, 128, 0.18);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+.gm-md-body pre {
+  background: var(--bg-1, #161b22);
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border-radius: 7px;
+  padding: 12px 14px;
+  overflow: auto;
+  margin: 10px 0;
+}
+.gm-md-body pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 12.5px;
+}
+.gm-md-body table,
+.gm-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  margin: 10px 0;
+}
+.gm-md-body th, .gm-md-body td,
+.gm-data-table th, .gm-data-table td {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.gm-md-body th,
+.gm-data-table th {
+  background: var(--bg-2, #1c2128);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  cursor: pointer;
+  user-select: none;
+}
+.gm-data-table tr:nth-child(even) td {
+  background: rgba(128, 128, 128, 0.04);
+}
+.gm-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.gm-table-toolbar input {
+  background: var(--bg-1, #161b22);
+  color: var(--text-0, #e6edf3);
+  border: 1px solid var(--border, rgba(255,255,255,0.14));
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  width: 260px;
+}
+.gm-media-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 16px;
+  gap: 12px;
+  box-sizing: border-box;
+}
+.gm-media-preview iframe.gm-pdf-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 480px;
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border-radius: 8px;
+  background: #fff;
+}
+.gm-media-preview video {
+  max-width: 100%;
+  max-height: 75vh;
+  border-radius: 8px;
+  background: #000;
+}
+.gm-media-preview audio {
+  width: min(520px, 92%);
+}
+
+/* ── 3. Remote SSH Resource Telemetry Bar ── */
+.gm-ssh-telemetry {
+  margin: 4px 8px 6px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: var(--bg-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.09));
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gm-ssh-telemetry.warn {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(245, 158, 11, 0.08);
+}
+.gm-ssh-telemetry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-1, #c9d1d9);
+  font-weight: 600;
+}
+.gm-ssh-telemetry-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.gm-metric-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gm-metric-label {
+  color: var(--text-2, #8b949e);
+  font-size: 10px;
+  display: flex;
+  justify-content: space-between;
+}
+.gm-metric-bar {
+  height: 4px;
+  border-radius: 99px;
+  background: rgba(128, 128, 128, 0.22);
+  overflow: hidden;
+}
+.gm-metric-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: var(--accent, #2f81f7);
+  transition: width 0.25s ease;
+}
+.gm-metric-fill.warn { background: #f59e0b; }
+.gm-metric-fill.crit { background: #ef4444; }
+
+/* ── 4. Shared Enhancement Modals (Search, Dashboard, Submodules/LFS, Folder Diff, Shortcuts, Backup) ── */
+.gm-enh-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.gm-enh-input {
+  flex: 1;
+  min-width: 180px;
+  background: var(--bg-1, #161b22);
+  color: var(--text-0, #e6edf3);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  outline: none;
+}
+.gm-enh-input:focus { border-color: var(--accent, #2f81f7); }
+.gm-enh-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-1, #c9d1d9);
+  cursor: pointer;
+  user-select: none;
+}
+.gm-enh-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 56vh;
+  overflow: auto;
+}
+.gm-enh-card {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  background: var(--bg-1, rgba(255, 255, 255, 0.025));
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+.gm-enh-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+.gm-search-match-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.gm-search-match-row:hover {
+  background: rgba(56, 139, 253, 0.14);
+}
+.gm-search-line-no {
+  color: var(--text-2, #8b949e);
+  min-width: 38px;
+  text-align: right;
+  user-select: none;
+}
+.gm-search-snippet {
+  color: var(--text-0, #e6edf3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gm-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(128, 128, 128, 0.18);
+  color: var(--text-1, #c9d1d9);
+}
+.gm-badge.ok { background: rgba(34, 197, 94, 0.16); color: #22c55e; }
+.gm-badge.warn { background: rgba(245, 158, 11, 0.16); color: #f59e0b; }
+.gm-badge.err { background: rgba(239, 68, 68, 0.16); color: #ef4444; }
+.gm-badge.info { background: rgba(56, 139, 253, 0.18); color: #58a6ff; }
+
+.gm-shortcut-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.gm-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-1, rgba(255,255,255,0.03));
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  font-size: 12.5px;
+}
+.gm-shortcut-kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--border, rgba(255,255,255,0.2));
+  background: var(--bg-2, #1c2128);
+  color: var(--text-0, #e6edf3);
+  cursor: pointer;
+}
+.gm-shortcut-kbd.recording {
+  border-color: var(--accent, #2f81f7);
+  box-shadow: 0 0 0 2px rgba(47, 129, 247, 0.28);
+}
+
+/* Cross-pane locate flash highlight */
+.fb-row.gm-locate-flash {
+  animation: gmLocatePulse 1.6s ease;
+}
+@keyframes gmLocatePulse {
+  0% { background: rgba(56, 139, 253, 0.36); box-shadow: inset 0 0 0 1px rgba(56, 139, 253, 0.85); }
+  100% { background: transparent; box-shadow: none; }
+}
+
+/* Virtual Scroll spacer for large file lists */
+.fb-vscroll-spacer {
+  position: relative;
+  width: 100%;
+}
+.fb-vscroll-viewport {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+}
+
+/* Interactive Rebase drag highlight */
+.rb-row[draggable="true"] { cursor: grab; }
+.rb-row.gm-drag-over {
+  outline: 2px solid var(--accent, #2f81f7);
+  outline-offset: -1px;
+  border-radius: 6px;
+}
+
+/* ── 5. Responsive Narrow-Screen & Split-Pane Adaptation ── */
+@media (max-width: 1040px) {
+  #topbar .top-pill-btn > span:not(.icon-slot):not(.inline-count-badge) {
+    display: none;
+  }
+  #topbar .top-pill-btn {
+    padding: 5px 8px;
+  }
+}
+
+@media (max-width: 780px) {
+  #sidebar {
+    width: 210px !important;
+    min-width: 170px !important;
+  }
+  .fb-toolbar {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .fb-col-size,
+  .fb-col-mtime {
+    display: none !important;
+  }
+}

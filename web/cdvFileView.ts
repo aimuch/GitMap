@@ -322,12 +322,14 @@ class CdvFileView {
 				const copyTitle = escapeHtml(t('Copy Absolute File Path to Clipboard'));
 				const revTitle = escapeHtml(t('View File at this Revision'));
 				const openTitle = escapeHtml(t('Open File'));
+				const locateTitle = escapeHtml(t('Reveal in Repository Files'));
 				let html = '<button type="button" class="rowAction" data-cdv-act="copy" data-tip="' + copyTitle + '" aria-label="' + copyTitle + '">' + SVG_ICONS.copy + '</button>';
 				if (file.type !== GG.GitFileStatus.Deleted) {
 					if (diffPossible && !isUncommitted) {
 						html += '<button type="button" class="rowAction" data-cdv-act="rev" data-tip="' + revTitle + '" aria-label="' + revTitle + '">' + SVG_ICONS.commit + '</button>';
 					}
 					html += '<button type="button" class="rowAction" data-cdv-act="open" data-tip="' + openTitle + '" aria-label="' + openTitle + '">' + SVG_ICONS.openFile + '</button>';
+					html += '<button type="button" class="rowAction" data-cdv-act="locate" data-tip="' + locateTitle + '" aria-label="' + locateTitle + '"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2"/></svg></button>';
 				}
 				barElem!.innerHTML = html;
 				barElem!.classList.remove('hidden');
@@ -347,6 +349,15 @@ class CdvFileView {
 				if (act === 'copy') triggerCopyFilePath(file, true);
 				else if (act === 'rev') triggerViewFileAtRevision(file, currentRecord);
 				else if (act === 'open') triggerOpenFile(file, currentRecord);
+				else if (act === 'locate') {
+					if (window.parent && window.parent !== window) {
+						window.parent.postMessage({
+							type: 'gitmap-shell-action',
+							action: 'locate-repo-file',
+							filePath: file.newFilePath || file.oldFilePath
+						}, window.location.origin || '*');
+					}
+				}
 			};
 		}
 

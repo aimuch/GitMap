@@ -217,6 +217,13 @@ class FindWidget {
 		if (focus) this.inputElem.focus();
 	}
 
+	public setQuery(query: string) {
+		this.show(true);
+		this.inputElem.value = query;
+		this.inputElem.dispatchEvent(new Event('keyup', { bubbles: true }));
+		this.inputElem.dispatchEvent(new Event('input', { bubbles: true }));
+	}
+
 	/**
 	 * Clear the search, and hide the Find Widget's results.
 	 */

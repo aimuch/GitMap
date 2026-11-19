@@ -1068,6 +1068,11 @@
         else setWorkspaceLayout(state.wsLayout === 'tabs' ? 'split-lr' : 'tabs');
       }
       else if (data.action === 'open-command-palette') window.GitMapFeatures?.openCommandPalette();
+      else if (data.action === 'open-shortcuts') window.GitMapSystemUI?.openShortcutsModal();
+      else if (data.action === 'open-content-search') window.GitMapRemoteAndGitUI?.openContentSearchModal();
+      else if (data.action === 'locate-repo-file' && data.filePath) {
+        locateFileInRepoBrowser(String(data.filePath));
+      }
       else if (data.action === 'focus-search') {
         const sb = document.getElementById('sidebar');
         const input = document.getElementById('sidebarSearch');
@@ -1079,6 +1084,59 @@
       closeTopmostOverlay();
     }
   });
+
+  /* ==================== Cross-Pane Linkage (Git Map <-> Repo Files) ==================== */
+  function filterGitMapByRepoFile(entryFullPath) {
+    if (!state.activeRepo || !entryFullPath) return;
+    const disp = parseRepoDisplay(state.activeRepo);
+    const repoRoot = (disp && disp.rawPath) || state.activeRepo;
+    let rel = String(entryFullPath).replace(/\\/g, '/');
+    const normRoot = String(repoRoot).replace(/\\/g, '/').replace(/\/+$/, '');
+    if (rel.startsWith(normRoot + '/')) rel = rel.slice(normRoot.length + 1);
+    if (state.wsLayout === 'tabs') activateTab('graph');
+    const iframe = document.getElementById('gitMapFrame');
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage({ __gitmapFilterByFile: rel }, window.location.origin || '*');
+    }
+    showToast(state.lang === 'zh' ? `已在 Git Map 中筛选文件历史：${rel}` : `Filtered Git Map by file: ${rel}`, 'status');
+  }
+
+  async function locateFileInRepoBrowser(relPath) {
+    if (!state.activeRepo || !relPath) return;
+    const cleanRel = String(relPath).replace(/\\/g, '/').replace(/^\/+/, '');
+    if (state.wsLayout === 'tabs') {
+      await openRepoFilesTab(false);
+    } else {
+      await openRepoFilesTab(true);
+    }
+    const parts = cleanRel.split('/');
+    const fileName = parts[parts.length - 1];
+    const dirParts = parts.slice(0, -1);
+    setTimeout(() => {
+      const panel = document.getElementById('repoFilesPanel') || document.querySelector('[data-tab-panel="repo-files"]');
+      if (!panel) return;
+      const filterInput = panel.querySelector('.fb-filter');
+      if (filterInput && dirParts.length === 0) {
+        filterInput.value = '';
+      }
+      const rows = panel.querySelectorAll('.fb-row');
+      let matchedRow = null;
+      rows.forEach((r) => {
+        const title = String(r.getAttribute('title') || '').replace(/\\/g, '/');
+        if (title.endsWith('/' + cleanRel) || title === cleanRel || r.querySelector('.fb-name')?.textContent === fileName) {
+          matchedRow = r;
+        }
+      });
+      if (matchedRow) {
+        matchedRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        matchedRow.classList.remove('gm-locate-flash');
+        void matchedRow.offsetWidth;
+        matchedRow.classList.add('gm-locate-flash');
+      } else {
+        showToast(state.lang === 'zh' ? `已在仓库文件中定位路径：${cleanRel}` : `Located in repository files: ${cleanRel}`, 'status');
+      }
+    }, 280);
+  }
 
   /* ==================== Toast Notifications ==================== */
   function showToast(message, level) {
@@ -2651,7 +2709,9 @@
       let selStart = payload.lines ? payload.lines.start : null;
       let selEnd = payload.lines ? payload.lines.end : null;
       let wrapLines = localStorage.getItem('gitmap.viewer.wrapLines') !== '0';
-      const canEdit = !fileRes.commit && !fileRes.truncated && typeof payload.inlineContent !== 'string' && !!(fileRes.repo || fileRes.sourceUri || payload.filePath);
+      const richPreviewKind = window.GitMapEditorPreview ? window.GitMapEditorPreview.getPreviewKind(fileRes.filePath) : null;
+      let richPreviewActive = richPreviewKind === 'pdf' || richPreviewKind === 'audio' || richPreviewKind === 'video';
+      const canEdit = !fileRes.commit && !fileRes.truncated && typeof payload.inlineContent !== 'string' && !!(fileRes.repo || fileRes.sourceUri || payload.filePath) && !['pdf', 'audio', 'video'].includes(richPreviewKind || '');
       let draftContent = typeof payload.initialDraft === 'string' ? payload.initialDraft : fileRes.content;
       const startInEdit = Boolean(canEdit && payload.startEditing);
       const initialEditorState = startInEdit
@@ -2736,7 +2796,8 @@
                      <button type="button" class="mini-btn act-cancel-edit">${escapeHtml(tr('cancel'))}</button>`
                   : `<button type="button" class="mini-btn act-edit-file">${ICONS.pencil}<span>${escapeHtml(zh ? '在线编辑' : 'Edit')}</span></button>`
               ) : ''}
-              ${!isEditing ? `<label class="inline-check"><input type="checkbox" class="wrap-toggle" ${wrapLines ? 'checked' : ''} /> <span>${escapeHtml(tr('wrapLines'))}</span></label>` : ''}
+              ${!isEditing && richPreviewKind && !['pdf', 'audio', 'video'].includes(richPreviewKind) ? `<button type="button" class="mini-btn act-rich-preview ${richPreviewActive ? 'primary' : ''}">${escapeHtml(richPreviewKind === 'markdown' ? (zh ? (richPreviewActive ? '查看源码' : '渲染预览') : (richPreviewActive ? 'Source' : 'Preview')) : (zh ? (richPreviewActive ? '查看源码' : '表格视图') : (richPreviewActive ? 'Source' : 'Table')))}</button>` : ''}
+              ${!isEditing && !richPreviewActive ? `<label class="inline-check"><input type="checkbox" class="wrap-toggle" ${wrapLines ? 'checked' : ''} /> <span>${escapeHtml(tr('wrapLines'))}</span></label>` : ''}
               ${hasRepo && !isEditing ? `
                 <button type="button" class="mini-btn act-blame ${showBlame ? 'primary' : ''}">${escapeHtml(tr('toggleBlame'))}</button>
                 <button type="button" class="mini-btn act-line-hist">${escapeHtml(tr('lineHistoryGraph'))}</button>
@@ -2822,15 +2883,13 @@
             if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
               e.preventDefault();
               doSave();
-            } else if (e.key === 'Tab') {
-              e.preventDefault();
-              const s = editorEl.selectionStart;
-              const end = editorEl.selectionEnd;
-              editorEl.value = editorEl.value.slice(0, s) + '  ' + editorEl.value.slice(end);
-              editorEl.selectionStart = editorEl.selectionEnd = s + 2;
-              syncDraftDirty();
             }
           });
+          if (window.GitMapEditorPreview && window.GitMapEditorPreview.upgradeCodeEditor) {
+            window.GitMapEditorPreview.upgradeCodeEditor(editorEl, fileRes.filePath, {
+              initialLine: payload.initialLine || selStart || null
+            });
+          }
           setTimeout(() => editorEl.focus(), 20);
           return;
         }
@@ -2841,6 +2900,20 @@
             sendEditorEvent('EDIT');
             mountViewer();
           });
+        }
+        const richBtn = panel.querySelector('.act-rich-preview');
+        if (richBtn) {
+          richBtn.addEventListener('click', () => {
+            richPreviewActive = !richPreviewActive;
+            mountViewer();
+          });
+        }
+        if (richPreviewActive && window.GitMapEditorPreview) {
+          const rendered = window.GitMapEditorPreview.renderRichPreview(scrollArea, fileRes.filePath, fileRes.content, {
+            repo: fileRes.repo || '',
+            filePath: fileRes.filePath
+          });
+          if (rendered) return;
         }
         const normalizedContent = fileRes.content.replace(/\r\n/g, '\n');
         const lines = normalizedContent.split('\n');
@@ -3809,6 +3882,13 @@
           label: zh ? '预览 / 查看文件' : 'Preview / View File',
           run: () => openEntry(entry)
         });
+        if (state.activeRepo) {
+          ctxActions.push({
+            icon: ICONS.history || ICONS.branch,
+            label: zh ? '在 Git Map 中查看此文件历史' : 'Filter File History in Git Map',
+            run: () => filterGitMapByRepoFile(entry.path)
+          });
+        }
         if (opts.onDoubleClickFile) {
           ctxActions.push({
             icon: ICONS.layoutTabs,
@@ -3948,7 +4028,7 @@
       } else if (fb.visible.length === 0) {
         body.innerHTML = `<div class="browser-empty-state">${escapeHtml(T('没有匹配“' + fb.filter + '”的项目', 'Nothing matches "' + fb.filter + '"'))}</div>`;
       } else {
-        const html = fb.visible.map((e, idx) => {
+        const renderRowHtml = (e, idx) => {
           const depth = e._depth || 0;
           const guidesHtml = depth > 0
             ? `<span class="fb-tree-guides">${'<span class="fb-tree-guide"></span>'.repeat(depth)}</span>`
@@ -3971,8 +4051,41 @@
             <span class="fb-col-mtime" title="${escapeHtml(m.full)}">${escapeHtml(m.short)}</span>
             <span class="fb-col-actions">${idleAction}</span>
           </div>`;
-        });
-        body.innerHTML = html.join('');
+        };
+
+        // Virtual scrolling for large directories (> 140 rows) to keep 60fps
+        if (fb.visible.length > 140) {
+          const VROW_H = 34;
+          const OVERSCAN = 14;
+          const totalH = fb.visible.length * VROW_H;
+          body.innerHTML = `<div class="fb-vscroll-spacer" style="height:${totalH}px"><div class="fb-vscroll-viewport"></div></div>`;
+          const viewport = body.querySelector('.fb-vscroll-viewport');
+          let vRaf = 0;
+          const drawSlice = () => {
+            vRaf = 0;
+            if (!viewport || !viewport.isConnected) return;
+            const st = body.scrollTop || 0;
+            const vh = body.clientHeight || 560;
+            const start = Math.max(0, Math.floor(st / VROW_H) - OVERSCAN);
+            const end = Math.min(fb.visible.length, Math.ceil((st + vh) / VROW_H) + OVERSCAN);
+            viewport.style.transform = `translateY(${start * VROW_H}px)`;
+            const slice = [];
+            for (let i = start; i < end; i++) slice.push(renderRowHtml(fb.visible[i], i));
+            viewport.innerHTML = slice.join('');
+          };
+          body.__gmVScrollHandler && body.removeEventListener('scroll', body.__gmVScrollHandler);
+          body.__gmVScrollHandler = () => {
+            if (!vRaf) vRaf = requestAnimationFrame(drawSlice);
+          };
+          body.addEventListener('scroll', body.__gmVScrollHandler, { passive: true });
+          drawSlice();
+        } else {
+          if (body.__gmVScrollHandler) {
+            body.removeEventListener('scroll', body.__gmVScrollHandler);
+            body.__gmVScrollHandler = null;
+          }
+          body.innerHTML = fb.visible.map(renderRowHtml).join('');
+        }
       }
       updateStatus();
     }
