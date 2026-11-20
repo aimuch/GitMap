@@ -15,6 +15,8 @@ export interface CommitMessageResult {
 }
 
 const MAX_DIFF_CHARS = 18000;
+/** Never read more than this from `git diff` (a huge staged file would otherwise be read whole, then cut to MAX_DIFF_CHARS). */
+const MAX_DIFF_BYTES = 200 * 1024;
 
 export function buildHeuristicCommitMessage(statText: string, language: 'zh' | 'en', style: 'conventional' | 'concise' | 'detailed'): string {
   const files: string[] = [];
@@ -50,7 +52,7 @@ export class AiAssistantService {
       const st = await this.dataSource.execGitRaw(repo, ['-c', 'core.quotepath=false', 'diff', '--cached', '--stat']);
       statOut = st.stdout.toString('utf8').trim();
       if (statOut) {
-        const df = await this.dataSource.execGitRaw(repo, ['-c', 'core.quotepath=false', 'diff', '--cached', '--no-color', '-U2']);
+        const df = await this.dataSource.execGitRaw(repo, ['-c', 'core.quotepath=false', 'diff', '--cached', '--no-color', '-U2'], { maxBytes: MAX_DIFF_BYTES });
         diffOut = df.stdout.toString('utf8');
       }
     } catch { /* ignore */ }
@@ -62,7 +64,7 @@ export class AiAssistantService {
         const st = await this.dataSource.execGitRaw(repo, ['-c', 'core.quotepath=false', 'diff', '--stat']);
         statOut = st.stdout.toString('utf8').trim();
         if (statOut) {
-          const df = await this.dataSource.execGitRaw(repo, ['-c', 'core.quotepath=false', 'diff', '--no-color', '-U2']);
+          const df = await this.dataSource.execGitRaw(repo, ['-c', 'core.quotepath=false', 'diff', '--no-color', '-U2'], { maxBytes: MAX_DIFF_BYTES });
           diffOut = df.stdout.toString('utf8');
         }
       } catch { /* ignore */ }

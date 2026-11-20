@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
@@ -97,6 +98,10 @@ export interface FolderDiffResult {
   truncated: boolean;
   entries: FolderDiffEntry[];
 }
+
+/** Folder diff: at most this many same-size-different-time files get a content check, each up to HASH_CHECK_MAX_BYTES. */
+const HASH_CHECK_MAX_FILES = 400;
+const HASH_CHECK_MAX_BYTES = 20 * 1024 * 1024;
 
 const DEFAULT_EXCLUDES = ['.git', 'node_modules', 'dist', 'build', '.next', '__pycache__', '.venv', 'target', 'release'];
 
@@ -615,10 +620,13 @@ export class EnhancementsService {
       return { map, truncated };
     }
 
-    // Remote SSH tree listing via find + stat (single SSH command)
+    // Remote SSH tree listing in a single SSH command: GNU find -printf (Linux), or `stat -f` where find has no
+    // -printf (macOS / BSD servers), otherwise the listing came back empty and every file looked "left-only"
     const qDir = quotePosixArg(endpoint.path);
     const pruneExpr = excludes.map((e) => `-name ${quotePosixArg(e)}`).join(' -o ');
-    const cmd = `cd ${qDir} 2>/dev/null && find . \\( ${pruneExpr} \\) -prune -o -type f -printf '%P\\t%s\\t%T@\\n' 2>/dev/null | head -n ${maxFiles + 1}`;
+    const findBase = `find . \\( ${pruneExpr} \\) -prune -o -type f`;
+    const cmd = `cd ${qDir} 2>/dev/null && { if find . -maxdepth 0 -printf '' >/dev/null 2>&1; then ${findBase} -printf '%P\\t%s\\t%T@\\n'; ` +
+      `else ${findBase} -exec stat -f '%N%t%z%t%m' {} +; fi; } 2>/dev/null | head -n ${maxFiles + 1}`;
     const res = await sshManager.execRemote(endpoint.hostId!, cmd);
     const lines = res.stdout.split(/\r?\n/);
     for (const line of lines) {
@@ -689,6 +697,22 @@ export class EnhancementsService {
       });
     }
 
+    // Same size, different time (copied, checked out, touched): compare the content before calling it "modified"
+    const suspects = entries.filter((e) => e.status === 'modified' && e.leftSize === e.rightSize).slice(0, HASH_CHECK_MAX_FILES);
+    if (suspects.length > 0) {
+      const paths = suspects.map((e) => e.relPath);
+      const [lHash, rHash] = await Promise.all([this.hashFiles(left, paths), this.hashFiles(right, paths)]);
+      for (const e of suspects) {
+        const a = lHash.get(e.relPath);
+        const b = rHash.get(e.relPath);
+        if (a && b && a === b) {
+          e.status = 'identical';
+          summary.modified--;
+          summary.identical++;
+        }
+      }
+    }
+
     return {
       left,
       right,
@@ -696,6 +720,31 @@ export class EnhancementsService {
       truncated: lTree.truncated || rTree.truncated,
       entries
     };
+  }
+
+  /** Content hashes (relPath → hex) of files below an endpoint; a file that can't be hashed is just missing from the map. */
+  private async hashFiles(endpoint: FolderEndpoint, relPaths: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (endpoint.kind === 'local') {
+      for (const rel of relPaths) {
+        try {
+          const full = path.join(endpoint.path, rel);
+          if ((await fs.promises.stat(full)).size > HASH_CHECK_MAX_BYTES) continue;
+          out.set(rel, crypto.createHash('sha1').update(await fs.promises.readFile(full)).digest('hex'));
+        } catch { /* unreadable: stays "modified" */ }
+      }
+      return out;
+    }
+    // Remote: one command, sha1sum (GNU) or shasum (macOS / BSD), relative paths kept as given
+    const quoted = relPaths.map((p) => quotePosixArg('./' + p)).join(' ');
+    const cmd = `cd ${quotePosixArg(endpoint.path)} 2>/dev/null && { if command -v sha1sum >/dev/null 2>&1; then sha1sum -- ${quoted}; ` +
+      `elif command -v shasum >/dev/null 2>&1; then shasum -a 1 -- ${quoted}; fi; } 2>/dev/null`;
+    const res = await sshManager.execRemote(endpoint.hostId!, cmd);
+    for (const line of res.stdout.split(/\r?\n/)) {
+      const m = /^([0-9a-f]{40})\s+\*?(.+)$/.exec(line);
+      if (m) out.set(m[2].replace(/^\.\//, ''), m[1]);
+    }
+    return out;
   }
 
   public async syncFolderFile(

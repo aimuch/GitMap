@@ -26,6 +26,10 @@ class CdvFileView {
 
 		if (fileWasViewed) {
 			expandedCommit.lastViewedFile = filePath;
+			// Highlight it (not just the small eye icon) and mark it viewed, so it's easy to find on returning from the diff
+			cdvViewedFiles.add(filePath);
+			filesElem.querySelectorAll('.fileTreeFileRecord.lastViewedFile').forEach((el) => el.classList.remove('lastViewedFile'));
+			fileElem.classList.add('lastViewedFile', 'viewedFile');
 			let lastViewedElem = document.getElementById('cdvLastFileViewed');
 			if (lastViewedElem !== null) lastViewedElem.remove();
 			lastViewedElem = document.createElement('span');

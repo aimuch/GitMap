@@ -75,6 +75,8 @@ export interface DesktopNativeHooks {
   showSaveDialog?: (req: SaveDialogRequest) => Promise<string | undefined>;
   writeClipboard?: (text: string) => Promise<boolean>;
   openExternal?: (url: string) => Promise<boolean>;
+  /** Move a local file / folder to the system Trash (desktop app only): local deletes become recoverable. */
+  trashItem?: (fullPath: string) => Promise<void>;
 }
 
 export interface GitMapServerOptions {
@@ -178,6 +180,7 @@ export class GitMapServer {
   }
 
   public setDesktopHooks(hooks: DesktopNativeHooks) {
+    this.workflowService?.setTrash(hooks.trashItem || null);
     this.desktopHooks = hooks;
   }
 
@@ -261,6 +264,7 @@ export class GitMapServer {
     this.repoManager = new RepoManager(this.dataSource, this.extensionState, configChangeEmitter.subscribe, this.logger);
     this.diffService = new DiffService(this.dataSource);
     this.workflowService = new GitWorkflowService(this.dataSource);
+    this.workflowService.setTrash(this.desktopHooks.trashItem || null);
     this.enhancementsService = new EnhancementsService(this.dataSource);
     this.aiAssistantService = new AiAssistantService(this.dataSource);
     this.hostingService = new HostingService(this.dataSource);
@@ -981,7 +985,8 @@ export class GitMapServer {
         sshHosts: sshManager.listHosts(),
         settings: getAllStandaloneSettings(),
         platform: process.platform,
-        homeDir: os.homedir()
+        homeDir: os.homedir(),
+        canTrash: typeof this.desktopHooks.trashItem === 'function'
       })
     );
 
@@ -1628,6 +1633,7 @@ export class GitMapServer {
       case 'local:delete': {
         const rawPaths: string[] = Array.isArray(params.paths) ? params.paths.map(String) : [];
         const homeResolved = path.resolve(os.homedir());
+        const trash = this.desktopHooks.trashItem;
         let deleted = 0;
         for (const p of rawPaths) {
           const norm = this.assertAllowedLocalPath(p);
@@ -1635,10 +1641,13 @@ export class GitMapServer {
           if (norm === parsedRoot || norm === homeResolved || norm.split(path.sep).filter(Boolean).length < 2) {
             throw new Error(`Refusing to delete protected directory "${p}".`);
           }
-          await fs.promises.rm(norm, { recursive: true, force: false });
+          // Desktop app: to the system Trash (recoverable); browser mode has no Trash API, so it's permanent
+          if (trash) await trash(norm);
+          else await fs.promises.rm(norm, { recursive: true, force: false });
           deleted++;
         }
-        return { deleted };
+        RepoFileWatcher.notifyPossibleRemoteChange(250);
+        return { deleted, trashed: !!trash };
       }
 
       case 'local:importPaths': {

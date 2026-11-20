@@ -378,7 +378,14 @@ function assertSafeRepoRelPath(relPath: string) {
 }
 
 export class GitWorkflowService {
+  /** Desktop app: discarded untracked local files go to the system Trash instead of being deleted for good. */
+  private trashItem: ((fullPath: string) => Promise<void>) | null = null;
+
   constructor(private readonly dataSource: DataSource) {}
+
+  public setTrash(fn: ((fullPath: string) => Promise<void>) | null) {
+    this.trashItem = fn;
+  }
 
   /* 1. Hunk & Line Partial Stage / Unstage / Discard + File Discard */
 
@@ -447,7 +454,8 @@ export class GitWorkflowService {
           if (target === rootResolved || !target.startsWith(rootResolved + path.sep)) {
             throw new Error(`Unsafe discard target: ${rel}`);
           }
-          await fs.promises.rm(target, { recursive: true, force: true });
+          if (this.trashItem && fs.existsSync(target)) await this.trashItem(target);
+          else await fs.promises.rm(target, { recursive: true, force: true });
         }
       }
     }
@@ -941,7 +949,9 @@ export class GitWorkflowService {
       return { repo, branch: null, ahead: 0, behind: 0, stagedCount: 0, unstagedCount: 0, conflictCount: 0, offline: true };
     }
     try {
-      const { stdout } = await this.dataSource.execGitRaw(repo, ['status', '--porcelain=v1', '-b', '-uall']);
+      // -unormal: an untracked folder is one entry, so the 25 s badge refresh doesn't walk every untracked file
+      // (the 暂存与提交 dialog still lists them one by one with -uall)
+      const { stdout } = await this.dataSource.execGitRaw(repo, ['status', '--porcelain=v1', '-b', '-unormal']);
       const lines = stdout.toString('utf8').split(/\r?\n/).filter(Boolean);
       let branch: string | null = null;
       let ahead = 0;

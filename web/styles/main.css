@@ -4042,3 +4042,19 @@ button.operationBarBtn svg{
 .cdvActionsOrderBadge.empty{
 	visibility:hidden;
 }
+
+/* Commit details: the file opened last stands out (not only the small eye icon); files already opened are dimmed */
+.fileTreeFileRecord.lastViewedFile{
+	background:color-mix(in srgb, var(--vscode-focusBorder) 16%, transparent);
+	box-shadow:inset 3px 0 0 var(--vscode-focusBorder);
+}
+.fileTreeFileRecord.viewedFile:not(.lastViewedFile) .fileTreeFileText{
+	opacity:0.6;
+}
+.fileTreeFileRecord.cdvRevealFlash{
+	animation:cdvRevealFlash 1.2s ease-out 1;
+}
+@keyframes cdvRevealFlash{
+	0%{background:color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);}
+	100%{background:color-mix(in srgb, var(--vscode-focusBorder) 16%, transparent);}
+}

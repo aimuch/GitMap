@@ -667,6 +667,9 @@ app.whenReady().then(async () => {
           return true;
         }
         return safeOpenExternal(url);
+      },
+      trashItem: async (fullPath) => {
+        await shell.trashItem(fullPath);
       }
     }
   });

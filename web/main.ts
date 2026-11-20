@@ -324,6 +324,16 @@ class GitGraphView {
 				name: this.gitRepos[this.currentRepo].name || getRepoName(this.currentRepo)
 			}, t('Opening Terminal'));
 		});
+		// Back from a diff tab (the shell activates the Git Map again): bring the file that was opened into view
+		window.addEventListener('gitmap-reveal-last-viewed', () => {
+			const fileView = getCdvFileViewElem();
+			const marker = fileView !== null ? fileView.querySelector('.fileTreeFileRecord.lastViewedFile') : null;
+			if (marker === null) return;
+			marker.scrollIntoView({ block: 'nearest' });
+			marker.classList.remove('cdvRevealFlash');
+			void (<HTMLElement>marker).offsetWidth;
+			marker.classList.add('cdvRevealFlash');
+		});
 		window.addEventListener('gitmap-filter-by-file', (ev: Event) => {
 			const detail = (<CustomEvent<{ filePath?: string }>>ev).detail;
 			if (detail && detail.filePath) {
@@ -1250,6 +1260,9 @@ class GitGraphView {
 	}
 
 	private saveExpandedCommitLoading(index: number, commitHash: string, commitElem: HTMLElement, compareWithHash: string | null, compareWithElem: HTMLElement | null) {
+		if (this.expandedCommit === null || this.expandedCommit.commitHash !== commitHash || this.expandedCommit.compareWithHash !== compareWithHash) {
+			cdvViewedFiles.clear(); // "viewed" marks belong to one commit (comparison)
+		}
 		this.expandedCommit = {
 			index: index,
 			commitHash: commitHash,

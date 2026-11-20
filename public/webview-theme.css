@@ -240,7 +240,19 @@ body {
   font-size: 13px;
 }
 
-/* ── Responsive narrow-pane / split-view adaptation ── */
+/* ── Responsive narrow-pane / split-view adaptation ──
+   The Description column matters most: as the pane narrows, the other columns go one at a time
+   (Commit → Date → Author → Changes) instead of squeezing Description to nothing. A header is always hidden
+   together with its cells (web/main.ts markup: th.dateCol / td.dateCol, th[data-col="4"] / td.hashCol …),
+   otherwise every column to the right shows the wrong data under the wrong header.
+   Right-click the table header to choose the columns yourself. */
+@media (max-width: 900px) {
+  #commitTable td.hashCol,
+  #commitTable th[data-col="4"] {
+    display: none !important;
+  }
+}
+
 @media (max-width: 760px) {
   #controls {
     flex-wrap: wrap !important;
@@ -250,19 +262,20 @@ body {
   #controls .controlLabel {
     display: none !important;
   }
-  /* Hide a header together with its cells (web/main.ts markup: th.dateCol / td.dateCol, th[data-col="4"] / td.hashCol),
-     otherwise every column to the right shows the wrong data under the wrong header */
   #commitTable td.dateCol,
-  #commitTable th.dateCol,
-  #commitTable td.hashCol,
-  #commitTable th[data-col="4"] {
+  #commitTable th.dateCol {
+    display: none !important;
+  }
+}
+
+@media (max-width: 640px) {
+  #commitTable td.authorCol,
+  #commitTable th.authorCol {
     display: none !important;
   }
 }
 
 @media (max-width: 520px) {
-  #commitTable td.authorCol,
-  #commitTable th.authorCol,
   #commitTable td.changesCol,
   #commitTable th.changesCol,
   #commitTable td.fileChangesCol,

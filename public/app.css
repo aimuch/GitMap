@@ -4945,3 +4945,21 @@ body.resizing-y #workspaceSplitResizer {
   color: var(--vscode-descriptionForeground);
   font-size: 12px;
 }
+
+/* Repository explorer: Git status (colours follow the theme's git decoration colours) */
+.fb-git-badge {
+  flex: none;
+  margin-left: 8px;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+.fb-row.gs-M .fb-name, .fb-row.gs-M .fb-git-badge,
+.fb-row.gs-R .fb-name, .fb-row.gs-R .fb-git-badge { color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); }
+.fb-row.gs-A .fb-name, .fb-row.gs-A .fb-git-badge,
+.fb-row.gs-U .fb-name, .fb-row.gs-U .fb-git-badge { color: var(--vscode-gitDecoration-addedResourceForeground, #73c991); }
+.fb-row.gs-D .fb-name, .fb-row.gs-D .fb-git-badge,
+.fb-row.gs-C .fb-name, .fb-row.gs-C .fb-git-badge { color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39); }
+.fb-row.is-dir .fb-git-badge { font-size: 9px; }
+.fb-row.is-dir .fb-name { color: inherit; }

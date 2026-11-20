@@ -139,6 +139,22 @@ describe('GitMap Enhancements Suite', () => {
       assert.strictEqual(diff1.summary.rightOnly, 1);
       assert.strictEqual(diff1.summary.modified, 1);
 
+      // 2b. Same size, different modification time: identical when the content matches, modified when it doesn't
+      fs.writeFileSync(path.join(dirA, 'copied.txt'), 'same bytes');
+      fs.writeFileSync(path.join(dirB, 'copied.txt'), 'same bytes');
+      fs.writeFileSync(path.join(dirA, 'tweaked.txt'), 'abcdefghij');
+      fs.writeFileSync(path.join(dirB, 'tweaked.txt'), 'abcdefghiX');
+      const old = new Date(Date.now() - 3600 * 1000);
+      fs.utimesSync(path.join(dirB, 'copied.txt'), old, old);
+      fs.utimesSync(path.join(dirB, 'tweaked.txt'), old, old);
+      const diff2 = await svc.compareFolders(dirA, dirB);
+      assert.strictEqual(diff2.entries.find((e) => e.relPath === 'copied.txt')!.status, 'identical', 'a copy with a new timestamp is not a change');
+      assert.strictEqual(diff2.entries.find((e) => e.relPath === 'tweaked.txt')!.status, 'modified');
+      fs.rmSync(path.join(dirA, 'copied.txt'));
+      fs.rmSync(path.join(dirB, 'copied.txt'));
+      fs.rmSync(path.join(dirA, 'tweaked.txt'));
+      fs.rmSync(path.join(dirB, 'tweaked.txt'));
+
       // 3. Selective sync Left -> Right for only-left.txt & src/hello.ts
       await svc.syncFolderFile(dirA, dirB, 'only-left.txt');
       await svc.syncFolderFile(dirA, dirB, 'src/hello.ts');

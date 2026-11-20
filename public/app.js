@@ -850,6 +850,7 @@
         state.sshHosts = msg.sshHosts || [];
         state.settings = msg.settings || {};
         state.homeDir = msg.homeDir || '~';
+        state.canTrash = !!msg.canTrash;
         if (state.settings['gitmap.app.iconStyle'] && VALID_ICON_STYLE_IDS.has(state.settings['gitmap.app.iconStyle'])) {
           state.iconStyle = state.settings['gitmap.app.iconStyle'];
         }
@@ -2079,8 +2080,33 @@
     });
   }
 
+  /** Confirm-dialog arguments for deleting local items: to the Trash in the desktop app, permanent in browser mode. */
+  function localDeleteConfirmText(count, names) {
+    const zh = state.lang === 'zh';
+    return state.canTrash
+      ? [zh ? '移到废纸篓' : 'Move to Trash', (zh ? `以下 ${count} 项会移到废纸篓，需要时可以从废纸篓恢复：\n\n` : `Move these ${count} item(s) to the Trash? You can restore them from there.\n\n`) + names, zh ? '移到废纸篓' : 'Move to Trash', true]
+      : [zh ? '永久删除文件 / 文件夹' : 'Permanently Delete Items', (zh ? `浏览器模式没有废纸篓，以下 ${count} 项（文件夹含其全部内容）会被永久删除，不可恢复：\n\n` : `Browser mode has no Trash: these ${count} item(s) will be deleted for good:\n\n`) + names, zh ? '永久删除' : 'Delete Permanently', true];
+  }
+
+  /** Discard: changes to tracked files can't be undone; untracked files go to the Trash in the desktop app (local repos). */
+  function discardConfirmText(question) {
+    const zh = state.lang === 'zh';
+    const remote = !!(state.activeRepo && String(state.activeRepo).startsWith('ssh://'));
+    const tail = state.canTrash && !remote
+      ? (zh ? '已跟踪文件的改动不可撤销；未跟踪的新文件会移到废纸篓。' : "Changes to tracked files can't be undone; untracked files go to the Trash.")
+      : (zh ? '此操作不可撤销（未跟踪的新文件也会被永久删除）。' : 'This cannot be undone (untracked files are deleted for good).');
+    return question + '\n' + tail;
+  }
+
+  /** Coming back to the Git Map (e.g. after a diff tab): scroll the file opened last in the commit details into view. */
+  function revealLastViewedInGitMap() {
+    const iframe = document.getElementById('gitMapFrame');
+    if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage({ __gitmapRevealLastViewed: true }, window.location.origin || '*');
+  }
+
   function activateTab(tabId, opts) {
     if (!tabById(tabId)) return;
+    if (tabId === 'graph' && state.activeTabId !== 'graph') setTimeout(revealLastViewedInGitMap, 60);
     if (!isSplitWorkspace()) {
       state.activeTabId = tabId;
       syncWorkspacePanels();
@@ -3553,6 +3579,11 @@
         }
       })(),
       showHidden: localStorage.getItem('gitmap.fb.hidden.' + opts.kind) === '1',
+      // null = automatic (folders on top only when sorting by name); true / false = the user's choice
+      foldersFirst: (() => {
+        const v = localStorage.getItem('gitmap.fb.foldersFirst.' + opts.kind);
+        return v === '1' ? true : v === '0' ? false : null;
+      })(),
       filter: '',
       selected: new Set(),
       expandedDirs: new Set(),
@@ -3594,6 +3625,7 @@
       <div class="fb-actions">
         <label class="fb-filter">${ICONS.search}<input type="text" class="fb-filter-input" spellcheck="false" placeholder="${escapeHtml(T('筛选当前目录…', 'Filter this folder…'))}" /></label>
         <button type="button" class="mini-icon-btn act-hidden" title="${escapeHtml(tr('showHidden'))}">${ICONS.eyeOff}</button>
+        <button type="button" class="mini-icon-btn act-folders-first" aria-pressed="false">${ICONS.folder}</button>
         <button type="button" class="mini-icon-btn act-expand-top" title="${escapeHtml(T('展开当前目录全部文件夹', 'Expand All Top-Level Folders'))}">${ICONS.expandAll}</button>
         <button type="button" class="mini-icon-btn act-collapse-all" title="${escapeHtml(T('收起全部已展开文件夹', 'Collapse All Folders'))}">${ICONS.collapseAll}</button>
         <span class="fb-actions-spacer"></span>
@@ -3651,8 +3683,48 @@
       });
     }
 
+    /** Optional root (opts.rootPath): the repository explorer shows paths from the repository and never leaves it. */
+    const normFsPath = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+    function confinedRoot() {
+      const r = opts.rootPath ? opts.rootPath() : null;
+      return r ? normFsPath(r) : null;
+    }
+    function isWithinRoot(p, r) {
+      const n = normFsPath(p);
+      return n === r || n.startsWith(r === '/' ? '/' : r + '/');
+    }
+
     function renderCrumbs(p) {
       crumbs.innerHTML = '';
+      const rootDir = confinedRoot();
+      if (rootDir && isWithinRoot(p, rootDir)) {
+        const rel = normFsPath(p).slice(rootDir.length).split('/').filter(Boolean);
+        const sepChar = !rootDir.startsWith('/') && String(p).includes('\\') ? '\\' : '/';
+        const addRel = (label, target, last) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'crumb-btn' + (last ? ' current' : '');
+          b.textContent = label;
+          b.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fb.navigate(target, { push: true });
+          });
+          crumbs.appendChild(b);
+        };
+        const rootTarget = opts.rootPath();
+        addRel(opts.rootLabel ? opts.rootLabel() : rootDir.split('/').pop() || '/', rootTarget, rel.length === 0);
+        let acc = rootTarget.replace(/[\\/]+$/, '');
+        rel.forEach((part, i) => {
+          const sep = document.createElement('span');
+          sep.className = 'crumb-sep';
+          sep.textContent = '/';
+          crumbs.appendChild(sep);
+          acc += sepChar + part;
+          addRel(part, acc, i === rel.length - 1);
+        });
+        crumbs.scrollLeft = crumbs.scrollWidth;
+        return;
+      }
       const isWinDrive = /^[a-zA-Z]:/.test(p);
       const parts = p.split(/[\\/]/).filter(Boolean);
       const add = (label, target, last) => {
@@ -3681,11 +3753,31 @@
       crumbs.scrollLeft = crumbs.scrollWidth;
     }
 
+    /**
+     * Folders on top: by default only when sorting by name (like Finder); sorting by modified time or size mixes
+     * folders and files so the newest / largest entry is first whatever it is. The toolbar toggle overrides it (remembered).
+     */
+    function foldersOnTop() {
+      return fb.foldersFirst === null ? fb.sort.key === 'name' : fb.foldersFirst;
+    }
+
+    function updateFoldersFirstButton() {
+      const btn = $('.act-folders-first');
+      if (!btn) return;
+      const on = foldersOnTop();
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.title = on
+        ? T('文件夹置顶：开（点一下和文件混排）', 'Folders on top: on (click to mix with files)')
+        : T('文件夹置顶：关（和文件一起排序，点一下置顶）', 'Folders on top: off (sorted with files; click to keep on top)');
+    }
+
     function sortEntryLevel(items) {
       const list = (items || []).slice();
       const { key, dir } = fb.sort;
+      const dirsFirst = foldersOnTop();
       list.sort((a, b) => {
-        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        if (dirsFirst && a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
         let c = 0;
         if (key === 'size') c = (a.size || 0) - (b.size || 0);
         else if (key === 'mtime') c = (a.mtime || 0) - (b.mtime || 0);
@@ -4051,12 +4143,13 @@
             : fileIconFor(e);
           const m = formatMtime(e.mtime);
           const sel = fb.selected.has(e.path);
+          const deco = opts.decorate ? opts.decorate(e) : null;
           const idleAction = e.isGitRepo && opts.showOpenRepo !== false
             ? `<button type="button" class="mini-btn act-row-open-repo">${escapeHtml(tr('openRepoBtn'))}</button>`
             : '';
-          return `<div class="fb-row${e.isDirectory ? ' is-dir' : ''}${e.isGitRepo ? ' is-git' : ''}${sel ? ' selected' : ''}${idx === fb.focusIdx ? ' focused' : ''}" data-idx="${idx}" role="row" title="${escapeHtml(e.path)}">
+          return `<div class="fb-row${e.isDirectory ? ' is-dir' : ''}${e.isGitRepo ? ' is-git' : ''}${sel ? ' selected' : ''}${idx === fb.focusIdx ? ' focused' : ''}${deco ? ' gs-' + deco.code : ''}" data-idx="${idx}" role="row" title="${escapeHtml(e.path)}">
             <span class="fb-col-chk"><input type="checkbox" class="fb-check" ${sel ? 'checked' : ''} tabindex="-1" /></span>
-            <span class="fb-col-name">${guidesHtml}${twistyHtml}<span class="fb-icon ${icon.cls}">${icon.svg}</span><span class="fb-name">${escapeHtml(e.name)}</span>${e.isSymlink ? `<span class="fb-link" title="${escapeHtml(T('符号链接', 'Symbolic link'))}">${ICONS.link}</span>` : ''}${e.isGitRepo ? `<span class="branch-pill">${ICONS.branch}${escapeHtml(e.gitBranch || 'HEAD')}</span>` : ''}</span>
+            <span class="fb-col-name">${guidesHtml}${twistyHtml}<span class="fb-icon ${icon.cls}">${icon.svg}</span><span class="fb-name">${escapeHtml(e.name)}</span>${deco ? `<span class="fb-git-badge" title="${escapeHtml(deco.title)}">${escapeHtml(deco.badge)}</span>` : ''}${e.isSymlink ? `<span class="fb-link" title="${escapeHtml(T('符号链接', 'Symbolic link'))}">${ICONS.link}</span>` : ''}${e.isGitRepo ? `<span class="branch-pill">${ICONS.branch}${escapeHtml(e.gitBranch || 'HEAD')}</span>` : ''}</span>
             <span class="fb-col-size">${e.isDirectory ? '—' : escapeHtml(formatBytes(e.size))}</span>
             <span class="fb-col-mtime" title="${escapeHtml(m.full)}">${escapeHtml(m.short)}</span>
             <span class="fb-col-actions">${idleAction}</span>
@@ -4153,6 +4246,8 @@
     };
 
     fb.navigate = async function (target, navOpts) {
+      const rootDir = confinedRoot();
+      if (rootDir && (!target || !isWithinRoot(target, rootDir))) target = opts.rootPath(); // never leave the root
       const seq = ++fb.loadSeq;
       const isRefreshSame = target === fb.currentPath && fb.entries.length > 0;
       if (!isRefreshSame) setLoading(opts.loadingText());
@@ -4163,7 +4258,9 @@
         root.classList.remove('fb-failed');
         const changedDir = listing.currentPath !== fb.currentPath;
         fb.currentPath = listing.currentPath;
-        fb.parentPath = listing.parentPath;
+        // At the root there is no "up" (the remote listing may report the canonical path, so compare the target too)
+        const atRoot = !!rootDir && (normFsPath(listing.currentPath) === rootDir || normFsPath(target) === rootDir);
+        fb.parentPath = atRoot ? null : listing.parentPath;
         fb.entries = listing.entries || [];
         if (changedDir) {
           fb.selected.clear();
@@ -4214,6 +4311,11 @@
 
     fb.refresh = function () {
       return fb.navigate(fb.currentPath, { push: false });
+    };
+
+    /** Re-draw the rows without listing again (e.g. decorations changed). */
+    fb.rerender = function () {
+      if (fb.currentPath !== null && fb.entries.length > 0) renderRows();
     };
 
     fb.ensureExpanded = async function (dirPath) {
@@ -4490,8 +4592,17 @@
         fb.sort = fb.sort.key === key ? { key, dir: -fb.sort.dir } : { key, dir: key === 'name' ? 1 : -1 };
         localStorage.setItem('gitmap.fb.sort.' + opts.kind, JSON.stringify(fb.sort));
         updateSortHeader();
+        updateFoldersFirstButton();
         renderRows();
       });
+    });
+    $('.act-folders-first').addEventListener('click', () => {
+      fb.foldersFirst = !foldersOnTop();
+      try {
+        localStorage.setItem('gitmap.fb.foldersFirst.' + opts.kind, fb.foldersFirst ? '1' : '0');
+      } catch (_) {}
+      updateFoldersFirstButton();
+      renderRows();
     });
     $('.fb-check-all').addEventListener('change', (e) => {
       if (e.target.checked) fb.visible.forEach((en) => fb.selected.add(en.path));
@@ -4760,6 +4871,7 @@
 
     updateHiddenButton();
     updateSortHeader();
+    updateFoldersFirstButton();
     return fb;
   }
 
@@ -5240,12 +5352,7 @@
       if (!entries || entries.length === 0) return;
       const zh = state.lang === 'zh';
       const names = entries.slice(0, 8).map((e) => '• ' + e.name + (e.isDirectory ? '/' : '')).join('\n') + (entries.length > 8 ? `\n… +${entries.length - 8}` : '');
-      const ok = await confirmDialog(
-        zh ? '永久删除文件/文件夹' : 'Permanently Delete Items',
-        (zh ? `将永久删除以下 ${entries.length} 项（文件夹含其全部内容），此操作无法撤销：\n\n` : `Permanently delete these ${entries.length} item(s)?\n\n`) + names,
-        zh ? '永久删除' : 'Delete Permanently',
-        true
-      );
+      const ok = await confirmDialog(...localDeleteConfirmText(entries.length, names));
       if (!ok) return;
       try {
         await rpc('local:delete', { paths: entries.map((e) => e.path) });
@@ -5369,6 +5476,70 @@
     openFileTab(payload);
   }
 
+  /**
+   * Git status of the repository explorer: one `scm:status` per folder listing, mapped repository-relative path →
+   * status letter. Files get a coloured name and a letter; folders a dot when something below them changed.
+   */
+  const repoGitStatus = { repo: null, files: new Map(), dirs: new Map(), seq: 0 };
+  const GIT_STATUS_RANK = { C: 5, D: 4, M: 3, R: 3, A: 2, U: 1 };
+  const GIT_STATUS_TEXT = {
+    C: ['有冲突', 'Conflict'], D: ['已删除', 'Deleted'], M: ['已修改', 'Modified'], R: ['已重命名', 'Renamed'], A: ['已添加（已暂存）', 'Added (staged)'], U: ['未跟踪', 'Untracked']
+  };
+
+  function repoRelPath(absPath) {
+    const info = activeRepoTarget();
+    if (!info) return null;
+    const rootDir = String(info.isRemote ? info.remotePath : info.fullDisplay).replace(/\\/g, '/').replace(/\/+$/, '');
+    const p = String(absPath || '').replace(/\\/g, '/');
+    return p.startsWith(rootDir + '/') ? p.slice(rootDir.length + 1) : null;
+  }
+
+  async function refreshRepoGitStatus() {
+    const repo = state.activeRepo;
+    if (!repo) return;
+    const seq = ++repoGitStatus.seq;
+    try {
+      const st = await rpc('scm:status', { repo });
+      if (seq !== repoGitStatus.seq || state.activeRepo !== repo) return;
+      const files = new Map();
+      const put = (rel, code) => {
+        if (!rel || !GIT_STATUS_RANK[code]) return;
+        const cur = files.get(rel);
+        if (!cur || GIT_STATUS_RANK[code] > GIT_STATUS_RANK[cur]) files.set(rel, code);
+      };
+      (st.staged || []).forEach((f) => put(f.path, f.status === 'C' ? 'A' : f.status));
+      (st.unstaged || []).forEach((f) => put(f.path, f.status));
+      (st.conflicted || []).forEach((f) => put(f.path, 'C'));
+      const dirs = new Map();
+      files.forEach((code, rel) => {
+        const parts = rel.split('/');
+        for (let i = 1; i < parts.length; i++) {
+          const d = parts.slice(0, i).join('/');
+          const cur = dirs.get(d);
+          if (!cur || GIT_STATUS_RANK[code] > GIT_STATUS_RANK[cur]) dirs.set(d, code);
+        }
+      });
+      repoGitStatus.repo = repo;
+      repoGitStatus.files = files;
+      repoGitStatus.dirs = dirs;
+      if (typeof repoFilesBrowser !== 'undefined' && repoFilesBrowser.rerender) repoFilesBrowser.rerender();
+    } catch (_) {
+      /* status is decoration only */
+    }
+  }
+
+  function repoGitDecoration(entry) {
+    if (repoGitStatus.repo !== state.activeRepo) return null;
+    const rel = repoRelPath(entry.path);
+    if (rel === null) return null;
+    const code = entry.isDirectory ? repoGitStatus.dirs.get(rel) : repoGitStatus.files.get(rel);
+    if (!code) return null;
+    const [zh, en] = GIT_STATUS_TEXT[code];
+    return entry.isDirectory
+      ? { code, badge: '●', title: state.lang === 'zh' ? '里面有改动' : 'Contains changes' }
+      : { code, badge: code, title: state.lang === 'zh' ? zh : en };
+  }
+
   const repoFilesBrowser = createFileBrowser(document.getElementById('repoFilesBrowserRoot'), {
     kind: 'repo',
     showOpenRepo: false,
@@ -5385,15 +5556,25 @@
       transfer: true
     },
     homeTitle: () => (state.lang === 'zh' ? '回到当前仓库根目录' : 'Jump to Repository Root'),
+    rootPath: () => {
+      const info = activeRepoTarget();
+      return info ? (info.isRemote ? info.remotePath : info.fullDisplay) : null;
+    },
+    rootLabel: () => {
+      const info = activeRepoTarget();
+      return info ? info.name : '';
+    },
+    decorate: (entry) => repoGitDecoration(entry),
     getHomePath: () => {
       const info = activeRepoTarget();
       if (!info) return '~';
       return info.isRemote ? info.remotePath : info.fullDisplay;
     },
     loadingText: () => (state.lang === 'zh' ? '正在读取仓库目录…' : 'Loading repository files…'),
-    list: async (p, showHidden) => {
+    list: async (p, showHidden, listOpts) => {
       const info = activeRepoTarget();
       if (!info) throw new Error(tr('noActiveRepo'));
+      if (!listOpts || !listOpts.subtree) refreshRepoGitStatus(); // runs alongside the listing; rows re-render when it lands
       if (info.isRemote) {
         const listing = await rpc('ssh:browsePath', { hostId: info.hostId, path: p || info.remotePath, showHidden });
         state.sshHosts = listing.hosts || state.sshHosts;
@@ -5493,12 +5674,14 @@
       if (!info || !entries || entries.length === 0) return;
       const zh = state.lang === 'zh';
       const names = entries.slice(0, 8).map((e) => '• ' + e.name + (e.isDirectory ? '/' : '')).join('\n') + (entries.length > 8 ? `\n… +${entries.length - 8}` : '');
-      const ok = await confirmDialog(
-        zh ? '永久删除文件 / 文件夹' : 'Permanently Delete Items',
-        (zh ? `将在仓库中永久删除以下 ${entries.length} 项（文件夹含其全部内容）：\n\n` : `Permanently delete these ${entries.length} item(s)?\n\n`) + names,
-        zh ? '确认删除' : 'Delete',
-        true
-      );
+      const ok = info.isRemote
+        ? await confirmDialog(
+          zh ? '永久删除文件 / 文件夹' : 'Permanently Delete Items',
+          (zh ? `远端服务器没有废纸篓，以下 ${entries.length} 项（文件夹含其全部内容）会被永久删除，不可恢复：\n\n` : `The server has no Trash: these ${entries.length} item(s) will be deleted for good:\n\n`) + names,
+          zh ? '永久删除' : 'Delete Permanently',
+          true
+        )
+        : await confirmDialog(...localDeleteConfirmText(entries.length, names));
       if (!ok) return;
       try {
         if (info.isRemote) await rpc('ssh:delete', { hostId: info.hostId, paths: entries.map((e) => e.path) });
@@ -6389,7 +6572,7 @@
         discardAllBtn.addEventListener('click', async () => {
           const ok = await confirmDialog(
             zh ? '丢弃全部工作区更改' : 'Discard All Working Tree Changes',
-            zh ? `确定丢弃全部 ${st.unstaged.length} 项未暂存更改（含未跟踪的新文件）？此操作不可撤销。` : `Discard all ${st.unstaged.length} unstaged changes (including untracked files)? This cannot be undone.`,
+            discardConfirmText(zh ? `确定丢弃全部 ${st.unstaged.length} 项未暂存更改（含未跟踪的新文件）？` : `Discard all ${st.unstaged.length} unstaged changes (including untracked files)?`),
             zh ? '全部丢弃' : 'Discard All',
             true
           );
@@ -6452,7 +6635,7 @@
           discardBtn.addEventListener('click', async () => {
             const ok = await confirmDialog(
               zh ? '丢弃文件更改' : 'Discard File Changes',
-              zh ? `确定丢弃 "${filePath}" 的未暂存更改？此操作不可撤销。` : `Discard unstaged changes in "${filePath}"? This cannot be undone.`,
+              discardConfirmText(zh ? `确定丢弃 "${filePath}" 的未暂存更改？` : `Discard unstaged changes in "${filePath}"?`),
               zh ? '丢弃' : 'Discard',
               true
             );

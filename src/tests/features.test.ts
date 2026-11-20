@@ -943,7 +943,22 @@ describe('GitMap 11 Advanced Features End-to-End Suite', () => {
 
     const del = await rpc.call('local:delete', { paths: [path.join(repoDir, 'docs'), path.join(repoDir, 'uploaded.txt')] });
     assert.equal(del.deleted, 2);
+    assert.equal(del.trashed, false, 'browser mode has no Trash: permanent');
     assert.equal(fs.existsSync(path.join(repoDir, 'docs')), false);
+
+    // Desktop app: deletes go through the Trash hook (recoverable) instead of rm
+    const trashed: string[] = [];
+    const trashTarget = path.join(repoDir, 'to-trash.txt');
+    fs.writeFileSync(trashTarget, 'keep me recoverable');
+    appServer!.setDesktopHooks({ trashItem: async (p: string) => { trashed.push(p); } });
+    try {
+      const delT = await rpc.call('local:delete', { paths: [trashTarget] });
+      assert.equal(delT.trashed, true);
+      assert.deepEqual(trashed, [trashTarget], 'the item was handed to the system Trash');
+    } finally {
+      appServer!.setDesktopHooks({});
+      fs.rmSync(trashTarget, { force: true });
+    }
 
     // Remote SSH createFile + nested mkdir
     const sshMk = await rpc.call('ssh:mkdir', { hostId: 'tunnel-box', path: remoteHome, name: 'remote-repo/pkg' });

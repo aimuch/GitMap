@@ -30,6 +30,9 @@
     if (ev.data && ev.data.__gitmapTheme) {
       applyTheme(ev.data.__gitmapTheme);
       ev.stopImmediatePropagation();
+    } else if (ev.data && ev.data.__gitmapRevealLastViewed) {
+      window.dispatchEvent(new CustomEvent('gitmap-reveal-last-viewed'));
+      ev.stopImmediatePropagation();
     } else if (ev.data && typeof ev.data.__gitmapFilterByFile === 'string') {
       window.dispatchEvent(new CustomEvent('gitmap-filter-by-file', { detail: { filePath: ev.data.__gitmapFilterByFile } }));
       ev.stopImmediatePropagation();

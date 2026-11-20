@@ -33,6 +33,12 @@ function getCurrentFolderInfo(folder: FileTreeFolder, name: string, pathSeg: str
 }
 
 /**
+ * Files of the expanded commit whose diff was opened (cleared when another commit is expanded): shown dimmed as "viewed",
+ * so a commit can be gone through file by file. The last one opened is highlighted (lastViewedFile).
+ */
+const cdvViewedFiles = new Set<string>();
+
+/**
  * The maximum number of lines changed in a file of the file view being generated, used to scale the bars of the lines changed in each file.
  */
 let fileViewMaxLinesChanged = 1;
@@ -119,7 +125,7 @@ function generateFileTreeLeafHtml(name: string, leaf: FileTreeLeaf, gitFiles: Re
 		const nameHtml = dirEnd > -1
 			? '<span class="gitFileName ' + fileTreeFile.type + '">' + escapeHtml(name.substring(dirEnd + 1)) + '</span>' + renamedFromHtml + '<span class="gitFileDir">' + escapeHtml(name.substring(0, dirEnd)) + '</span>'
 			: '<span class="gitFileName ' + fileTreeFile.type + '">' + escapedName + '</span>' + renamedFromHtml;
-		return '<li data-pathseg="' + encodedName + '"><span class="fileTreeFileRecord' + (leaf.index === fileContextMenuOpen ? ' ' + CLASS_CONTEXT_MENU_ACTIVE : '') + '" data-index="' + leaf.index + '"><span class="fileTreeFile' + (diffPossible ? ' gitDiffPossible' : '') + (leaf.reviewed ? '' : ' ' + CLASS_PENDING_REVIEW) + '" title="' + (diffPossible ? t('Click to View Diff') : t('Unable to View Diff{0}', (fileTreeFile.type !== GG.GitFileStatus.Deleted ? t(' (this is a binary file)') : ''))) + ' • ' + changeTypeMessage + '"><span class="fileTreeFileBadge ' + fileTreeFile.type + '">' + fileTreeFile.type + '</span>' + fileIcons.getFileIcon(fileTreeFile.newFilePath) + '<span class="fileTreeFileText">' + nameHtml + '</span></span>' +
+		return '<li data-pathseg="' + encodedName + '"><span class="fileTreeFileRecord' + (leaf.index === fileContextMenuOpen ? ' ' + CLASS_CONTEXT_MENU_ACTIVE : '') + (fileTreeFile.newFilePath === lastViewedFile ? ' lastViewedFile' : '') + (cdvViewedFiles.has(fileTreeFile.newFilePath) ? ' viewedFile' : '') + '" data-index="' + leaf.index + '"><span class="fileTreeFile' + (diffPossible ? ' gitDiffPossible' : '') + (leaf.reviewed ? '' : ' ' + CLASS_PENDING_REVIEW) + '" title="' + (diffPossible ? t('Click to View Diff') : t('Unable to View Diff{0}', (fileTreeFile.type !== GG.GitFileStatus.Deleted ? t(' (this is a binary file)') : ''))) + ' • ' + changeTypeMessage + '"><span class="fileTreeFileBadge ' + fileTreeFile.type + '">' + fileTreeFile.type + '</span>' + fileIcons.getFileIcon(fileTreeFile.newFilePath) + '<span class="fileTreeFileText">' + nameHtml + '</span></span>' +
 			(initialState.config.enhancedAccessibility ? '<span class="fileTreeFileType" title="' + changeTypeMessage + '">' + fileTreeFile.type + '</span>' : '') +
 			(textFile ? '<span class="fileTreeFileAddDel">' + generateChangeBarHtml(fileTreeFile.additions!, fileTreeFile.deletions!, Math.round(8 + 52 * (fileTreeFile.additions! + fileTreeFile.deletions!) / fileViewMaxLinesChanged)) + '<span class="fileTreeFileAdd" title="' + (fileTreeFile.additions !== 1 ? t('{0} additions', fileTreeFile.additions) : t('{0} addition', fileTreeFile.additions)) + '">+' + fileTreeFile.additions + '</span><span class="fileTreeFileDel" title="' + (fileTreeFile.deletions !== 1 ? t('{0} deletions', fileTreeFile.deletions) : t('{0} deletion', fileTreeFile.deletions)) + '">\u2212' + fileTreeFile.deletions + '</span></span>' : '') +
 			(fileTreeFile.newFilePath === lastViewedFile ? '<span id="cdvLastFileViewed" title="' + t('Last File Viewed') + '">' + SVG_ICONS.eyeOpen + '</span>' : '') +
