@@ -221,6 +221,46 @@ function loadKnownHostKeysForTarget(files: string[], host: string, port: number)
   return matched;
 }
 
+/** Host key algorithms that yield a key of each known_hosts key type (an RSA key is offered under three signature names). */
+const HOST_KEY_ALGOS_FOR_TYPE: { [keyType: string]: string[] } = {
+  'ssh-ed25519': ['ssh-ed25519'],
+  'ecdsa-sha2-nistp256': ['ecdsa-sha2-nistp256'],
+  'ecdsa-sha2-nistp384': ['ecdsa-sha2-nistp384'],
+  'ecdsa-sha2-nistp521': ['ecdsa-sha2-nistp521'],
+  'ssh-rsa': ['rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa'],
+  'ssh-dss': ['ssh-dss']
+};
+/** ssh2's own default / supported host key lists (ed25519 only where this runtime's crypto has it): an exact list
+ *  given to ssh2 may only contain supported names, otherwise connect() throws. */
+const SSH2_HOST_KEY_LISTS: { defaults: string[]; supported: string[] } = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const c = require('ssh2/lib/protocol/constants');
+    if (Array.isArray(c.DEFAULT_SERVER_HOST_KEY) && Array.isArray(c.SUPPORTED_SERVER_HOST_KEY)) {
+      return { defaults: c.DEFAULT_SERVER_HOST_KEY.slice(), supported: c.SUPPORTED_SERVER_HOST_KEY.slice() };
+    }
+  } catch (_) {}
+  const fallback = ['ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521', 'rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa'];
+  return { defaults: fallback, supported: fallback };
+})();
+const DEFAULT_HOST_KEY_ALGOS = SSH2_HOST_KEY_LISTS.defaults;
+
+/**
+ * Host key algorithm order for a host, like OpenSSH: the key types already in known_hosts come first, so a server
+ * known by its RSA key presents that key instead of a newer ed25519 one (which used to be refused as a changed key).
+ * The other algorithms stay allowed after them. → undefined when nothing is known (ssh2's default order).
+ */
+export function orderHostKeyAlgorithms(knownKeyTypes: string[]): string[] | undefined {
+  const preferred: string[] = [];
+  for (const t of knownKeyTypes) {
+    for (const a of HOST_KEY_ALGOS_FOR_TYPE[t] || []) {
+      if (!preferred.includes(a) && SSH2_HOST_KEY_LISTS.supported.includes(a)) preferred.push(a);
+    }
+  }
+  if (preferred.length === 0) return undefined;
+  return preferred.concat(DEFAULT_HOST_KEY_ALGOS.filter((a) => !preferred.includes(a)));
+}
+
 async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
   if (items.length === 0) return;
   let idx = 0;
@@ -645,6 +685,13 @@ export class SshManager {
     return candidates;
   }
 
+  /** ssh2 `algorithms` for a host: prefer the host key types already known for it (see orderHostKeyAlgorithms). */
+  private hostKeyAlgorithmsFor(profile: SshHostProfile): { serverHostKey: string[] } | undefined {
+    const files = [path.join(os.homedir(), '.ssh', 'known_hosts'), this.knownHostsFilePath].filter(Boolean);
+    const order = orderHostKeyAlgorithms(loadKnownHostKeysForTarget(files, profile.host, profile.port).map((r) => r.keyType));
+    return order ? { serverHostKey: order } : undefined;
+  }
+
   private async verifyHostKey(profile: SshHostProfile, presentedKey: Buffer): Promise<{ ok: boolean; error?: string }> {
     const keyType = parseSshWireKeyType(presentedKey);
     const fingerprint = 'SHA256:' + crypto.createHash('sha256').update(presentedKey).digest('base64').replace(/=+$/, '');
@@ -746,6 +793,7 @@ export class SshManager {
                 sock: hopStream as any,
                 agent: defaultAgentSocket(),
                 readyTimeout: 20000,
+                algorithms: this.hostKeyAlgorithmsFor(hopProfile) as any,
                 hostVerifier: (key: Buffer, verify: (valid: boolean) => void) => {
                   this.verifyHostKey(hopProfile, key)
                     .then((res) => {
@@ -872,6 +920,7 @@ export class SshManager {
           username: profile.user,
           sock: sock as any,
           readyTimeout: 20000,
+          algorithms: this.hostKeyAlgorithmsFor(profile) as any,
           keepaliveInterval: 15000,
           keepaliveCountMax: 3,
           hostVerifier: (key: Buffer, verify: (valid: boolean) => void) => {

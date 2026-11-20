@@ -168,6 +168,18 @@ describe('GitMap Enhancements Suite', () => {
     }
   });
 
+  it('prefers host key types already in known_hosts, like OpenSSH', async () => {
+    const { orderHostKeyAlgorithms } = await import('../remote/sshManager');
+    assert.strictEqual(orderHostKeyAlgorithms([]), undefined, 'nothing known: ssh2 default order');
+    assert.strictEqual(orderHostKeyAlgorithms(['unknown-type']), undefined);
+    const rsaFirst = orderHostKeyAlgorithms(['ssh-rsa'])!;
+    assert.deepStrictEqual(rsaFirst.slice(0, 3), ['rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa'], 'a host known by its RSA key is asked for the RSA key first');
+    assert.ok(rsaFirst.includes('ecdsa-sha2-nistp256'), 'other algorithms stay allowed after the known ones');
+    assert.strictEqual(new Set(rsaFirst).size, rsaFirst.length, 'no duplicates');
+    const two = orderHostKeyAlgorithms(['ecdsa-sha2-nistp256', 'ssh-rsa'])!;
+    assert.strictEqual(two[0], 'ecdsa-sha2-nistp256');
+  });
+
   it('opens a file itself in an editor, and its folder in a terminal', async () => {
     const { resolveLaunchTarget } = await import('../server/launchers');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitmap-launch-'));
