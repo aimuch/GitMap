@@ -467,8 +467,8 @@ export class GitWorkflowService {
           '  if [ -e "$gd/$f" ]; then printf "1"; else printf "0"; fi',
           'done'
         ].join(' && ');
-        const [status, probeRes] = await Promise.all([
-          this.dataSource.getWorkingTreeStatus(repo),
+        const [conflictCount, probeRes] = await Promise.all([
+          this.countConflicts(repo),
           sshManager.execRemote(remote.hostId, probeScript)
         ]);
         const bits = String(probeRes.stdout || '').trim();
@@ -478,12 +478,12 @@ export class GitWorkflowService {
           cherryPickInProgress: bits[3] === '1',
           bisectInProgress: bits[4] === '1',
           revertInProgress: bits[5] === '1',
-          conflictCount: status.conflicted.length
+          conflictCount
         };
       }
 
-      const [status, gitDirRes] = await Promise.all([
-        this.dataSource.getWorkingTreeStatus(repo),
+      const [conflictCount, gitDirRes] = await Promise.all([
+        this.countConflicts(repo),
         this.dataSource.execGitRaw(repo, ['rev-parse', '--git-dir'])
       ]);
       const gitDirOut = gitDirRes.stdout.toString('utf8').trim();
@@ -495,7 +495,7 @@ export class GitWorkflowService {
         cherryPickInProgress: existsLocal('CHERRY_PICK_HEAD'),
         bisectInProgress: existsLocal('BISECT_START'),
         revertInProgress: existsLocal('REVERT_HEAD'),
-        conflictCount: status.conflicted.length
+        conflictCount
       };
     } catch (_) {
       return {
@@ -507,6 +507,15 @@ export class GitWorkflowService {
         conflictCount: 0
       };
     }
+  }
+
+  /**
+   * Number of unmerged (conflicted) paths. The status banner asks for this every 25 s and on every window focus,
+   * so it reads the index only (`git diff --diff-filter=U`) instead of running a full `git status -uall` scan.
+   */
+  private async countConflicts(repo: string): Promise<number> {
+    const { stdout } = await this.dataSource.execGitRaw(repo, ['diff', '--name-only', '-z', '--diff-filter=U']);
+    return stdout.toString('utf8').split('\0').filter(Boolean).length;
   }
 
   public async readConflictFile(repo: string, filePath: string): Promise<ConflictFileData> {
@@ -725,24 +734,26 @@ export class GitWorkflowService {
     const backupRef = `refs/gitmap-backup/rebase-${Date.now()}`;
     await this.dataSource.execGitRaw(repo, ['update-ref', backupRef, headHash]);
 
-    // Build todo list & editor message queue for `reword` and terminal `squash` groups
+    // Build todo list & editor message queue: Git opens GIT_EDITOR once per `reword`, and once at the END of a
+    // contiguous squash/fixup chain that contains at least one `squash` (a fixup-only chain opens no editor).
+    // The chain may end with a fixup ("squash B, fixup C"): the slot belongs there, otherwise every later message shifts.
     const todoLines: string[] = [];
     const editorMessages: Array<string | null> = [];
+    const isChain = (a: string) => a === 'squash' || a === 'fixup';
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i];
       todoLines.push(`${s.action} ${s.hash}`);
       if (s.action === 'reword') {
         editorMessages.push(s.message?.trim() ? s.message.trim() + '\n' : null);
-      } else if (s.action === 'squash') {
-        // Git opens GIT_EDITOR once at the end of a contiguous squash/fixup chain containing >=1 squash
-        let j = i + 1;
-        while (j < steps.length && (steps[j].action === 'squash' || steps[j].action === 'fixup')) {
-          j++;
+      } else if (isChain(s.action) && !(i + 1 < steps.length && isChain(steps[i + 1].action))) {
+        let hasSquash = false;
+        let message: string | null = null;
+        for (let k = i; k >= 0 && isChain(steps[k].action); k--) {
+          if (steps[k].action !== 'squash') continue;
+          hasSquash = true;
+          if (message === null && steps[k].message?.trim()) message = steps[k].message!.trim() + '\n'; // the last squash's message wins
         }
-        const nextIsChain = i + 1 < steps.length && (steps[i + 1].action === 'squash' || steps[i + 1].action === 'fixup');
-        if (!nextIsChain) {
-          editorMessages.push(s.message?.trim() ? s.message.trim() + '\n' : null);
-        }
+        if (hasSquash) editorMessages.push(message);
       }
     }
     const todoText = todoLines.join('\n') + '\n';

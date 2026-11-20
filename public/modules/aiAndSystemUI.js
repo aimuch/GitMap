@@ -17,6 +17,11 @@
   }
 
   function openModalShell(title, subtitle, wide) {
+    // Use the shared opener so the footer, icon, badge and width left by the previous feature modal are reset
+    const shared = window.GitMapFeatures && window.GitMapFeatures.openFeatureModal;
+    if (shared) {
+      return shared({ title, subtitle, width: wide ? 'min(1180px, 96vw)' : 'min(880px, 94vw)' }).bodyEl;
+    }
     const modal = document.getElementById('featureModal');
     const win = modal && modal.querySelector('.modal-window');
     const titleEl = document.getElementById('featureModalTitle');

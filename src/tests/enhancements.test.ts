@@ -22,7 +22,10 @@ describe('GitMap Enhancements Suite', () => {
         name: 'Dev Server',
         host: '10.0.0.5',
         port: 2222,
-        username: 'andy',
+        // Real SshHostProfile field names: the login is `user`, the jump host `proxyJump`
+        user: 'andy',
+        proxyJump: 'bastion.example.com',
+        alias: 'GPU box',
         authType: 'password',
         password: 'SUPER_SECRET_PASSWORD',
         passphrase: 'PRIVATE_KEY_PASSPHRASE',
@@ -34,6 +37,13 @@ describe('GitMap Enhancements Suite', () => {
     assert.strictEqual((sanitized[0] as any).password, undefined);
     assert.strictEqual((sanitized[0] as any).passphrase, undefined);
     assert.strictEqual(sanitized[0].host, '10.0.0.5');
+    assert.strictEqual(sanitized[0].user, 'andy', 'the SSH login must survive export');
+    assert.strictEqual(sanitized[0].proxyJump, 'bastion.example.com', 'ProxyJump must survive export');
+    assert.strictEqual(sanitized[0].alias, 'GPU box');
+    // Backups written by older versions used `username` / `jumpHost`: still understood
+    const legacy = sanitizeSshHostsForExport([{ host: 'h', username: 'old', jumpHost: 'j' }]);
+    assert.strictEqual(legacy[0].user, 'old');
+    assert.strictEqual(legacy[0].proxyJump, 'j');
 
     const payload: BackupPayload = {
       schemaVersion: 1,
@@ -103,6 +113,25 @@ describe('GitMap Enhancements Suite', () => {
       assert.strictEqual(searchRes.files.length, 1);
       assert.strictEqual(searchRes.totalMatches, 2);
       assert.strictEqual(searchRes.files[0].matches[0].line, 1);
+
+      // 1b. Without ripgrep on PATH the search must fall back to grep, not report "no matches"
+      if (process.platform !== 'win32') {
+        const binDir = path.join(tmpBase, 'bin-no-rg');
+        fs.mkdirSync(binDir);
+        for (const tool of ['grep', 'git']) {
+          const real = execFileSync('/bin/sh', ['-c', `command -v ${tool}`]).toString().trim();
+          if (real) fs.symlinkSync(real, path.join(binDir, tool));
+        }
+        const savedPath = process.env.PATH;
+        process.env.PATH = binDir;
+        try {
+          const noRg = await svc.searchContent(dirA, { query: 'GREETING', caseSensitive: true });
+          assert.notStrictEqual(noRg.engine, 'rg', 'rg is not installed here, so another engine must have run');
+          assert.strictEqual(noRg.totalMatches, 2, 'the fallback engine finds the same matches');
+        } finally {
+          process.env.PATH = savedPath;
+        }
+      }
 
       // 2. Folder diff
       const diff1 = await svc.compareFolders(dirA, dirB);

@@ -139,7 +139,9 @@ async function execLocal(cmd: string, args: string[], cwd: string, timeoutMs = 2
     });
     return { stdout: String(stdout || ''), stderr: String(stderr || ''), code: 0 };
   } catch (err: any) {
-    const code = typeof err?.code === 'number' ? err.code : 1;
+    // A missing binary (ENOENT) must not look like exit code 1, which rg / grep use for "no matches":
+    // otherwise searching on a machine without ripgrep silently returns nothing instead of falling back.
+    const code = typeof err?.code === 'number' ? err.code : err?.code === 'ENOENT' ? 127 : 1;
     return {
       stdout: String(err?.stdout || ''),
       stderr: String(err?.stderr || err?.message || ''),
@@ -500,11 +502,10 @@ export class EnhancementsService {
       // Load average + CPU count
       `LOAD=$(cat /proc/loadavg 2>/dev/null | awk '{print $1" "$2" "$3}');`,
       `CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1);`,
-      // Quick CPU sample from /proc/stat if available (non-blocking instant or 200ms delta)
-      `CPU=$(awk '/^cpu /{u=$2+$4; t=$2+$3+$4+$5+$6+$7+$8; print u, t}' /proc/stat 2>/dev/null);`,
+      // CPU % is estimated from the 1-minute load average ÷ cores (below), so no /proc/stat sample is taken
       `MEM=$(free -m 2>/dev/null | awk '/^Mem:/{print $3" "$2}');`,
       `DISK=$(df -hP ${target} 2>/dev/null | tail -n 1 | awk '{print $3" "$2" "$5" "$6}');`,
-      `printf 'LOAD=%s\\nCORES=%s\\nCPU=%s\\nMEM=%s\\nDISK=%s\\n' "$LOAD" "$CORES" "$CPU" "$MEM" "$DISK"`
+      `printf 'LOAD=%s\\nCORES=%s\\nMEM=%s\\nDISK=%s\\n' "$LOAD" "$CORES" "$MEM" "$DISK"`
     ].join(' ');
 
     const res = await sshManager.execRemote(hostId, script);

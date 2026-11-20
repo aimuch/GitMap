@@ -11,10 +11,17 @@ export interface BackupPayload {
     name?: string;
     host: string;
     port?: number;
+    /** SSH login name (SshHostProfile.user). */
+    user?: string;
+    /** Legacy name of `user` (backups written before 2026-11-20); still read on import and written for older GitMap versions. */
     username?: string;
     authType?: string;
     privateKeyPath?: string;
+    /** ProxyJump (SshHostProfile.proxyJump). */
+    proxyJump?: string;
+    /** Legacy name of `proxyJump`. */
     jumpHost?: string;
+    alias?: string;
     tags?: string[];
     defaultPath?: string;
   }>;
@@ -56,18 +63,27 @@ export interface UpdateCheckResult {
  */
 export function sanitizeSshHostsForExport(hosts: any[]): BackupPayload['sshHosts'] {
   if (!Array.isArray(hosts)) return [];
-  return hosts.map((h) => ({
-    id: typeof h.id === 'string' ? h.id : undefined,
-    name: typeof h.name === 'string' ? h.name : undefined,
-    host: String(h.host || ''),
-    port: typeof h.port === 'number' ? h.port : 22,
-    username: typeof h.username === 'string' ? h.username : undefined,
-    authType: typeof h.authType === 'string' ? h.authType : undefined,
-    privateKeyPath: typeof h.privateKeyPath === 'string' ? h.privateKeyPath : undefined,
-    jumpHost: typeof h.jumpHost === 'string' ? h.jumpHost : undefined,
-    tags: Array.isArray(h.tags) ? h.tags.map(String) : undefined,
-    defaultPath: typeof h.defaultPath === 'string' ? h.defaultPath : undefined
-  })).filter((h) => !!h.host);
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : undefined);
+  return hosts.map((h) => {
+    // SSH host profiles store the login as `user` and the jump host as `proxyJump` (SshHostProfile)
+    const user = str(h.user) || str(h.username);
+    const proxyJump = str(h.proxyJump) || str(h.jumpHost);
+    return {
+      id: str(h.id),
+      name: str(h.name),
+      host: String(h.host || ''),
+      port: typeof h.port === 'number' ? h.port : 22,
+      user,
+      username: user,
+      authType: str(h.authType),
+      privateKeyPath: str(h.privateKeyPath),
+      proxyJump,
+      jumpHost: proxyJump,
+      alias: str(h.alias),
+      tags: Array.isArray(h.tags) ? h.tags.map(String) : undefined,
+      defaultPath: str(h.defaultPath)
+    };
+  }).filter((h) => !!h.host);
 }
 
 export function createBackupEnvelope(payload: BackupPayload, passphrase?: string): BackupEnvelope {

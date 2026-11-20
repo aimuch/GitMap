@@ -1938,12 +1938,35 @@ body.vscode-light .hljs-deletion { color: #a31515; }
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
   font-family: var(--vscode-editor-font-family);
   font-size: 11.5px;
 }
 
+.fb-conn-summary > strong,
+.fb-conn-summary > .icon-slot,
+.fb-conn-summary > .status-dot {
+  flex: none;
+}
+
+.fb-conn-actions {
+  flex: none;
+}
+
+/* Narrow panes (split view): one line, the path is cut with an ellipsis instead of wrapping over the buttons */
+.fb-conn-summary .fb-conn-addr {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .fb-conn-meta {
+  flex: none;
+  white-space: nowrap;
   padding: 1px 7px;
   border-radius: 999px;
   background: rgba(63, 185, 80, 0.14);
@@ -4912,3 +4935,13 @@ body.resizing-y #workspaceSplitResizer {
 
 
 
+
+/* Subtitle of the shared feature modal (set by openFeatureModal) */
+.feature-modal-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}

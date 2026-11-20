@@ -818,7 +818,10 @@
 
   function rpc(method, params, timeoutMs) {
     const reqId = 'r' + (++reqCounter);
-    const effectiveTimeout = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : RPC_TIMEOUT_MS;
+    // Clone / fetch-all / LFS / submodules / rebase and every AI call can legitimately run longer than 60 s
+    // (the AI timeout setting defaults to 90 s): don't report a timeout while the server is still working.
+    const LONG_RPC = /^(ai:|git:clone$|repos:fetchAll$|git:lfsAction$|git:submoduleAction$|rebase:execute$|conflict:aiMerge$|hosting:(generatePrDraft|createPr|checkoutPr)$|git:nlSearch$|repos:scanLocal$|ssh:scanRepos$|search:content$|diff:folders$)/;
+    const effectiveTimeout = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : LONG_RPC.test(method) ? 15 * 60 * 1000 : RPC_TIMEOUT_MS;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         if (pendingRpc.has(reqId)) {
@@ -1089,7 +1092,8 @@
   function filterGitMapByRepoFile(entryFullPath) {
     if (!state.activeRepo || !entryFullPath) return;
     const disp = parseRepoDisplay(state.activeRepo);
-    const repoRoot = (disp && disp.rawPath) || state.activeRepo;
+    // parseRepoDisplay gives the remote path for ssh:// repos and the folder for local ones (there's no `rawPath`)
+    const repoRoot = (disp && (disp.isRemote ? disp.remotePath : disp.fullDisplay)) || state.activeRepo;
     let rel = String(entryFullPath).replace(/\\/g, '/');
     const normRoot = String(repoRoot).replace(/\\/g, '/').replace(/\/+$/, '');
     if (rel.startsWith(normRoot + '/')) rel = rel.slice(normRoot.length + 1);
@@ -1110,22 +1114,28 @@
       await openRepoFilesTab(true);
     }
     const parts = cleanRel.split('/');
-    const fileName = parts[parts.length - 1];
     const dirParts = parts.slice(0, -1);
+    const info = activeRepoTarget();
+    if (!info) return;
+    // Open the folder that holds the file first (the browser only lists one folder), then find its row by full path
+    const root = (info.isRemote ? info.remotePath : info.fullDisplay).replace(/[\\/]+$/, '');
+    const sep = !info.isRemote && root.includes('\\') ? '\\' : '/';
+    const fullPath = root + sep + parts.join(sep);
+    try {
+      await repoFilesBrowser.navigate(dirParts.length ? root + sep + dirParts.join(sep) : root, { push: true });
+    } catch (_) {}
     setTimeout(() => {
-      const panel = document.getElementById('repoFilesPanel') || document.querySelector('[data-tab-panel="repo-files"]');
+      const panel = document.getElementById('panel-files');
       if (!panel) return;
-      const filterInput = panel.querySelector('.fb-filter');
-      if (filterInput && dirParts.length === 0) {
+      const filterInput = panel.querySelector('.fb-filter-input');
+      if (filterInput && filterInput.value) {
         filterInput.value = '';
+        filterInput.dispatchEvent(new Event('input', { bubbles: true }));
       }
-      const rows = panel.querySelectorAll('.fb-row');
+      const norm = (p) => String(p || '').replace(/\\/g, '/');
       let matchedRow = null;
-      rows.forEach((r) => {
-        const title = String(r.getAttribute('title') || '').replace(/\\/g, '/');
-        if (title.endsWith('/' + cleanRel) || title === cleanRel || r.querySelector('.fb-name')?.textContent === fileName) {
-          matchedRow = r;
-        }
+      panel.querySelectorAll('.fb-row').forEach((r) => {
+        if (norm(r.getAttribute('title')) === norm(fullPath)) matchedRow = r;
       });
       if (matchedRow) {
         matchedRow.scrollIntoView({ block: 'center', behavior: 'smooth' });

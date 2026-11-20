@@ -250,19 +250,23 @@ body {
   #controls .controlLabel {
     display: none !important;
   }
+  /* Hide a header together with its cells (web/main.ts markup: th.dateCol / td.dateCol, th[data-col="4"] / td.hashCol),
+     otherwise every column to the right shows the wrong data under the wrong header */
   #commitTable td.dateCol,
-  #commitTable th[data-col="Date"],
-  #commitTable td.commitCol,
-  #commitTable th[data-col="Commit"] {
+  #commitTable th.dateCol,
+  #commitTable td.hashCol,
+  #commitTable th[data-col="4"] {
     display: none !important;
   }
 }
 
 @media (max-width: 520px) {
   #commitTable td.authorCol,
-  #commitTable th[data-col="Author"],
-  #commitTable td.statsCol,
-  #commitTable th[data-col="Changes"] {
+  #commitTable th.authorCol,
+  #commitTable td.changesCol,
+  #commitTable th.changesCol,
+  #commitTable td.fileChangesCol,
+  #commitTable th.fileChangesCol {
     display: none !important;
   }
   #fetchBtn span,

@@ -55,6 +55,11 @@
     } else {
       badge.classList.add('hidden');
     }
+    const subtitle = document.getElementById('featureModalSubtitle');
+    if (subtitle) {
+      subtitle.textContent = opts.subtitle || '';
+      subtitle.classList.toggle('hidden', !opts.subtitle);
+    }
     const bodyEl = document.getElementById('featureModalBody');
     const footerEl = document.getElementById('featureModalFooter');
     bodyEl.innerHTML = opts.bodyHtml || '';
@@ -1762,9 +1767,18 @@
       refreshAllStatusesAndContext();
     }
   }, 25000);
-  window.addEventListener('focus', () => refreshAllStatusesAndContext());
+  // Each refresh runs `git status` on every repo: switching windows back and forth shouldn't do that more than every 5 s
+  let lastFocusRefresh = 0;
+  window.addEventListener('focus', () => {
+    if (Date.now() - lastFocusRefresh < 5000) return;
+    lastFocusRefresh = Date.now();
+    refreshAllStatusesAndContext();
+  });
 
   window.GitMapFeatures = {
+    // The one opener of the shared #featureModal: resets icon, badge, subtitle, width and footer,
+    // and invalidates earlier modals' async callbacks (public/modules/*.js use it too)
+    openFeatureModal,
     openCommandPalette,
     openHunkStagingModal,
     openConflictResolverTab,

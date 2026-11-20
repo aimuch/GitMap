@@ -13,6 +13,11 @@
   }
 
   function openModalShell(title, subtitle, wide) {
+    // Use the shared opener so the footer, icon, badge and width left by the previous feature modal are reset
+    const shared = window.GitMapFeatures && window.GitMapFeatures.openFeatureModal;
+    if (shared) {
+      return shared({ title, subtitle, width: wide ? 'min(1180px, 96vw)' : 'min(880px, 94vw)' }).bodyEl;
+    }
     const modal = document.getElementById('featureModal');
     const win = modal && modal.querySelector('.modal-window');
     const titleEl = document.getElementById('featureModalTitle');
@@ -55,7 +60,7 @@
     }
     const body = openModalShell(
       T('子模块与 Git LFS 管理', 'Submodules & Git LFS'),
-      app.parseRepoDisplay(targetRepo).label,
+      app.parseRepoDisplay(targetRepo).name,
       false
     );
     if (!body) return;
@@ -213,8 +218,8 @@
         if (!badges.length) badges.push(`<span class="gm-badge ok">${esc(T('干净', 'Clean'))}</span>`);
         return `<div class="gm-enh-card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer" data-jump-repo="${esc(s.repo)}">
           <div>
-            <div style="font-weight:600">${esc(disp.label)}</div>
-            <div style="font-size:11.5px;color:var(--text-2)">${esc(disp.sub || s.repo)}</div>
+            <div style="font-weight:600">${esc(disp.name)}</div>
+            <div style="font-size:11.5px;color:var(--text-2)">${esc(disp.fullDisplay || s.repo)}</div>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end">${badges.join('')}</div>
         </div>`;
@@ -264,7 +269,7 @@
           const dt = h.date ? new Date(h.date * 1000).toLocaleString() : '';
           return `<div class="gm-enh-card" style="cursor:pointer" data-hit-repo="${esc(h.repo)}" data-hit-hash="${esc(h.hash)}">
             <div class="gm-enh-card-head">
-              <span><span class="gm-badge info">${esc(disp.label)}</span> <code>${esc(h.shortHash)}</code> ${esc(h.subject)}</span>
+              <span><span class="gm-badge info">${esc(disp.name)}</span> <code>${esc(h.shortHash)}</code> ${esc(h.subject)}</span>
               <span style="font-size:11px;color:var(--text-2);font-weight:400">${esc(h.author)} · ${esc(dt)}</span>
             </div>
           </div>`;
@@ -315,7 +320,7 @@
     const disp = app.parseRepoDisplay(target);
     const body = openModalShell(
       T('全局文件内容搜索 (rg / git grep)', 'Global Full-Text Content Search'),
-      `${disp.label} (${disp.sub || target})`,
+      `${disp.name} (${disp.fullDisplay || target})`,
       true
     );
     if (!body) return;

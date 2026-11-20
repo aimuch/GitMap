@@ -1174,7 +1174,8 @@ export class GitMapServer {
         await fs.promises.mkdir(localParent, { recursive: true });
         const fullLocal = path.join(localParent, repoFolderName);
         await new Promise<void>((resolve, reject) => {
-          cp.execFile('git', ['clone', '--', url, fullLocal], { cwd: localParent }, (err, _stdout, stderr) => {
+          // No terminal to type a password into: fail fast with git's message instead of hanging on a hidden prompt
+          cp.execFile('git', ['clone', '--', url, fullLocal], { cwd: localParent, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, _stdout, stderr) => {
             if (err) reject(new Error(String(stderr || err.message).trim()));
             else resolve();
           });
@@ -1698,6 +1699,7 @@ export class GitMapServer {
         const to = path.posix.join(path.posix.dirname(from), name);
         const res = await sshManager.execRemote(hostId, `if [ -e ${quotePosixArg(to)} ]; then echo 'A file or folder with that name already exists.' >&2; exit 1; fi; mv ${quotePosixArg(from)} ${quotePosixArg(to)}`);
         if (res.code !== 0) throw new Error(res.stderr.trim() || 'Unable to rename.');
+        RepoFileWatcher.notifyPossibleRemoteChange(250);
         return { path: to };
       }
 
@@ -2216,24 +2218,31 @@ export class GitMapServer {
         }
         let restoredHosts = 0;
         if (Array.isArray(payload.sshHosts)) {
-          const existing = new Map(sshManager.listHosts().map((h: any) => [`${h.username || ''}@${h.host}:${h.port || 22}`, h]));
+          // Profiles store the login as `user` and the jump host as `proxyJump`; backups written before 2026-11-20 used
+          // `username` / `jumpHost` (and lost the values), so read both
+          const keyOf = (user: string, host: string, port: number) => `${user}@${host.toLowerCase()}:${port}`;
+          const existing = new Set(sshManager.listHosts().map((h) => keyOf(h.user || '', h.host, h.port || 22)));
           for (const h of payload.sshHosts) {
             if (!h || !h.host) continue;
-            const key = `${h.username || ''}@${h.host}:${h.port || 22}`;
-            if (!existing.has(key)) {
-              await sshManager.saveHost({
-                name: h.name || h.host,
-                host: h.host,
-                port: h.port || 22,
-                username: h.username || os.userInfo().username,
-                authType: (h.authType === 'password' || h.authType === 'agent' || h.authType === 'key' ? h.authType : 'agent') as any,
-                privateKeyPath: h.privateKeyPath,
-                jumpHost: h.jumpHost,
-                tags: h.tags,
-                defaultPath: h.defaultPath
-              } as any);
-              restoredHosts++;
+            const user = String(h.user || h.username || '').trim() || os.userInfo().username;
+            const port = Number(h.port) || 22;
+            const key = keyOf(user, h.host, port);
+            if (existing.has(key)) continue;
+            const profile = await sshManager.saveHost({
+              name: h.name || h.host,
+              host: h.host,
+              port,
+              user,
+              authType: h.authType === 'password' || h.authType === 'agent' || h.authType === 'key' || h.authType === 'auto' ? h.authType : 'auto',
+              privateKeyPath: h.privateKeyPath,
+              proxyJump: h.proxyJump || h.jumpHost,
+              defaultPath: h.defaultPath
+            });
+            if ((h.alias && h.alias.trim()) || (Array.isArray(h.tags) && h.tags.length > 0)) {
+              await sshManager.updateHostMeta(profile.id, h.alias, h.tags);
             }
+            existing.add(key);
+            restoredHosts++;
           }
         }
         return {

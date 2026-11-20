@@ -594,6 +594,40 @@ describe('GitMap 11 Advanced Features End-to-End Suite', () => {
     assert.equal(fs.readFileSync(path.join(repoDir, 'a.txt'), 'utf8'), 'v1-fixed\n');
   });
 
+  it('Feature 3b: a squash chain that ends with a fixup still gets its message, and later rewords keep theirs', async () => {
+    const repoDir = path.join(tmpRoot, 'repo-rebase-chain');
+    fs.mkdirSync(repoDir, { recursive: true });
+    execGitSync(repoDir, ['init', '-b', 'main']);
+    execGitSync(repoDir, ['config', 'user.name', 'Andy']);
+    execGitSync(repoDir, ['config', 'user.email', 'andy@example.com']);
+    fs.writeFileSync(path.join(repoDir, 'base.txt'), 'root\n');
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '-m', 'chore: root']);
+    const rootHash = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+    for (const [file, subject] of [['a.txt', 'feat: A'], ['b.txt', 'feat: B'], ['c.txt', 'fix: C'], ['d.txt', 'feat: D']]) {
+      fs.writeFileSync(path.join(repoDir, file), subject + '\n');
+      execGitSync(repoDir, ['add', '.']);
+      execGitSync(repoDir, ['commit', '-m', subject]);
+    }
+    const { root: repo } = await rpc.call('repos:add', { path: repoDir });
+    const prep = await rpc.call('rebase:prepare', { repo, base: rootHash });
+    const [a, b, c, d] = prep.commits;
+    // Git opens the editor once at the end of [squash B, fixup C] (the chain contains a squash), then once for the reword
+    await rpc.call('rebase:execute', {
+      repo,
+      baseHash: prep.baseHash,
+      steps: [
+        { hash: a.hash, action: 'pick' },
+        { hash: b.hash, action: 'squash', message: 'feat: A and B together' },
+        { hash: c.hash, action: 'fixup' },
+        { hash: d.hash, action: 'reword', message: 'feat: D (renamed)' }
+      ]
+    });
+    const subjects = execGitSync(repoDir, ['log', '--format=%s', `${rootHash}..HEAD`]).trim().split(/\r?\n/);
+    assert.deepEqual(subjects, ['feat: D (renamed)', 'feat: A and B together']);
+    for (const f of ['a.txt', 'b.txt', 'c.txt', 'd.txt']) assert.ok(fs.existsSync(path.join(repoDir, f)), `${f} is kept`);
+  });
+
   it('Feature 4 & 7: manages Git worktrees (add / list / remove) and Command Palette refs & checkout', async () => {
     const repoDir = path.join(tmpRoot, 'repo-worktree');
     const wtDir = path.join(tmpRoot, 'repo-worktree-wt');
