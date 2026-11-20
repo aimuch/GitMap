@@ -2747,7 +2747,7 @@
       let wrapLines = localStorage.getItem('gitmap.viewer.wrapLines') !== '0';
       const richPreviewKind = window.GitMapEditorPreview ? window.GitMapEditorPreview.getPreviewKind(fileRes.filePath) : null;
       let richPreviewActive = richPreviewKind === 'pdf' || richPreviewKind === 'audio' || richPreviewKind === 'video';
-      const canEdit = !fileRes.commit && !fileRes.truncated && typeof payload.inlineContent !== 'string' && !!(fileRes.repo || fileRes.sourceUri || payload.filePath) && !['pdf', 'audio', 'video'].includes(richPreviewKind || '');
+      const canEdit = !fileRes.commit && !fileRes.truncated && !fileRes.notUtf8 && typeof payload.inlineContent !== 'string' && !!(fileRes.repo || fileRes.sourceUri || payload.filePath) && !['pdf', 'audio', 'video'].includes(richPreviewKind || '');
       let draftContent = typeof payload.initialDraft === 'string' ? payload.initialDraft : fileRes.content;
       const startInEdit = Boolean(canEdit && payload.startEditing);
       const initialEditorState = startInEdit
@@ -2824,6 +2824,7 @@
               <span class="viewer-path" title="${escapeHtml(fileRes.filePath)}">${escapeHtml(fileRes.filePath)}${fileRes.commit ? ' @ ' + escapeHtml(fileRes.commit.slice(0, 8)) : ''}</span>
               ${isEditing ? `<span class="viewer-dirty-badge${dirtyNow ? '' : ' hidden'}">● ${escapeHtml(zh ? '未保存' : 'Unsaved')}</span>` : ''}
               ${fileRes.truncated ? `<span class="diff-stat-del">${escapeHtml(tr('truncatedDiffNotice'))}</span>` : ''}
+              ${fileRes.notUtf8 ? `<span class="diff-stat-del" title="${escapeHtml(zh ? '在 GitMap 里保存会把不认识的字节换成 �，所以只读显示' : 'Saving from GitMap would replace the unknown bytes with �, so it is read-only')}">${escapeHtml(zh ? '不是 UTF-8 编码（如 GBK），只读显示' : 'Not UTF-8 (e.g. GBK): read-only')}</span>` : ''}
             </div>
             <div class="viewer-toolbar-right">
               ${canEdit ? (

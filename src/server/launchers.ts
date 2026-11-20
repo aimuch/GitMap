@@ -30,8 +30,10 @@ export interface LauncherApp {
 
 export interface LaunchTarget {
   isRemote: boolean;
-  /** Local path, or the path on the SSH host. */
+  /** Local path, or the path on the SSH host. A file only for editors (terminals always get its folder). */
   path: string;
+  /** `path` is a file (editors open the file itself instead of its folder). */
+  isFile?: boolean;
   profile: SshHostProfile | null;
 }
 
@@ -493,13 +495,14 @@ function vscodeLike(id: string, name: string, macApp: string, cliName: string): 
       const location = requireLocation(ctx, name);
       const cli = location.endsWith('.app') ? path.join(location, 'Contents', 'Resources', 'app', 'bin', cliName) : location;
       const authority = ctx.target.isRemote ? vscodeSshAuthority(ctx.target.profile!) : '';
+      const remoteUri = `vscode-remote://ssh-remote+${encodeURIComponent(authority)}${ctx.target.path}`;
+      // A remote file needs --file-uri (a bare path after --remote is opened as a folder)
       const args = ctx.target.isRemote
-        ? ['--remote', `ssh-remote+${authority}`, ctx.target.path]
+        ? (ctx.target.isFile ? ['--file-uri', remoteUri] : ['--remote', `ssh-remote+${authority}`, ctx.target.path])
         : [ctx.target.path];
       if (location.endsWith('.app') && !fs.existsSync(cli)) {
         if (ctx.target.isRemote) {
-          const uri = `vscode-remote://ssh-remote+${encodeURIComponent(authority)}${ctx.target.path}`;
-          await runAndWait('open', ['-a', location, '--args', '--folder-uri', uri]);
+          await runAndWait('open', ['-a', location, '--args', ctx.target.isFile ? '--file-uri' : '--folder-uri', remoteUri]);
         } else {
           await runAndWait('open', ['-a', location, ctx.target.path]);
         }
@@ -624,16 +627,29 @@ function defaultEditorId(): string | null {
  * Resolve a repository key / path into a launch target.
  * @param location A local path, or an ssh:// URI (`ssh://host/path`).
  */
-export async function resolveLaunchTarget(location: string): Promise<LaunchTarget> {
+/**
+ * Where to open a location. keepFile: an editor opens a file itself ("Open in Editor" on a file); terminals need
+ * a folder, so they get the file's folder.
+ */
+export async function resolveLaunchTarget(location: string, keepFile: boolean = false): Promise<LaunchTarget> {
   const remote = parseRemoteRepo(location);
   if (remote !== null) {
     const profile = sshManager.resolveProfile(remote.hostId);
-    return { isRemote: true, path: remote.remotePath, profile };
+    let isFile = false;
+    try {
+      const sftp = await sshManager.getSftp(remote.hostId);
+      isFile = await new Promise<boolean>((resolve) => sftp.stat(remote.remotePath, (err, st) => resolve(!err && !!st && st.isFile())));
+    } catch (_) {
+      /* not connected: treat it as a folder, as before */
+    }
+    if (isFile && !keepFile) return { isRemote: true, path: path.posix.dirname(remote.remotePath), profile };
+    return { isRemote: true, path: remote.remotePath, isFile, profile };
   }
   const local = location.startsWith('~') ? path.join(os.homedir(), location.slice(1)) : location;
-  if (!fs.existsSync(local)) throw new Error(`The folder "${local}" doesn't exist.`);
-  const stat = fs.statSync(local);
-  return { isRemote: false, path: stat.isDirectory() ? local : path.dirname(local), profile: null };
+  if (!fs.existsSync(local)) throw new Error(`"${local}" doesn't exist.`);
+  const isFile = !fs.statSync(local).isDirectory();
+  if (isFile && !keepFile) return { isRemote: false, path: path.dirname(local), profile: null };
+  return { isRemote: false, path: local, isFile, profile: null };
 }
 
 function fillTemplate(template: string, target: LaunchTarget): string {
@@ -653,8 +669,9 @@ async function runCustom(template: string, target: LaunchTarget, kind: string) {
     throw new Error(`The custom ${kind} command doesn't use {sshCommand}, {host} or {sshUri}, so it can't open a remote SSH path.`);
   }
   const command = fillTemplate(template, target);
-  if (PLATFORM === 'win32') await spawnDetached('cmd.exe', ['/c', command], { cwd: target.isRemote ? os.homedir() : target.path });
-  else await spawnDetached('/bin/sh', ['-c', command], { cwd: target.isRemote ? os.homedir() : target.path });
+  const cwd = target.isRemote ? os.homedir() : target.isFile ? path.dirname(target.path) : target.path;
+  if (PLATFORM === 'win32') await spawnDetached('cmd.exe', ['/c', command], { cwd });
+  else await spawnDetached('/bin/sh', ['-c', command], { cwd });
 }
 
 async function launchWith(defs: AppDefinition[], appId: string, target: LaunchTarget, kind: string) {
@@ -691,7 +708,7 @@ export async function openInTerminal(location: string, settings: LauncherSetting
 }
 
 export async function openInEditor(location: string, settings: LauncherSettings): Promise<string> {
-  const target = await resolveLaunchTarget(location);
+  const target = await resolveLaunchTarget(location, true);
   const appId = settings.editorApp && settings.editorApp !== 'auto' ? settings.editorApp : defaultEditorId();
   if (appId === null) throw new Error('No supported code editor was found. Choose one, or set a custom command, in Settings.');
   if (appId === 'custom') {

@@ -119,6 +119,12 @@ function fastLargeFileDiff(oldLines: string[], newLines: string[]): { rows: Diff
   return { rows, additions: addCount, deletions: delCount };
 }
 
+/** The bytes aren't valid UTF-8 (decoding replaced something), so the text can't be written back unchanged. */
+export function isLossyUtf8(bytes: Buffer, decoded?: string): boolean {
+  const text = decoded !== undefined ? decoded : bytes.toString('utf8');
+  return text.includes('\uFFFD') && !Buffer.from(text, 'utf8').equals(bytes);
+}
+
 export class DiffService {
   constructor(private readonly dataSource: DataSource) {}
 
@@ -126,7 +132,7 @@ export class DiffService {
     repo: string,
     commit: string | null,
     filePath: string
-  ): Promise<{ content: string; isBinary: boolean; truncated: boolean; error: string | null }> {
+  ): Promise<{ content: string; isBinary: boolean; truncated: boolean; error: string | null; notUtf8?: boolean }> {
     if (!commit || commit === UNCOMMITTED) {
       const buf = await readRepoFileBuffer(repo, filePath, MAX_DIFF_BYTES + 1);
       if (buf === null) {
@@ -136,11 +142,15 @@ export class DiffService {
         return { content: '', isBinary: true, truncated: false, error: null };
       }
       const truncated = buf.length > MAX_DIFF_BYTES;
+      const slice = buf.subarray(0, MAX_DIFF_BYTES);
+      const content = slice.toString('utf8');
       return {
-        content: buf.subarray(0, MAX_DIFF_BYTES).toString('utf8'),
+        content,
         isBinary: false,
         truncated,
-        error: null
+        error: null,
+        // GBK / Latin-1 … shown as UTF-8 has replacement characters: saving it back would destroy the original bytes
+        notUtf8: !truncated && isLossyUtf8(slice, content)
       };
     }
 

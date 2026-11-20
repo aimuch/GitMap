@@ -45,7 +45,7 @@ import {
   updateStandaloneSetting,
   updateStandaloneSettingsBatch
 } from '../platform/vscode';
-import { formatRemoteRepoUri, isRemoteRepo, parseRemoteRepo } from '../remote/repoTransport';
+import { formatRemoteRepoUri, isRemoteRepo, parseRemoteRepo, readRepoFileBuffer } from '../remote/repoTransport';
 import { quotePosixArg, RemoteDirectoryEntry, sshManager } from '../remote/sshManager';
 import { TransferDirection, transferManager } from '../remote/transferManager';
 import { RemoveFromHistory } from '../removeFromHistory';
@@ -56,7 +56,7 @@ import { EventEmitter as GitMapEventEmitter } from '../utils/event';
 import { fsmRegistry } from '../utils/fsm';
 import { VisualFileHistory } from '../visualFileHistory';
 import { AiAssistantService } from './aiAssistantService';
-import { DiffService } from './diffService';
+import { DiffService, isLossyUtf8 } from './diffService';
 import { EnhancementsService } from './enhancementsService';
 import { buildPartialHunkPatch, GitWorkflowService } from './gitWorkflowService';
 import { HostingProviderKind, HostingService } from './hostingService';
@@ -1846,6 +1846,7 @@ export class GitMapServer {
             content: textRes.content,
             isBinary: textRes.isBinary,
             truncated: textRes.truncated,
+            notUtf8: !!textRes.notUtf8,
             error: textRes.error,
             blame
           };
@@ -1882,6 +1883,7 @@ export class GitMapServer {
           isBinary,
           error: null,
           truncated,
+          notUtf8: !isBinary && !truncated && isLossyUtf8(buf),
           blame: null
         };
       }
@@ -1890,6 +1892,15 @@ export class GitMapServer {
         const repo = String(params.repo || '');
         const filePath = String(params.filePath || '');
         const content = String(params.content ?? '');
+        // Never overwrite a file that isn't UTF-8: the editor only had a lossy UTF-8 view of it
+        const existing = repo
+          ? await readRepoFileBuffer(repo, filePath, 32 * 1024 * 1024).catch(() => null)
+          : isRemoteRepo(filePath)
+            ? await sshManager.readRemoteFile(parseRemoteRepo(filePath)!.hostId, parseRemoteRepo(filePath)!.remotePath).catch(() => null)
+            : await fs.promises.readFile(this.assertAllowedLocalPath(filePath)).catch(() => null);
+        if (existing && !existing.subarray(0, 8192).includes(0) && isLossyUtf8(existing)) {
+          throw new Error('This file isn\'t UTF-8 encoded (e.g. GBK); saving from GitMap would corrupt it. Edit it in an editor that keeps its encoding.');
+        }
         if (repo) {
           await this.workflowService.writeRepoWorkingFile(repo, filePath, content);
           return { ok: true };

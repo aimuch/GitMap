@@ -960,6 +960,18 @@ describe('GitMap 11 Advanced Features End-to-End Suite', () => {
       fs.rmSync(trashTarget, { force: true });
     }
 
+    // A GBK file is shown read-only and can't be overwritten (saving a lossy UTF-8 view would destroy its bytes)
+    const gbkFile = path.join(repoDir, 'gbk.txt');
+    const gbkBytes = Buffer.from([0xc4, 0xe3, 0xba, 0xc3, 0x0a]); // "你好\n" in GBK
+    fs.writeFileSync(gbkFile, gbkBytes);
+    const gbkRead = await rpc.call('file:read', { filePath: gbkFile });
+    assert.equal(gbkRead.notUtf8, true, 'non-UTF-8 text is flagged');
+    await assert.rejects(rpc.call('file:write', { filePath: gbkFile, content: 'overwritten' }), /UTF-8/);
+    assert.ok(fs.readFileSync(gbkFile).equals(gbkBytes), 'the GBK bytes are untouched');
+    const utf8Read = await rpc.call('file:read', { filePath: path.join(repoDir, 'README.md') }).catch(() => null);
+    if (utf8Read) assert.notEqual(utf8Read.notUtf8, true, 'plain UTF-8 stays editable');
+    fs.rmSync(gbkFile, { force: true });
+
     // Remote SSH createFile + nested mkdir
     const sshMk = await rpc.call('ssh:mkdir', { hostId: 'tunnel-box', path: remoteHome, name: 'remote-repo/pkg' });
     assert.equal(fs.existsSync(sshMk.path), true);

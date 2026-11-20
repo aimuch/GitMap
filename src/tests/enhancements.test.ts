@@ -168,6 +168,25 @@ describe('GitMap Enhancements Suite', () => {
     }
   });
 
+  it('opens a file itself in an editor, and its folder in a terminal', async () => {
+    const { resolveLaunchTarget } = await import('../server/launchers');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitmap-launch-'));
+    try {
+      const file = path.join(dir, 'main.ts');
+      fs.writeFileSync(file, 'export {};\n');
+      const forEditor = await resolveLaunchTarget(file, true);
+      assert.strictEqual(forEditor.path, file, 'editors get the file');
+      assert.strictEqual(forEditor.isFile, true);
+      const forTerminal = await resolveLaunchTarget(file);
+      assert.strictEqual(forTerminal.path, dir, 'terminals get the folder');
+      const folder = await resolveLaunchTarget(dir, true);
+      assert.strictEqual(folder.path, dir);
+      assert.strictEqual(folder.isFile, false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('verifies modular frontend assets are wired into public/index.html', () => {
     const rootDir = path.resolve(__dirname, '..', '..');
     const html = fs.readFileSync(path.join(rootDir, 'public', 'index.html'), 'utf8');
