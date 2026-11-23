@@ -1074,6 +1074,14 @@
       else if (data.action === 'open-command-palette') window.GitMapFeatures?.openCommandPalette();
       else if (data.action === 'open-shortcuts') window.GitMapSystemUI?.openShortcutsModal();
       else if (data.action === 'open-content-search') window.GitMapRemoteAndGitUI?.openContentSearchModal();
+      else if (data.action === 'open-commit-compare') {
+        window.GitMapRemoteAndGitUI?.openCommitCompareModal({
+          leftRef: data.leftRef || null,
+          leftHash: data.leftHash || null,
+          rightRef: data.rightRef || null,
+          rightHash: data.rightHash || null
+        });
+      }
       else if (data.action === 'locate-repo-file' && data.filePath) {
         locateFileInRepoBrowser(String(data.filePath));
       }
@@ -1149,17 +1157,294 @@
     }, 280);
   }
 
-  /* ==================== Toast Notifications ==================== */
-  function showToast(message, level) {
+  /* ==================== Toast Notifications (Sonner-style stacking + Undo action) ==================== */
+  const MAX_VISIBLE_TOASTS = 4;
+  function showToast(message, level, opts) {
     const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const options = opts && typeof opts === 'object' ? opts : {};
+    const kind = level || 'info';
+    const duration = typeof options.duration === 'number'
+      ? options.duration
+      : options.actionLabel
+        ? 8500
+        : kind === 'error'
+          ? 7000
+          : 4200;
+
+    // Cap visible toast stack cleanly
+    while (container.children.length >= MAX_VISIBLE_TOASTS) {
+      container.firstElementChild.remove();
+    }
+
     const el = document.createElement('div');
-    el.className = 'toast ' + (level || 'info');
-    el.innerHTML = `<span>${escapeHtml(message)}</span><button class="mini-icon-btn" aria-label="Dismiss">${ICONS.close}</button>`;
-    el.querySelector('button').addEventListener('click', () => el.remove());
+    el.className = 'toast ' + kind;
+    const detailHtml = options.detail ? `<span class="toast-detail">${escapeHtml(options.detail)}</span>` : '';
+    const actionHtml = options.actionLabel && typeof options.onAction === 'function'
+      ? `<button type="button" class="toast-action-btn">${escapeHtml(options.actionLabel)}</button>`
+      : '';
+    el.innerHTML = `
+      <div class="toast-body">
+        <span>${escapeHtml(message)}</span>
+        ${detailHtml}
+      </div>
+      <div class="toast-actions">
+        ${actionHtml}
+        <button type="button" class="mini-icon-btn toast-close-btn" aria-label="Dismiss">${ICONS.close}</button>
+      </div>
+      ${duration > 0 ? '<div class="toast-progress"></div>' : ''}
+    `;
+
+    let closed = false;
+    let remaining = duration;
+    let startedAt = Date.now();
+    let timerId = null;
+    const progressEl = el.querySelector('.toast-progress');
+
+    const dismiss = () => {
+      if (closed) return;
+      closed = true;
+      if (timerId) clearTimeout(timerId);
+      el.classList.add('toast-leaving');
+      setTimeout(() => { if (el.parentNode) el.remove(); }, 170);
+    };
+
+    const scheduleTimer = () => {
+      if (closed || duration <= 0) return;
+      startedAt = Date.now();
+      if (progressEl) {
+        progressEl.style.transition = `transform ${remaining}ms linear`;
+        requestAnimationFrame(() => {
+          if (!closed && progressEl) progressEl.style.transform = 'scaleX(0)';
+        });
+      }
+      timerId = setTimeout(dismiss, remaining);
+    };
+
+    const pauseTimer = () => {
+      if (closed || duration <= 0 || !timerId) return;
+      clearTimeout(timerId);
+      timerId = null;
+      const elapsed = Date.now() - startedAt;
+      remaining = Math.max(800, remaining - elapsed);
+      if (progressEl) {
+        const ratio = Math.max(0, Math.min(1, remaining / duration));
+        progressEl.style.transition = 'none';
+        progressEl.style.transform = `scaleX(${ratio})`;
+      }
+    };
+
+    el.addEventListener('mouseenter', pauseTimer);
+    el.addEventListener('mouseleave', scheduleTimer);
+    el.addEventListener('focusin', pauseTimer);
+    el.addEventListener('focusout', scheduleTimer);
+
+    const closeBtn = el.querySelector('.toast-close-btn');
+    if (closeBtn) closeBtn.addEventListener('click', dismiss);
+
+    const actionBtn = el.querySelector('.toast-action-btn');
+    if (actionBtn) {
+      actionBtn.addEventListener('click', async () => {
+        pauseTimer();
+        actionBtn.disabled = true;
+        try {
+          await options.onAction();
+          dismiss();
+        } catch (err) {
+          actionBtn.disabled = false;
+          showToast(err && err.message ? err.message : String(err), 'error');
+        }
+      });
+    }
+
     container.appendChild(el);
-    setTimeout(() => {
-      if (el.parentNode) el.remove();
-    }, level === 'error' ? 7000 : 4000);
+    scheduleTimer();
+    return { dismiss };
+  }
+
+  /* ==================== Shared Reusable UI Primitives (2-Step Danger & Quick AI Model Pill) ==================== */
+  function bindTwoStepDangerButton(btn, opts) {
+    if (!btn) return;
+    const cfg = opts || {};
+    const armedLabel = cfg.armedLabel || (state.lang === 'zh' ? '再次点击确认' : 'Click Again to Confirm');
+    const timeoutMs = cfg.timeoutMs || 3500;
+    let armed = false;
+    let resetTimer = null;
+    const origHtml = btn.innerHTML;
+    btn.classList.add('gm-danger-arm');
+
+    const disarm = () => {
+      armed = false;
+      if (resetTimer) { clearTimeout(resetTimer); resetTimer = null; }
+      btn.classList.remove('armed');
+      btn.innerHTML = origHtml;
+    };
+
+    btn.addEventListener('click', async (e) => {
+      if (btn.disabled) return;
+      if (typeof cfg.shouldRequireArm === 'function' && !cfg.shouldRequireArm()) {
+        if (typeof cfg.onConfirm === 'function') await cfg.onConfirm(e);
+        return;
+      }
+      if (!armed) {
+        e.preventDefault();
+        e.stopPropagation();
+        armed = true;
+        btn.classList.add('armed');
+        btn.innerHTML = `${ICONS.alert}<span>${escapeHtml(armedLabel)}</span>`;
+        resetTimer = setTimeout(disarm, timeoutMs);
+        return;
+      }
+      disarm();
+      if (typeof cfg.onConfirm === 'function') {
+        await cfg.onConfirm(e);
+      }
+    });
+    return { disarm };
+  }
+
+  let cachedAiInfoSnapshot = null;
+  let aiInfoInFlight = null;
+  function invalidateAiInfoCache() {
+    cachedAiInfoSnapshot = null;
+  }
+  async function fetchAiInfoCached(force) {
+    if (!force && cachedAiInfoSnapshot) return cachedAiInfoSnapshot;
+    if (!force && aiInfoInFlight) return aiInfoInFlight;
+    aiInfoInFlight = rpc('ai:info').then((info) => {
+      cachedAiInfoSnapshot = info;
+      aiInfoInFlight = null;
+      return info;
+    }).catch((err) => {
+      aiInfoInFlight = null;
+      throw err;
+    });
+    return aiInfoInFlight;
+  }
+
+  function mountQuickAiModelPill(hostEl, opts) {
+    if (!hostEl) return null;
+    const cfg = opts || {};
+    const zh = state.lang === 'zh';
+    const wrap = document.createElement('div');
+    wrap.className = 'gm-model-pill-wrap';
+    wrap.innerHTML = `
+      <button type="button" class="gm-model-pill" title="${escapeHtml(zh ? '快速切换 AI 服务商与模型' : 'Quick-switch AI Provider & Model')}">
+        <span class="gm-model-pill-dot unready"></span>
+        ${ICONS.cpu}
+        <span class="gm-model-pill-label">${escapeHtml(zh ? 'AI 模型…' : 'AI Model…')}</span>
+        ${ICONS.chevronDown}
+      </button>
+    `;
+    hostEl.appendChild(wrap);
+    const pillBtn = wrap.querySelector('.gm-model-pill');
+    const dotEl = wrap.querySelector('.gm-model-pill-dot');
+    const labelEl = wrap.querySelector('.gm-model-pill-label');
+    let popoverEl = null;
+
+    const updatePillDisplay = (info) => {
+      if (!info) return;
+      const preset = (info.presets || []).find((p) => p.id === info.provider);
+      const effectiveModel = info.model || (preset && preset.defaultModel) || (zh ? '未设模型' : 'No model');
+      const ready = !!preset && !!effectiveModel && (!preset.requiresApiKey || !!info.hasApiKey);
+      dotEl.classList.toggle('unready', !ready);
+      labelEl.textContent = `${info.provider || 'AI'} · ${effectiveModel}`;
+      pillBtn.title = ready
+        ? (zh ? `当前 AI：${info.provider} / ${effectiveModel}（点击快速切换）` : `Active AI: ${info.provider} / ${effectiveModel} (click to switch)`)
+        : (zh ? `AI 尚未就绪（点击切换或配置模型与密钥）` : `AI not ready (click to switch or configure)`);
+    };
+
+    fetchAiInfoCached(false).then(updatePillDisplay).catch(() => {});
+
+    const closePopover = () => {
+      if (popoverEl) {
+        popoverEl.remove();
+        popoverEl = null;
+      }
+      document.removeEventListener('click', onDocClick, true);
+    };
+
+    const onDocClick = (ev) => {
+      if (popoverEl && !wrap.contains(ev.target)) closePopover();
+    };
+
+    pillBtn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (popoverEl) {
+        closePopover();
+        return;
+      }
+      let info;
+      try {
+        info = await fetchAiInfoCached(true);
+        updatePillDisplay(info);
+      } catch (err) {
+        showToast(err.message, 'error');
+        return;
+      }
+
+      popoverEl = document.createElement('div');
+      popoverEl.className = 'gm-model-popover' + (cfg.alignRight ? ' align-right' : '');
+      const presets = info.presets || [];
+      popoverEl.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:600">
+          <span>${escapeHtml(zh ? '快速切换 AI 模型' : 'Quick AI Model Switcher')}</span>
+          <button type="button" class="mini-btn gm-mp-settings" style="height:20px;font-size:11px;padding:0 6px">${escapeHtml(zh ? '完整设置' : 'Full Settings')}</button>
+        </div>
+        <label>
+          <span>${escapeHtml(zh ? '服务商 (Provider)' : 'Provider')}</span>
+          <select class="gm-mp-provider">
+            ${presets.map((p) => {
+              const hasKey = !p.requiresApiKey || (info.keys && info.keys[p.id]);
+              return `<option value="${escapeHtml(p.id)}" ${p.id === info.provider ? 'selected' : ''}>${escapeHtml(p.name)}${hasKey ? '' : (zh ? ' (需密钥)' : ' (key needed)')}</option>`;
+            }).join('')}
+          </select>
+        </label>
+        <label>
+          <span>${escapeHtml(zh ? '模型名称 (Model)' : 'Model')}</span>
+          <input type="text" class="gm-mp-model" value="${escapeHtml(info.model || '')}" placeholder="${escapeHtml((presets.find((p) => p.id === info.provider)?.defaultModel) || 'e.g. deepseek-chat / gpt-4o')}" />
+        </label>
+        <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:2px">
+          <button type="button" class="mini-btn gm-mp-cancel">${escapeHtml(zh ? '取消' : 'Cancel')}</button>
+          <button type="button" class="mini-btn primary gm-mp-apply">${escapeHtml(zh ? '应用切换' : 'Apply')}</button>
+        </div>
+      `;
+      wrap.appendChild(popoverEl);
+      document.addEventListener('click', onDocClick, true);
+
+      const provSel = popoverEl.querySelector('.gm-mp-provider');
+      const modelInp = popoverEl.querySelector('.gm-mp-model');
+      provSel.addEventListener('change', () => {
+        const chosen = presets.find((p) => p.id === provSel.value);
+        modelInp.placeholder = (chosen && chosen.defaultModel) || 'e.g. deepseek-chat';
+        if (chosen && chosen.defaultModel) modelInp.value = chosen.defaultModel;
+      });
+      popoverEl.querySelector('.gm-mp-cancel').addEventListener('click', closePopover);
+      popoverEl.querySelector('.gm-mp-settings').addEventListener('click', () => {
+        closePopover();
+        openAppSettingsModal('ai');
+      });
+      popoverEl.querySelector('.gm-mp-apply').addEventListener('click', async () => {
+        try {
+          const updated = await rpc('ai:quickSwitch', {
+            provider: provSel.value,
+            model: modelInp.value.trim()
+          });
+          cachedAiInfoSnapshot = updated;
+          updatePillDisplay(updated);
+          closePopover();
+          showToast(
+            zh ? `已切换 AI：${updated.provider}${updated.model ? ' · ' + updated.model : ''}` : `Switched AI: ${updated.provider}${updated.model ? ' · ' + updated.model : ''}`,
+            'info'
+          );
+          if (typeof cfg.onChanged === 'function') cfg.onChanged(updated);
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      });
+    });
+
+    return { el: wrap, refresh: () => fetchAiInfoCached(true).then(updatePillDisplay).catch(() => {}) };
   }
 
   /* ==================== Host labels & tags ==================== */
@@ -2088,14 +2373,28 @@
       : [zh ? '永久删除文件 / 文件夹' : 'Permanently Delete Items', (zh ? `浏览器模式没有废纸篓，以下 ${count} 项（文件夹含其全部内容）会被永久删除，不可恢复：\n\n` : `Browser mode has no Trash: these ${count} item(s) will be deleted for good:\n\n`) + names, zh ? '永久删除' : 'Delete Permanently', true];
   }
 
-  /** Discard: changes to tracked files can't be undone; untracked files go to the Trash in the desktop app (local repos). */
-  function discardConfirmText(question) {
+  /** Discard: tailor the warning accurately to whether tracked, untracked, or both are being discarded. */
+  function discardConfirmText(question, kind) {
     const zh = state.lang === 'zh';
     const remote = !!(state.activeRepo && String(state.activeRepo).startsWith('ssh://'));
-    const tail = state.canTrash && !remote
-      ? (zh ? '已跟踪文件的改动不可撤销；未跟踪的新文件会移到废纸篓。' : "Changes to tracked files can't be undone; untracked files go to the Trash.")
-      : (zh ? '此操作不可撤销（未跟踪的新文件也会被永久删除）。' : 'This cannot be undone (untracked files are deleted for good).');
+    const mode = kind || 'mixed';
+    let tail;
+    if (mode === 'tracked') {
+      tail = zh ? '已跟踪文件的改动丢弃后不可撤销。' : "Changes to tracked files can't be undone.";
+    } else if (mode === 'untracked') {
+      tail = state.canTrash && !remote
+        ? (zh ? '此未跟踪的新文件会移到废纸篓，需要时可恢复。' : 'This untracked file will be moved to the Trash so you can restore it if needed.')
+        : (zh ? '此未跟踪的新文件会被永久删除，不可撤销。' : 'This untracked file will be deleted for good and cannot be undone.');
+    } else {
+      tail = state.canTrash && !remote
+        ? (zh ? '已跟踪文件的改动不可撤销；未跟踪的新文件会移到废纸篓。' : "Changes to tracked files can't be undone; untracked files go to the Trash.")
+        : (zh ? '此操作不可撤销（未跟踪的新文件也会被永久删除）。' : 'This cannot be undone (untracked files are deleted for good).');
+    }
     return question + '\n' + tail;
+  }
+
+  function isDiffOrViewerTabId(tabId) {
+    return !!tabId && tabId !== 'graph' && tabId !== 'files';
   }
 
   /** Coming back to the Git Map (e.g. after a diff tab): scroll the file opened last in the commit details into view. */
@@ -2106,10 +2405,11 @@
 
   function activateTab(tabId, opts) {
     if (!tabById(tabId)) return;
-    if (tabId === 'graph' && state.activeTabId !== 'graph') setTimeout(revealLastViewedInGitMap, 60);
+    const prevTabId = state.activeTabId;
     if (!isSplitWorkspace()) {
       state.activeTabId = tabId;
       syncWorkspacePanels();
+      if (tabId === 'graph' && isDiffOrViewerTabId(prevTabId)) requestAnimationFrame(revealLastViewedInGitMap);
       return;
     }
     if (tabId === state.primaryPaneTabId) {
@@ -2135,6 +2435,7 @@
     }
     persistWorkspaceLayout();
     syncWorkspacePanels();
+    if (tabId === 'graph' && isDiffOrViewerTabId(prevTabId)) requestAnimationFrame(revealLastViewedInGitMap);
   }
 
   function placeTabInSplitPane(tabId, side) {
@@ -2254,6 +2555,7 @@
     if (panelEl) panelEl.remove();
 
     if (isSplitWorkspace()) {
+      const closedViewerTab = isDiffOrViewerTabId(tabId);
       if (state.primaryPaneTabId === tabId) {
         state.primaryPaneTabId = pickCompanionTab(state.secondaryPaneTabId, 'graph');
       }
@@ -2265,6 +2567,9 @@
       }
       persistWorkspaceLayout();
       syncWorkspacePanels();
+      if (closedViewerTab && (state.primaryPaneTabId === 'graph' || state.secondaryPaneTabId === 'graph')) {
+        requestAnimationFrame(revealLastViewedInGitMap);
+      }
       return true;
     }
 
@@ -2416,18 +2721,90 @@
           <button type="button" class="mini-btn act-ftm">${ICONS.clock}<span>${escapeHtml(tr('timeMachine'))}</span></button>
         </div>
       </div>
-      <div class="diff-scroll-area"></div>
+      <div class="diff-body-wrap">
+        <div class="diff-scroll-area"></div>
+        <div class="diff-hunk-rail empty" aria-label="Diff Hunk Map"></div>
+      </div>
     `;
 
     const scrollArea = container.querySelector('.diff-scroll-area');
+    const hunkRail = container.querySelector('.diff-hunk-rail');
     const hunkCounterEl = container.querySelector('.hunk-counter');
     let hunkRowElements = [];
+    let hunkRowMeta = [];
     let currentHunkIdx = -1;
+    let railViewportEl = null;
+    let railSyncRaf = 0;
+
+    function updateRailViewport() {
+      if (!railViewportEl || !hunkRail || hunkRail.classList.contains('empty')) return;
+      const sh = scrollArea.scrollHeight || 1;
+      const ch = scrollArea.clientHeight || 1;
+      const topPct = Math.max(0, Math.min(100, (scrollArea.scrollTop / sh) * 100));
+      const hPct = Math.max(4, Math.min(100, (ch / sh) * 100));
+      railViewportEl.style.top = topPct + '%';
+      railViewportEl.style.height = hPct + '%';
+    }
+
+    function renderHunkRail() {
+      if (!hunkRail) return;
+      if (hunkRowElements.length === 0) {
+        hunkRail.innerHTML = '';
+        hunkRail.classList.add('empty');
+        railViewportEl = null;
+        return;
+      }
+      hunkRail.classList.remove('empty');
+      hunkRail.innerHTML = '';
+      railViewportEl = document.createElement('div');
+      railViewportEl.className = 'diff-hunk-rail-viewport';
+      hunkRail.appendChild(railViewportEl);
+
+      const totalHeight = Math.max(1, scrollArea.scrollHeight);
+      hunkRowElements.forEach((rowEl, idx) => {
+        const meta = hunkRowMeta[idx] || { kind: 'change', line: null };
+        const topPct = Math.max(0.5, Math.min(97.5, (rowEl.offsetTop / totalHeight) * 100));
+        const tick = document.createElement('button');
+        tick.type = 'button';
+        tick.className = `diff-hunk-tick kind-${meta.kind}` + (idx === currentHunkIdx ? ' active' : '');
+        tick.style.top = topPct + '%';
+        tick.style.height = Math.max(5, Math.min(20, (rowEl.offsetHeight / totalHeight) * 100)) + 'px';
+        const lineInfo = meta.line != null ? ` · L${meta.line}` : '';
+        tick.title = `#${idx + 1}${lineInfo}`;
+        tick.dataset.hunkIdx = String(idx);
+        tick.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          currentHunkIdx = idx;
+          updateHunkCounter();
+          rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        hunkRail.appendChild(tick);
+      });
+      updateRailViewport();
+    }
+
+    scrollArea.addEventListener('scroll', () => {
+      if (railSyncRaf) return;
+      railSyncRaf = requestAnimationFrame(() => {
+        railSyncRaf = 0;
+        updateRailViewport();
+      });
+    }, { passive: true });
+
+    hunkRail.addEventListener('click', (ev) => {
+      if (ev.target && ev.target.classList.contains('diff-hunk-tick')) return;
+      const rect = hunkRail.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (ev.clientY - rect.top) / Math.max(1, rect.height)));
+      scrollArea.scrollTo({ top: ratio * Math.max(0, scrollArea.scrollHeight - scrollArea.clientHeight), behavior: 'smooth' });
+    });
 
     function updateHunkCounter() {
       const total = hunkRowElements.length;
       const shown = total === 0 ? 0 : (currentHunkIdx < 0 ? 0 : currentHunkIdx + 1);
       hunkCounterEl.textContent = `${shown} / ${total}`;
+      if (hunkRail) {
+        hunkRail.querySelectorAll('.diff-hunk-tick').forEach((t, i) => t.classList.toggle('active', i === currentHunkIdx));
+      }
     }
 
     // Syntax highlighting: highlight each side of the file as a whole, then look lines up by their line number
@@ -2518,6 +2895,7 @@
       table.className = 'diff-table' + (wrapLines ? '' : ' nowrap');
       const tbody = document.createElement('tbody');
       hunkRowElements = [];
+      hunkRowMeta = [];
       let prevWasChange = false;
       let targetHighlightRow = null;
 
@@ -2550,7 +2928,10 @@
               <td class="diff-gutter ${rightCls}">${r.newLineNumber ?? ''}</td>
               <td class="diff-code diff-side-right ${rightCls}">${formatSide(false, r.newLineNumber, r.newText, r.newSegments, 'word-add')}</td>
             `;
-            if (isChange && !prevWasChange) hunkRowElements.push(trEl);
+            if (isChange && !prevWasChange) {
+              hunkRowElements.push(trEl);
+              hunkRowMeta.push({ kind: r.kind === 'added' ? 'add' : r.kind === 'deleted' ? 'del' : 'change', line: r.newLineNumber ?? r.oldLineNumber ?? null });
+            }
             if (matchesRange && !targetHighlightRow) targetHighlightRow = trEl;
             prevWasChange = isChange;
             tbody.appendChild(trEl);
@@ -2570,7 +2951,10 @@
                 <td class="diff-gutter diff-cell-add">${r.newLineNumber ?? ''}</td>
                 <td class="diff-code diff-cell-add"><span class="diff-sign">+</span>${formatSide(false, r.newLineNumber, r.newText, r.newSegments, 'word-add')}</td>
               `;
-              if (!prevWasChange) hunkRowElements.push(trDel);
+              if (!prevWasChange) {
+                hunkRowElements.push(trDel);
+                hunkRowMeta.push({ kind: 'change', line: r.newLineNumber ?? r.oldLineNumber ?? null });
+              }
               if (matchesRange && !targetHighlightRow) targetHighlightRow = trAdd;
               prevWasChange = true;
               tbody.appendChild(trDel);
@@ -2588,7 +2972,10 @@
                 <td class="diff-gutter ${cls}">${r.newLineNumber ?? ''}</td>
                 <td class="diff-code ${cls}"><span class="diff-sign">${sign}</span>${codeHtml}</td>
               `;
-              if (isChange && !prevWasChange) hunkRowElements.push(trEl);
+              if (isChange && !prevWasChange) {
+                hunkRowElements.push(trEl);
+                hunkRowMeta.push({ kind: r.kind === 'added' ? 'add' : r.kind === 'deleted' ? 'del' : 'change', line: r.newLineNumber ?? r.oldLineNumber ?? null });
+              }
               if (matchesRange && !targetHighlightRow) targetHighlightRow = trEl;
               prevWasChange = isChange;
               tbody.appendChild(trEl);
@@ -2602,6 +2989,7 @@
       scrollArea.appendChild(table);
       currentHunkIdx = -1;
       updateHunkCounter();
+      requestAnimationFrame(() => renderHunkRail());
       if (initialScroll && targetHighlightRow) {
         setTimeout(() => targetHighlightRow.scrollIntoView({ block: 'center' }), 20);
       }
@@ -2726,7 +3114,8 @@
         fileRes = await rpc('file:read', {
           repo: payload.repo,
           filePath: payload.filePath,
-          commit: payload.commit
+          commit: payload.commit,
+          ...(payload.encoding ? { encoding: payload.encoding } : {})
         });
       }
       if (loadSeq !== panel.__fileLoadSeq) return;
@@ -2818,15 +3207,38 @@
         const zh = state.lang === 'zh';
         const isEditing = isEditorActive();
         const dirtyNow = isEditorDirty();
+        const currentEncoding = String(fileRes.encoding || payload.encoding || 'utf8').toLowerCase();
+        const encodingOptions = [
+          ['utf8', 'UTF-8'],
+          ['gb18030', 'GB18030 / GBK'],
+          ['big5', 'Big5'],
+          ['shift_jis', 'Shift_JIS'],
+          ['euc-kr', 'EUC-KR'],
+          ['windows-1252', 'Windows-1252'],
+          ['utf16le', 'UTF-16 LE'],
+          ['utf16be', 'UTF-16 BE']
+        ];
+        const externalTarget = (() => {
+          if (fileRes.commit) return null;
+          if (fileRes.sourceUri) return fileRes.sourceUri;
+          if (fileRes.repo && fileRes.filePath) {
+            const base = String(fileRes.repo).replace(/[\\/]+$/, '');
+            const sep = !base.startsWith('ssh://') && base.includes('\\') ? '\\' : '/';
+            return base + sep + String(fileRes.filePath).replace(/^[\\/]+/, '');
+          }
+          return payload.filePath || null;
+        })();
         panel.innerHTML = `
           <div class="viewer-toolbar">
             <div class="viewer-toolbar-left">
               <span class="viewer-path" title="${escapeHtml(fileRes.filePath)}">${escapeHtml(fileRes.filePath)}${fileRes.commit ? ' @ ' + escapeHtml(fileRes.commit.slice(0, 8)) : ''}</span>
               ${isEditing ? `<span class="viewer-dirty-badge${dirtyNow ? '' : ' hidden'}">● ${escapeHtml(zh ? '未保存' : 'Unsaved')}</span>` : ''}
               ${fileRes.truncated ? `<span class="diff-stat-del">${escapeHtml(tr('truncatedDiffNotice'))}</span>` : ''}
-              ${fileRes.notUtf8 ? `<span class="diff-stat-del" title="${escapeHtml(zh ? '在 GitMap 里保存会把不认识的字节换成 �，所以只读显示' : 'Saving from GitMap would replace the unknown bytes with �, so it is read-only')}">${escapeHtml(zh ? '不是 UTF-8 编码（如 GBK），只读显示' : 'Not UTF-8 (e.g. GBK): read-only')}</span>` : ''}
+              ${fileRes.notUtf8 ? `<span class="viewer-encoding-notice" title="${escapeHtml(zh ? '原始字节不是 UTF-8 编码，为避免破坏原文件编码仅提供只读查看；可切换右侧编码阅读或在外部编辑器中编辑' : 'File bytes are not UTF-8; read-only to avoid corrupting its encoding. Switch preview encoding or open in an external editor.')}">${escapeHtml(zh ? '非 UTF-8 · 只读' : 'Non-UTF-8 · Read-only')}</span>
+                <select class="viewer-encoding-select" title="${escapeHtml(zh ? '切换查看编码（不修改原文件）' : 'Switch preview encoding (read-only)')}">${encodingOptions.map(([val, lbl]) => `<option value="${val}"${val === currentEncoding ? ' selected' : ''}>${escapeHtml(lbl)}</option>`).join('')}</select>` : ''}
             </div>
             <div class="viewer-toolbar-right">
+              ${fileRes.notUtf8 && externalTarget ? `<button type="button" class="mini-btn act-viewer-open-editor" title="${escapeHtml(tr('openInEditor'))}">${ICONS.editor}<span>${escapeHtml(tr('openInEditor'))}</span></button>` : ''}
               ${canEdit ? (
                 isEditing
                   ? `<button type="button" class="mini-btn primary act-save-file">${ICONS.save}<span>${escapeHtml(zh ? '保存 (⌘S)' : 'Save (⌘S)')}</span></button>
@@ -2866,6 +3278,19 @@
           panel.querySelector('.act-close-preview')?.addEventListener('click', async () => {
             if (!(await confirmDiscardIfDirty())) return;
             if (opts.onClosePreview) opts.onClosePreview();
+          });
+        }
+
+        const encSelect = panel.querySelector('.viewer-encoding-select');
+        if (encSelect) {
+          encSelect.addEventListener('change', () => {
+            renderFileViewerInto(panel, { ...payload, encoding: encSelect.value }, opts);
+          });
+        }
+        const viewerOpenEdBtn = panel.querySelector('.act-viewer-open-editor');
+        if (viewerOpenEdBtn && externalTarget) {
+          viewerOpenEdBtn.addEventListener('click', () => {
+            openInEditor(externalTarget, true).catch((err) => showToast(err.message, 'error'));
           });
         }
 
@@ -3569,6 +3994,7 @@
     const fb = {
       currentPath: null,
       parentPath: null,
+      resolvedRootPath: null,
       entries: [],
       history: [],
       historyIdx: -1,
@@ -3626,7 +4052,7 @@
       <div class="fb-actions">
         <label class="fb-filter">${ICONS.search}<input type="text" class="fb-filter-input" spellcheck="false" placeholder="${escapeHtml(T('筛选当前目录…', 'Filter this folder…'))}" /></label>
         <button type="button" class="mini-icon-btn act-hidden" title="${escapeHtml(tr('showHidden'))}">${ICONS.eyeOff}</button>
-        <button type="button" class="mini-icon-btn act-folders-first" aria-pressed="false">${ICONS.folder}</button>
+        <button type="button" class="mini-icon-btn act-folders-first" aria-pressed="false">${ICONS.foldersTop || ICONS.folder}</button>
         <button type="button" class="mini-icon-btn act-expand-top" title="${escapeHtml(T('展开当前目录全部文件夹', 'Expand All Top-Level Folders'))}">${ICONS.expandAll}</button>
         <button type="button" class="mini-icon-btn act-collapse-all" title="${escapeHtml(T('收起全部已展开文件夹', 'Collapse All Folders'))}">${ICONS.collapseAll}</button>
         <span class="fb-actions-spacer"></span>
@@ -3685,20 +4111,56 @@
     }
 
     /** Optional root (opts.rootPath): the repository explorer shows paths from the repository and never leaves it. */
-    const normFsPath = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+    const normFsPath = (p) => {
+      const s = String(p || '').replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+      return /^[A-Z]:/.test(s) ? s[0].toLowerCase() + s.slice(1) : s;
+    };
+    function effectiveRootTarget() {
+      if (fb.resolvedRootPath) return fb.resolvedRootPath;
+      return opts.rootPath ? opts.rootPath() : null;
+    }
     function confinedRoot() {
-      const r = opts.rootPath ? opts.rootPath() : null;
+      const r = effectiveRootTarget();
       return r ? normFsPath(r) : null;
     }
     function isWithinRoot(p, r) {
       const n = normFsPath(p);
       return n === r || n.startsWith(r === '/' ? '/' : r + '/');
     }
+    function resolveConfinedTarget(rawTarget) {
+      const logical = opts.rootPath ? opts.rootPath() : null;
+      const rootTarget = effectiveRootTarget();
+      const rootDir = confinedRoot();
+      if (!rootDir || !rootTarget) return { target: rawTarget, clamped: false };
+      const trimmed = String(rawTarget || '').trim();
+      if (!trimmed || trimmed === '~' || trimmed === '.') return { target: rootTarget, clamped: false };
+      // Allow repo-relative paths (matching the breadcrumbs shown in confined mode, e.g. "src/server")
+      const isAbsolute = trimmed.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(trimmed);
+      if (!isAbsolute) {
+        const sepChar = !rootDir.startsWith('/') && rootTarget.includes('\\') ? '\\' : '/';
+        const cleanParts = [];
+        for (const seg of trimmed.replace(/\\/g, '/').split('/')) {
+          if (!seg || seg === '.') continue;
+          if (seg === '..') {
+            if (cleanParts.length === 0) return { target: rootTarget, clamped: true };
+            cleanParts.pop();
+          } else {
+            cleanParts.push(seg);
+          }
+        }
+        const base = rootTarget.replace(/[\\/]+$/, '');
+        return { target: cleanParts.length ? base + sepChar + cleanParts.join(sepChar) : rootTarget, clamped: false };
+      }
+      if (isWithinRoot(trimmed, rootDir)) return { target: trimmed, clamped: false };
+      if (logical && isWithinRoot(trimmed, normFsPath(logical))) return { target: trimmed, clamped: false };
+      return { target: rootTarget, clamped: true };
+    }
 
     function renderCrumbs(p) {
       crumbs.innerHTML = '';
       const rootDir = confinedRoot();
-      if (rootDir && isWithinRoot(p, rootDir)) {
+      const rootTarget = effectiveRootTarget();
+      if (rootDir && rootTarget && isWithinRoot(p, rootDir)) {
         const rel = normFsPath(p).slice(rootDir.length).split('/').filter(Boolean);
         const sepChar = !rootDir.startsWith('/') && String(p).includes('\\') ? '\\' : '/';
         const addRel = (label, target, last) => {
@@ -3712,7 +4174,6 @@
           });
           crumbs.appendChild(b);
         };
-        const rootTarget = opts.rootPath();
         addRel(opts.rootLabel ? opts.rootLabel() : rootDir.split('/').pop() || '/', rootTarget, rel.length === 0);
         let acc = rootTarget.replace(/[\\/]+$/, '');
         rel.forEach((part, i) => {
@@ -3779,6 +4240,8 @@
       const dirsFirst = foldersOnTop();
       list.sort((a, b) => {
         if (dirsFirst && a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        // Directories display "—" (unknown size), so follow SQL NULLS LAST when sorting by size in mixed mode
+        if (!dirsFirst && key === 'size' && a.isDirectory !== b.isDirectory) return a.isDirectory ? 1 : -1;
         let c = 0;
         if (key === 'size') c = (a.size || 0) - (b.size || 0);
         else if (key === 'mtime') c = (a.mtime || 0) - (b.mtime || 0);
@@ -4005,10 +4468,10 @@
         ctxActions.push({ icon: ICONS.download, label: zh ? '下载 / 导出…' : 'Download / Export…', run: () => opts.download([entry.path]) });
       }
       if (features.launch && entry.isDirectory && opts.openTerminal) {
-        ctxActions.push({ icon: ICONS.terminal, label: zh ? '在此打开终端' : 'Open Terminal Here', run: () => opts.openTerminal(entry.path) });
+        ctxActions.push({ icon: ICONS.terminal, label: zh ? '在此打开终端' : 'Open Terminal Here', run: () => opts.openTerminal(entry.path, false) });
       }
       if (features.launch && opts.openEditor) {
-        ctxActions.push({ icon: ICONS.editor, label: tr('openInEditor'), run: () => opts.openEditor(entry.path) });
+        ctxActions.push({ icon: ICONS.editor, label: tr('openInEditor'), run: () => opts.openEditor(entry.path, !entry.isDirectory) });
       }
       ctxActions.push({
         icon: ICONS.copy,
@@ -4150,7 +4613,7 @@
             : '';
           return `<div class="fb-row${e.isDirectory ? ' is-dir' : ''}${e.isGitRepo ? ' is-git' : ''}${sel ? ' selected' : ''}${idx === fb.focusIdx ? ' focused' : ''}${deco ? ' gs-' + deco.code : ''}" data-idx="${idx}" role="row" title="${escapeHtml(e.path)}">
             <span class="fb-col-chk"><input type="checkbox" class="fb-check" ${sel ? 'checked' : ''} tabindex="-1" /></span>
-            <span class="fb-col-name">${guidesHtml}${twistyHtml}<span class="fb-icon ${icon.cls}">${icon.svg}</span><span class="fb-name">${escapeHtml(e.name)}</span>${deco ? `<span class="fb-git-badge" title="${escapeHtml(deco.title)}">${escapeHtml(deco.badge)}</span>` : ''}${e.isSymlink ? `<span class="fb-link" title="${escapeHtml(T('符号链接', 'Symbolic link'))}">${ICONS.link}</span>` : ''}${e.isGitRepo ? `<span class="branch-pill">${ICONS.branch}${escapeHtml(e.gitBranch || 'HEAD')}</span>` : ''}</span>
+            <span class="fb-col-name">${guidesHtml}${twistyHtml}<span class="fb-icon ${icon.cls}">${icon.svg}</span><span class="fb-name">${escapeHtml(e.name)}</span>${e.isSymlink ? `<span class="fb-link" title="${escapeHtml(T('符号链接', 'Symbolic link'))}">${ICONS.link}</span>` : ''}${e.isGitRepo ? `<span class="branch-pill">${ICONS.branch}${escapeHtml(e.gitBranch || 'HEAD')}</span>` : ''}${deco ? `<span class="fb-git-badge" title="${escapeHtml(deco.title)}" aria-label="${escapeHtml(deco.title)}">${escapeHtml(deco.badge)}</span>` : ''}</span>
             <span class="fb-col-size">${e.isDirectory ? '—' : escapeHtml(formatBytes(e.size))}</span>
             <span class="fb-col-mtime" title="${escapeHtml(m.full)}">${escapeHtml(m.short)}</span>
             <span class="fb-col-actions">${idleAction}</span>
@@ -4233,6 +4696,7 @@
     fb.reset = function () {
       fb.currentPath = null;
       fb.parentPath = null;
+      fb.resolvedRootPath = null;
       fb.entries = [];
       fb.history = [];
       fb.historyIdx = -1;
@@ -4247,19 +4711,30 @@
     };
 
     fb.navigate = async function (target, navOpts) {
-      const rootDir = confinedRoot();
-      if (rootDir && (!target || !isWithinRoot(target, rootDir))) target = opts.rootPath(); // never leave the root
+      const hasConfinedRoot = !!opts.rootPath && !!opts.rootPath();
+      const logicalRoot = hasConfinedRoot ? opts.rootPath() : null;
+      if (hasConfinedRoot) {
+        const resolved = resolveConfinedTarget(target);
+        target = resolved.target;
+        if (resolved.clamped && navOpts && navOpts.fromUserInput) {
+          showToast(T('仓库文件浏览器限定在当前仓库内；浏览其他路径请使用顶部「本地仓库」或「Remote - SSH」。', 'Repository Explorer stays inside the active repository. Use Local / Remote-SSH browser for other paths.'), 'status');
+        }
+      }
       const seq = ++fb.loadSeq;
       const isRefreshSame = target === fb.currentPath && fb.entries.length > 0;
       if (!isRefreshSame) setLoading(opts.loadingText());
       hideSuggestions();
       try {
-        const listing = await opts.list(target, fb.showHidden, { subtree: false });
+        const listing = await opts.list(target, fb.showHidden, { subtree: false, refresh: !!(navOpts && navOpts.forceRefresh) });
         if (seq !== fb.loadSeq) return;
         root.classList.remove('fb-failed');
+        // Latch the canonical root path (e.g. from sftp.realpath or /private/var) on root listing so symlinked repos work seamlessly
+        if (hasConfinedRoot && logicalRoot && (!fb.resolvedRootPath || normFsPath(target) === normFsPath(logicalRoot))) {
+          fb.resolvedRootPath = listing.currentPath;
+        }
+        const rootDir = confinedRoot();
         const changedDir = listing.currentPath !== fb.currentPath;
         fb.currentPath = listing.currentPath;
-        // At the root there is no "up" (the remote listing may report the canonical path, so compare the target too)
         const atRoot = !!rootDir && (normFsPath(listing.currentPath) === rootDir || normFsPath(target) === rootDir);
         fb.parentPath = atRoot ? null : listing.parentPath;
         fb.entries = listing.entries || [];
@@ -4311,10 +4786,40 @@
     };
 
     fb.refresh = function () {
-      return fb.navigate(fb.currentPath, { push: false });
+      return fb.navigate(fb.currentPath, { push: false, forceRefresh: true });
     };
 
-    /** Re-draw the rows without listing again (e.g. decorations changed). */
+    /** Patch Git status decorations in-place on live DOM rows without destroying DOM, scroll position, or the floating bar. */
+    const GS_CLASSES = ['gs-M', 'gs-R', 'gs-A', 'gs-U', 'gs-D', 'gs-C'];
+    fb.refreshDecorations = function () {
+      if (!opts.decorate || fb.currentPath === null || fb.visible.length === 0) return;
+      const rows = body.querySelectorAll('.fb-row[data-idx]');
+      rows.forEach((row) => {
+        const idx = Number(row.getAttribute('data-idx'));
+        const entry = fb.visible[idx];
+        if (!entry) return;
+        const deco = opts.decorate(entry);
+        GS_CLASSES.forEach((cls) => row.classList.remove(cls));
+        if (deco && deco.code) row.classList.add('gs-' + deco.code);
+        const nameCol = row.querySelector('.fb-col-name');
+        if (!nameCol) return;
+        let badgeEl = nameCol.querySelector('.fb-git-badge');
+        if (deco) {
+          if (!badgeEl) {
+            badgeEl = document.createElement('span');
+            badgeEl.className = 'fb-git-badge';
+            nameCol.appendChild(badgeEl);
+          }
+          badgeEl.title = deco.title || '';
+          badgeEl.textContent = deco.badge || '';
+          badgeEl.setAttribute('aria-label', deco.title || '');
+        } else if (badgeEl) {
+          badgeEl.remove();
+        }
+      });
+    };
+
+    /** Re-draw the rows without listing again (fallback). */
     fb.rerender = function () {
       if (fb.currentPath !== null && fb.entries.length > 0) renderRows();
     };
@@ -4409,8 +4914,18 @@
     let completeSeq = 0;
     async function fetchCompletions() {
       const seq = ++completeSeq;
-      const res = await opts.complete(pathInput.value, fb.showHidden);
+      const rootDir = confinedRoot();
+      let queryPath = pathInput.value;
+      if (rootDir && queryPath && !queryPath.startsWith('/') && !/^[a-zA-Z]:[\\/]/.test(queryPath)) {
+        const rootTarget = effectiveRootTarget();
+        const sepChar = !rootDir.startsWith('/') && rootTarget.includes('\\') ? '\\' : '/';
+        queryPath = rootTarget.replace(/[\\/]+$/, '') + sepChar + queryPath;
+      }
+      const res = await opts.complete(queryPath, fb.showHidden);
       if (seq !== completeSeq) return null;
+      if (rootDir && res && Array.isArray(res.entries)) {
+        return { ...res, entries: res.entries.filter((it) => isWithinRoot(it.path, rootDir)) };
+      }
       return res;
     }
 
@@ -4503,7 +5018,7 @@
         e.preventDefault();
         const value = pathInput.value.trim() || '~';
         stopEditingPath();
-        fb.navigate(value, { push: true });
+        fb.navigate(value, { push: true, fromUserInput: true });
       } else if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -4598,9 +5113,13 @@
       });
     });
     $('.act-folders-first').addEventListener('click', () => {
-      fb.foldersFirst = !foldersOnTop();
+      const autoVal = fb.sort.key === 'name';
+      const nextVal = !foldersOnTop();
+      // Toggling back to the natural default restores automatic mode (null) instead of permanently locking out smart sorting
+      fb.foldersFirst = nextVal === autoVal ? null : nextVal;
       try {
-        localStorage.setItem('gitmap.fb.foldersFirst.' + opts.kind, fb.foldersFirst ? '1' : '0');
+        if (fb.foldersFirst === null) localStorage.removeItem('gitmap.fb.foldersFirst.' + opts.kind);
+        else localStorage.setItem('gitmap.fb.foldersFirst.' + opts.kind, fb.foldersFirst ? '1' : '0');
       } catch (_) {}
       updateFoldersFirstButton();
       renderRows();
@@ -4644,9 +5163,9 @@
       } else if (btn.classList.contains('act-row-download') && opts.download) {
         opts.download([entry.path]);
       } else if (btn.classList.contains('act-row-term') && opts.openTerminal) {
-        opts.openTerminal(entry.path);
+        opts.openTerminal(entry.path, !entry.isDirectory);
       } else if (btn.classList.contains('act-row-editor') && opts.openEditor) {
-        opts.openEditor(entry.path);
+        opts.openEditor(entry.path, !entry.isDirectory);
       } else if (btn.classList.contains('act-row-copy')) {
         navigator.clipboard?.writeText(entry.path).catch(() => {});
         showToast(T('已复制：', 'Copied: ') + entry.path, 'status');
@@ -4816,8 +5335,8 @@
     /* ---- Feature buttons ---- */
     if (features.scan) $('.act-scan').addEventListener('click', () => opts.scan(fb.currentPath));
     if (features.launch) {
-      $('.act-here-term').addEventListener('click', () => opts.openTerminal(fb.currentPath));
-      $('.act-here-editor').addEventListener('click', () => opts.openEditor(fb.currentPath));
+      $('.act-here-term').addEventListener('click', () => opts.openTerminal(fb.currentPath, false));
+      $('.act-here-editor').addEventListener('click', () => opts.openEditor(fb.currentPath, false));
     }
     if (features.nativePicker) $('.act-native').addEventListener('click', () => opts.nativePick());
     if (features.createFile) $('.act-new-file').addEventListener('click', () => opts.createFile(fb.currentPath));
@@ -5063,8 +5582,8 @@
       openFileTab({ repo: '', filePath: sshUriFor(state.selectedSshHostId, entry.path), commit: null, title: entry.name, lines: null });
       document.getElementById('sshModal').classList.add('hidden');
     },
-    openTerminal: (p) => openExternalTerminal(sshUriFor(state.selectedSshHostId, p)).catch((err) => showToast(err.message, 'error')),
-    openEditor: (p) => openInEditor(sshUriFor(state.selectedSshHostId, p)).catch((err) => showToast(err.message, 'error')),
+    openTerminal: (p, isFile) => openExternalTerminal(sshUriFor(state.selectedSshHostId, p), isFile).catch((err) => showToast(err.message, 'error')),
+    openEditor: (p, isFile) => openInEditor(sshUriFor(state.selectedSshHostId, p), isFile).catch((err) => showToast(err.message, 'error')),
     scan: (p) => scanRemoteRepos(p),
     createFile: async (dir) => {
       const name = await inputDialog(state.lang === 'zh' ? '新建远程文件' : 'New Remote File', state.lang === 'zh' ? '文件名称（支持相对路径如 src/app.ts）' : 'File name (e.g. src/app.ts)', '');
@@ -5307,8 +5826,8 @@
       openFileTab({ repo: '', filePath: entry.path, commit: null, title: entry.name, lines: null });
       document.getElementById('localModal').classList.add('hidden');
     },
-    openTerminal: (p) => openExternalTerminal(p).catch((err) => showToast(err.message, 'error')),
-    openEditor: (p) => openInEditor(p).catch((err) => showToast(err.message, 'error')),
+    openTerminal: (p, isFile) => openExternalTerminal(p, isFile).catch((err) => showToast(err.message, 'error')),
+    openEditor: (p, isFile) => openInEditor(p, isFile).catch((err) => showToast(err.message, 'error')),
     nativePick: async () => {
       const chosen = await desktopApi.pickLocalFolder();
       if (chosen) await addLocalRepoAndClose(chosen);
@@ -5356,7 +5875,10 @@
       const ok = await confirmDialog(...localDeleteConfirmText(entries.length, names));
       if (!ok) return;
       try {
-        await rpc('local:delete', { paths: entries.map((e) => e.path) });
+        const res = await rpc('local:delete', { paths: entries.map((e) => e.path) });
+        showToast(res && res.trashed
+          ? (zh ? `已移到废纸篓 (${entries.length} 项)` : `Moved ${entries.length} item(s) to Trash`)
+          : (zh ? `已永久删除 ${entries.length} 项` : `Permanently deleted ${entries.length} item(s)`), 'status');
         await localBrowser.refresh();
       } catch (err) {
         showToast(err.message, 'error');
@@ -5478,66 +6000,110 @@
   }
 
   /**
-   * Git status of the repository explorer: one `scm:status` per folder listing, mapped repository-relative path →
-   * status letter. Files get a coloured name and a letter; folders a dot when something below them changed.
+   * Git status of the repository explorer: single lightweight `scm:treeStatus` (`git status --porcelain=v1 -z -unormal`),
+   * cached briefly across subfolder navigation and refreshed on repo mutations / explicit refresh / Split View updates.
+   * Patches live rows in-place via `refreshDecorations()` so the hover bar and scroll position stay intact.
    */
-  const repoGitStatus = { repo: null, files: new Map(), dirs: new Map(), seq: 0 };
+  const REPO_GIT_STATUS_TTL_MS = 2500;
+  const repoGitStatus = { repo: null, files: new Map(), dirs: new Map(), untrackedDirs: new Set(), seq: 0, fetchedAt: 0 };
   const GIT_STATUS_RANK = { C: 5, D: 4, M: 3, R: 3, A: 2, U: 1 };
   const GIT_STATUS_TEXT = {
     C: ['有冲突', 'Conflict'], D: ['已删除', 'Deleted'], M: ['已修改', 'Modified'], R: ['已重命名', 'Renamed'], A: ['已添加（已暂存）', 'Added (staged)'], U: ['未跟踪', 'Untracked']
   };
 
+  function normDriveCase(p) {
+    const s = String(p || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    return /^[A-Z]:/.test(s) ? s[0].toLowerCase() + s.slice(1) : s;
+  }
+
   function repoRelPath(absPath) {
     const info = activeRepoTarget();
     if (!info) return null;
-    const rootDir = String(info.isRemote ? info.remotePath : info.fullDisplay).replace(/\\/g, '/').replace(/\/+$/, '');
-    const p = String(absPath || '').replace(/\\/g, '/');
-    return p.startsWith(rootDir + '/') ? p.slice(rootDir.length + 1) : null;
+    const p = normDriveCase(absPath);
+    const roots = [];
+    if (typeof repoFilesBrowser !== 'undefined' && repoFilesBrowser && repoFilesBrowser.resolvedRootPath) {
+      roots.push(normDriveCase(repoFilesBrowser.resolvedRootPath));
+    }
+    const logical = normDriveCase(info.isRemote ? info.remotePath : info.fullDisplay);
+    if (logical && !roots.includes(logical)) roots.push(logical);
+    for (const rootDir of roots) {
+      if (rootDir && p.startsWith(rootDir + '/')) return p.slice(rootDir.length + 1);
+    }
+    return null;
   }
 
-  async function refreshRepoGitStatus() {
+  async function refreshRepoGitStatus(force) {
     const repo = state.activeRepo;
     if (!repo) return;
+    if (!force && repoGitStatus.repo === repo && (Date.now() - repoGitStatus.fetchedAt) < REPO_GIT_STATUS_TTL_MS) {
+      return;
+    }
     const seq = ++repoGitStatus.seq;
     try {
-      const st = await rpc('scm:status', { repo });
+      const st = await rpc('scm:treeStatus', { repo });
       if (seq !== repoGitStatus.seq || state.activeRepo !== repo) return;
+      if (st.error) return;
       const files = new Map();
+      const untrackedDirs = new Set();
       const put = (rel, code) => {
         if (!rel || !GIT_STATUS_RANK[code]) return;
         const cur = files.get(rel);
         if (!cur || GIT_STATUS_RANK[code] > GIT_STATUS_RANK[cur]) files.set(rel, code);
       };
-      (st.staged || []).forEach((f) => put(f.path, f.status === 'C' ? 'A' : f.status));
-      (st.unstaged || []).forEach((f) => put(f.path, f.status));
-      (st.conflicted || []).forEach((f) => put(f.path, 'C'));
+      Object.entries(st.files || {}).forEach(([rel, code]) => put(rel, code));
+      (st.untrackedDirs || []).forEach((d) => {
+        const clean = String(d || '').replace(/\/+$/, '');
+        if (clean) untrackedDirs.add(clean);
+      });
       const dirs = new Map();
-      files.forEach((code, rel) => {
+      const propagateDir = (rel, code) => {
         const parts = rel.split('/');
         for (let i = 1; i < parts.length; i++) {
           const d = parts.slice(0, i).join('/');
           const cur = dirs.get(d);
           if (!cur || GIT_STATUS_RANK[code] > GIT_STATUS_RANK[cur]) dirs.set(d, code);
         }
+      };
+      files.forEach((code, rel) => propagateDir(rel, code));
+      untrackedDirs.forEach((d) => {
+        const cur = dirs.get(d);
+        if (!cur || GIT_STATUS_RANK.U > GIT_STATUS_RANK[cur]) dirs.set(d, 'U');
+        propagateDir(d, 'U');
       });
       repoGitStatus.repo = repo;
       repoGitStatus.files = files;
       repoGitStatus.dirs = dirs;
-      if (typeof repoFilesBrowser !== 'undefined' && repoFilesBrowser.rerender) repoFilesBrowser.rerender();
+      repoGitStatus.untrackedDirs = untrackedDirs;
+      repoGitStatus.fetchedAt = Date.now();
+      if (typeof repoFilesBrowser !== 'undefined' && repoFilesBrowser.refreshDecorations) {
+        repoFilesBrowser.refreshDecorations();
+      }
     } catch (_) {
       /* status is decoration only */
     }
+  }
+
+  function isInsideUntrackedDir(rel) {
+    if (repoGitStatus.untrackedDirs.size === 0) return false;
+    if (repoGitStatus.untrackedDirs.has(rel)) return true;
+    let slash = rel.lastIndexOf('/');
+    while (slash > 0) {
+      if (repoGitStatus.untrackedDirs.has(rel.slice(0, slash))) return true;
+      slash = rel.lastIndexOf('/', slash - 1);
+    }
+    return false;
   }
 
   function repoGitDecoration(entry) {
     if (repoGitStatus.repo !== state.activeRepo) return null;
     const rel = repoRelPath(entry.path);
     if (rel === null) return null;
-    const code = entry.isDirectory ? repoGitStatus.dirs.get(rel) : repoGitStatus.files.get(rel);
+    let code = entry.isDirectory ? repoGitStatus.dirs.get(rel) : repoGitStatus.files.get(rel);
+    if (!code && isInsideUntrackedDir(rel)) code = 'U';
     if (!code) return null;
     const [zh, en] = GIT_STATUS_TEXT[code];
     return entry.isDirectory
-      ? { code, badge: '●', title: state.lang === 'zh' ? '里面有改动' : 'Contains changes' }
+      ? { code, badge: '', title: state.lang === 'zh' ? (code === 'U' ? '未跟踪目录' : '里面有改动') : (code === 'U' ? 'Untracked folder' : 'Contains changes') }
       : { code, badge: code, title: state.lang === 'zh' ? zh : en };
   }
 
@@ -5575,7 +6141,7 @@
     list: async (p, showHidden, listOpts) => {
       const info = activeRepoTarget();
       if (!info) throw new Error(tr('noActiveRepo'));
-      if (!listOpts || !listOpts.subtree) refreshRepoGitStatus(); // runs alongside the listing; rows re-render when it lands
+      if (!listOpts || !listOpts.subtree) refreshRepoGitStatus(!!(listOpts && listOpts.refresh)); // coalesced + TTL-cached across subfolder navigation
       if (info.isRemote) {
         const listing = await rpc('ssh:browsePath', { hostId: info.hostId, path: p || info.remotePath, showHidden });
         state.sshHosts = listing.hosts || state.sshHosts;
@@ -5611,17 +6177,17 @@
     },
     onOpenFile: (entry) => openRepoEntryInViewer(entry.path, entry.name, false),
     onDoubleClickFile: (entry) => openRepoEntryInViewer(entry.path, entry.name, true),
-    openTerminal: (p) => {
+    openTerminal: (p, isFile) => {
       const info = activeRepoTarget();
       if (!info) return;
       const loc = info.isRemote ? sshUriFor(info.hostId, p) : p;
-      openExternalTerminal(loc).catch((err) => showToast(err.message, 'error'));
+      openExternalTerminal(loc, isFile).catch((err) => showToast(err.message, 'error'));
     },
-    openEditor: (p) => {
+    openEditor: (p, isFile) => {
       const info = activeRepoTarget();
       if (!info) return;
       const loc = info.isRemote ? sshUriFor(info.hostId, p) : p;
-      openInEditor(loc).catch((err) => showToast(err.message, 'error'));
+      openInEditor(loc, isFile).catch((err) => showToast(err.message, 'error'));
     },
     createFile: async (dir) => {
       const info = activeRepoTarget();
@@ -5685,8 +6251,15 @@
         : await confirmDialog(...localDeleteConfirmText(entries.length, names));
       if (!ok) return;
       try {
-        if (info.isRemote) await rpc('ssh:delete', { hostId: info.hostId, paths: entries.map((e) => e.path) });
-        else await rpc('local:delete', { paths: entries.map((e) => e.path) });
+        if (info.isRemote) {
+          await rpc('ssh:delete', { hostId: info.hostId, paths: entries.map((e) => e.path) });
+          showToast(zh ? `已永久删除 ${entries.length} 项` : `Permanently deleted ${entries.length} item(s)`, 'status');
+        } else {
+          const res = await rpc('local:delete', { paths: entries.map((e) => e.path) });
+          showToast(res && res.trashed
+            ? (zh ? `已移到废纸篓 (${entries.length} 项)` : `Moved ${entries.length} item(s) to Trash`)
+            : (zh ? `已永久删除 ${entries.length} 项` : `Permanently deleted ${entries.length} item(s)`), 'status');
+        }
         await repoFilesBrowser.refresh();
         window.GitMapFeatures?.refreshAllStatusesAndContext();
       } catch (err) {
@@ -6267,6 +6840,7 @@
     if (apiKey && !document.getElementById('cfgAiKey').disabled) {
       await rpc('ai:setApiKey', { key: apiKey });
     }
+    invalidateAiInfoCache();
 
     if (prevSyntax !== nextSyntax) {
       document.querySelectorAll('#coreSplitStage .tab-panel, #coreSplitStage .tab-panel-content, #repoFilesPreviewPane').forEach((panel) => {
@@ -6377,28 +6951,35 @@
   });
 
   /** Open a local path / ssh:// location in the external terminal chosen in Settings. */
-  async function openExternalTerminal(location) {
-    const res = await rpc('term:openSystem', { repo: location || state.activeRepo || state.homeDir });
+  async function openExternalTerminal(location, isFileHint) {
+    const res = await rpc('term:openSystem', {
+      repo: location || state.activeRepo || state.homeDir,
+      ...(typeof isFileHint === 'boolean' ? { isFile: isFileHint } : {})
+    });
     showToast(tr('openedIn', res.app), 'status');
   }
 
   /** Open a local path / ssh:// location in the code editor chosen in Settings. */
-  async function openInEditor(location) {
+  async function openInEditor(location, isFileHint) {
     if (!location) throw new Error(tr('noActiveRepo'));
-    const res = await rpc('editor:open', { repo: location });
+    const res = await rpc('editor:open', {
+      repo: location,
+      ...(typeof isFileHint === 'boolean' ? { isFile: isFileHint } : {})
+    });
     showToast(tr('openedIn', res.app), 'status');
   }
 
   /* ==================== Working Tree Stage & Commit Modal (#scmModal) ==================== */
   let scmDraftMsg = '';
   let scmSessionSeq = 0;
-  async function openScmModal(draftMessage) {
+  async function openScmModal(draftMessage, opts) {
     if (!state.activeRepo) {
       showToast(tr('noActiveRepo'), 'warning');
       return;
     }
     const myScmSeq = ++scmSessionSeq;
     let scmOpSeq = 0;
+    const initialAmend = !!(opts && opts.amend);
     if (typeof draftMessage === 'string' && draftMessage.trim()) {
       scmDraftMsg = draftMessage;
     }
@@ -6428,8 +7009,17 @@
       const prevScrolls = Array.from(bodyEl.querySelectorAll('.scm-group-list')).map((el) => el.scrollTop);
       const existingTextarea = bodyEl.querySelector('.scm-commit-textarea');
       const existingAmend = bodyEl.querySelector('.scm-amend-chk');
-      const currentMsg = existingTextarea ? existingTextarea.value : scmDraftMsg;
-      const isAmend = existingAmend ? existingAmend.checked : false;
+      const existingOnlyMsg = bodyEl.querySelector('.scm-amend-only-chk');
+      const existingResetDate = bodyEl.querySelector('.scm-amend-date-chk');
+      const existingAuthor = bodyEl.querySelector('.scm-amend-author');
+      const isAmend = existingAmend ? existingAmend.checked : initialAmend;
+      const fullHeadMsg = st.headMessage || st.headSubject || '';
+      const currentMsg = existingTextarea
+        ? existingTextarea.value
+        : (scmDraftMsg || (isAmend ? fullHeadMsg : ''));
+      const onlyMsgChecked = existingOnlyMsg ? existingOnlyMsg.checked : false;
+      const resetDateChecked = existingResetDate ? existingResetDate.checked : false;
+      const authorVal = existingAuthor ? existingAuthor.value : (st.headAuthor || '');
 
       const buildFileRow = (f, kind) => {
         const displayPath = f.oldPath ? `${f.oldPath} → ${f.path}` : f.path;
@@ -6481,12 +7071,27 @@
         </div>
         <div class="scm-commit-box">
           <textarea class="scm-commit-textarea" placeholder="${escapeHtml(zh ? '输入提交说明 (Cmd/Ctrl+Enter 提交)…' : 'Commit message (Cmd/Ctrl+Enter to commit)…')}">${escapeHtml(currentMsg)}</textarea>
+          <div class="scm-amend-opts${isAmend ? '' : ' hidden'}">
+            <label class="inline-check" title="${escapeHtml(zh ? '仅修改上一次提交的说明/作者，不把当前暂存区改动合入 (--only)' : 'Edit commit message/metadata only without folding staged files (--only)')}"><input type="checkbox" class="scm-amend-only-chk" ${onlyMsgChecked ? 'checked' : ''} /> <span>${escapeHtml(zh ? '仅改提交说明 (--only)' : 'Message only (--only)')}</span></label>
+            <label class="inline-check" title="${escapeHtml(zh ? '将提交作者时间刷新为当前时间 (--date=now)' : 'Refresh author timestamp to now (--date=now)')}"><input type="checkbox" class="scm-amend-date-chk" ${resetDateChecked ? 'checked' : ''} /> <span>${escapeHtml(zh ? '更新时间 (--date=now)' : 'Reset date (--date=now)')}</span></label>
+            <input type="text" class="scm-amend-author" value="${escapeHtml(authorVal)}" placeholder="${escapeHtml(zh ? '作者: Name <email>（可选）' : 'Author: Name <email> (optional)')}" title="${escapeHtml(zh ? '修改提交作者 (--author)，保持不变则沿用原作者' : 'Override commit author (--author); leave unchanged to keep original')}" />
+          </div>
           <div class="scm-commit-footer">
             <label class="inline-check"><input type="checkbox" class="scm-amend-chk" ${isAmend ? 'checked' : ''} /> <span>${escapeHtml(zh ? '修正上一次提交 (--amend)' : 'Amend previous commit (--amend)')}</span></label>
-            <div style="display:flex;gap:8px;align-items:center;">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <button type="button" class="mini-btn act-scm-ai-review" ${(st.staged.length === 0 && st.unstaged.length === 0) ? 'disabled' : ''}>${ICONS.shield}<span>${escapeHtml(zh ? 'AI 审查' : 'AI Review')}</span></button>
               <button type="button" class="mini-btn act-scm-refresh" title="Refresh">${ICONS.refresh}</button>
-              <button type="button" class="mini-btn primary act-scm-commit" ${(st.staged.length === 0 && !isAmend) ? 'disabled' : ''}>${ICONS.commit}<span>${escapeHtml(zh ? '提交已暂存更改' : 'Commit Staged')}</span></button>
+              <div class="gm-btn-group scm-commit-split-group">
+                <button type="button" class="mini-btn primary gm-btn-group-main act-scm-commit" ${(st.staged.length === 0 && !isAmend) ? 'disabled' : ''}>${ICONS.commit}<span>${escapeHtml(isAmend ? (zh ? '修改提交 (--amend)' : 'Amend Commit') : (zh ? '提交已暂存更改' : 'Commit Staged'))}</span></button>
+                <button type="button" class="mini-btn primary gm-btn-group-caret act-scm-commit-menu" aria-label="${escapeHtml(zh ? '更多提交操作' : 'More commit actions')}" aria-expanded="false">${ICONS.chevronDown}</button>
+                <div class="gm-split-menu hidden scm-commit-menu-pop">
+                  <button type="button" class="gm-split-menu-item act-scm-menu-amend"><span class="gm-split-item-left">${ICONS.pencil}<span>${escapeHtml(zh ? '修正上一次提交 (--amend)' : 'Amend Previous Commit (--amend)')}</span></span></button>
+                  <button type="button" class="gm-split-menu-item act-scm-menu-composer" ${(st.staged.length === 0 && st.unstaged.length === 0) ? 'disabled' : ''}><span class="gm-split-item-left">${ICONS.sparkle}<span>${escapeHtml(zh ? 'AI 智能拆分编排多个提交…' : 'AI Commit Composer…')}</span></span></button>
+                  <button type="button" class="gm-split-menu-item act-scm-menu-patch" ${(st.staged.length === 0 && st.unstaged.length === 0) ? 'disabled' : ''}><span class="gm-split-item-left">${ICONS.patch}<span>${escapeHtml(zh ? '导出 Review Patch 补丁包…' : 'Export Review Patch Bundle…')}</span></span></button>
+                  <div class="gm-split-menu-sep"></div>
+                  <button type="button" class="gm-split-menu-item act-scm-menu-undo"><span class="gm-split-item-left">${ICONS.undo}<span>${escapeHtml(zh ? '撤销最近一次提交 (Soft Reset)' : 'Undo Last Commit (Soft Reset)')}</span></span></button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -6494,17 +7099,75 @@
 
       const textarea = bodyEl.querySelector('.scm-commit-textarea');
       const amendChk = bodyEl.querySelector('.scm-amend-chk');
+      const amendOptsEl = bodyEl.querySelector('.scm-amend-opts');
+      const amendOnlyChk = bodyEl.querySelector('.scm-amend-only-chk');
+      const amendDateChk = bodyEl.querySelector('.scm-amend-date-chk');
+      const amendAuthorInput = bodyEl.querySelector('.scm-amend-author');
       const commitBtn = bodyEl.querySelector('.act-scm-commit');
+      const splitCaret = bodyEl.querySelector('.act-scm-commit-menu');
+      const splitMenu = bodyEl.querySelector('.scm-commit-menu-pop');
       textarea.addEventListener('input', () => {
         scmDraftMsg = textarea.value;
       });
-      amendChk.addEventListener('change', () => {
-        if (amendChk.checked && !textarea.value.trim() && st.headSubject) {
-          textarea.value = st.headSubject;
+      const syncAmendUi = () => {
+        if (amendChk.checked && !textarea.value.trim() && fullHeadMsg) {
+          textarea.value = fullHeadMsg;
           scmDraftMsg = textarea.value;
         }
+        if (amendOptsEl) amendOptsEl.classList.toggle('hidden', !amendChk.checked);
+        const labelSpan = commitBtn.querySelector('span');
+        if (labelSpan) labelSpan.textContent = amendChk.checked ? (zh ? '修改提交 (--amend)' : 'Amend Commit') : (zh ? '提交已暂存更改' : 'Commit Staged');
         commitBtn.disabled = st.staged.length === 0 && !amendChk.checked;
-      });
+      };
+      amendChk.addEventListener('change', syncAmendUi);
+
+      if (splitCaret && splitMenu) {
+        const closeSplitMenu = () => {
+          splitMenu.classList.add('hidden');
+          splitCaret.setAttribute('aria-expanded', 'false');
+        };
+        splitCaret.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const opening = splitMenu.classList.contains('hidden');
+          splitMenu.classList.toggle('hidden', !opening);
+          splitCaret.setAttribute('aria-expanded', opening ? 'true' : 'false');
+        });
+        bodyEl.addEventListener('click', (ev) => {
+          if (!splitMenu.classList.contains('hidden') && !ev.target.closest('.scm-commit-split-group')) {
+            closeSplitMenu();
+          }
+        });
+        splitMenu.querySelector('.act-scm-menu-amend')?.addEventListener('click', () => {
+          closeSplitMenu();
+          amendChk.checked = !amendChk.checked;
+          syncAmendUi();
+          textarea.focus();
+        });
+        splitMenu.querySelector('.act-scm-menu-composer')?.addEventListener('click', () => {
+          closeSplitMenu();
+          modal.classList.add('hidden');
+          window.GitMapRemoteAndGitUI?.openCommitComposerModal?.();
+        });
+        splitMenu.querySelector('.act-scm-menu-patch')?.addEventListener('click', () => {
+          closeSplitMenu();
+          modal.classList.add('hidden');
+          window.GitMapRemoteAndGitUI?.openPatchBundleModal?.('export');
+        });
+        splitMenu.querySelector('.act-scm-menu-undo')?.addEventListener('click', async () => {
+          closeSplitMenu();
+          try {
+            const undone = await rpc('scm:undoLastCommit', { repo: state.activeRepo });
+            showToast(
+              zh ? `已软撤销提交「${undone.subject}」，改动保留在暂存区` : `Soft-reset commit "${undone.subject}" (changes kept staged)`,
+              'info'
+            );
+            window.GitMapFeatures?.refreshAllStatusesAndContext();
+            if (undone.status) renderScmState(undone.status);
+          } catch (err) {
+            showToast(err.message, 'error');
+          }
+        });
+      }
 
       const runCommit = async () => {
         const msg = textarea.value.trim();
@@ -6515,9 +7178,49 @@
         }
         commitBtn.disabled = true;
         try {
-          const next = await rpc('scm:commit', { repo: state.activeRepo, message: msg, amend: amendChk.checked });
+          const amend = amendChk.checked;
+          const nextAuthor = amendAuthorInput ? amendAuthorInput.value.trim() : '';
+          const authorChanged = amend && nextAuthor && nextAuthor !== (st.headAuthor || '');
+          const committedRepo = state.activeRepo;
+          const next = await rpc('scm:commit', {
+            repo: committedRepo,
+            message: msg,
+            amend,
+            onlyMessage: amend && !!(amendOnlyChk && amendOnlyChk.checked),
+            resetAuthorDate: amend && !!(amendDateChk && amendDateChk.checked),
+            ...(authorChanged ? { author: nextAuthor } : {})
+          });
           scmDraftMsg = '';
-          showToast(zh ? '提交成功' : 'Committed successfully', 'info');
+          const subjectLine = msg.split(/\r?\n/)[0].slice(0, 56);
+          if (amend) {
+            showToast(
+              zh ? '已修正最新提交 (--amend)' : 'Commit amended successfully',
+              'info',
+              {
+                detail: subjectLine,
+                actionLabel: zh ? '查看 Reflog' : 'View Reflog',
+                onAction: () => window.GitMapFeatures && window.GitMapFeatures.openReflogModal && window.GitMapFeatures.openReflogModal()
+              }
+            );
+          } else {
+            showToast(
+              zh ? '提交成功' : 'Committed successfully',
+              'info',
+              {
+                detail: subjectLine,
+                actionLabel: zh ? '撤销提交' : 'Undo Commit',
+                onAction: async () => {
+                  const undone = await rpc('scm:undoLastCommit', { repo: committedRepo });
+                  showToast(
+                    zh ? `已撤销「${undone.subject}」，改动已回到暂存区` : `Undid "${undone.subject}" — changes remain staged`,
+                    'info'
+                  );
+                  window.GitMapFeatures?.refreshAllStatusesAndContext();
+                }
+              }
+            );
+          }
+          window.GitMapFeatures?.refreshAllStatusesAndContext();
           if (next.staged.length === 0 && next.unstaged.length === 0) {
             modal.classList.add('hidden');
             activateTab('graph');
@@ -6571,9 +7274,12 @@
       const discardAllBtn = bodyEl.querySelector('.act-scm-discard-all');
       if (discardAllBtn) {
         discardAllBtn.addEventListener('click', async () => {
+          const hasUntracked = st.unstaged.some((x) => x.status === 'U' || x.status === '?');
+          const hasTracked = st.unstaged.some((x) => x.status !== 'U' && x.status !== '?');
+          const kind = hasTracked && hasUntracked ? 'mixed' : hasUntracked ? 'untracked' : 'tracked';
           const ok = await confirmDialog(
             zh ? '丢弃全部工作区更改' : 'Discard All Working Tree Changes',
-            discardConfirmText(zh ? `确定丢弃全部 ${st.unstaged.length} 项未暂存更改（含未跟踪的新文件）？` : `Discard all ${st.unstaged.length} unstaged changes (including untracked files)?`),
+            discardConfirmText(zh ? `确定丢弃全部 ${st.unstaged.length} 项未暂存更改${hasUntracked ? '（含未跟踪的新文件）' : ''}？` : `Discard all ${st.unstaged.length} unstaged changes${hasUntracked ? ' (including untracked files)' : ''}?`, kind),
             zh ? '全部丢弃' : 'Discard All',
             true
           );
@@ -6634,9 +7340,10 @@
         const discardBtn = row.querySelector('.act-scm-discard');
         if (discardBtn) {
           discardBtn.addEventListener('click', async () => {
+            const isUntracked = stCode === 'U' || stCode === '?';
             const ok = await confirmDialog(
               zh ? '丢弃文件更改' : 'Discard File Changes',
-              discardConfirmText(zh ? `确定丢弃 "${filePath}" 的未暂存更改？` : `Discard unstaged changes in "${filePath}"?`),
+              discardConfirmText(zh ? `确定丢弃 "${filePath}" 的未暂存更改？` : `Discard unstaged changes in "${filePath}"?`, isUntracked ? 'untracked' : 'tracked'),
               zh ? '丢弃' : 'Discard',
               true
             );
@@ -7510,6 +8217,10 @@
     rpc,
     sendWs,
     showToast,
+    bindTwoStepDangerButton,
+    mountQuickAiModelPill,
+    invalidateAiInfoCache,
+    fetchAiInfoCached,
     confirmDialog,
     inputDialog,
     parseRepoDisplay,
@@ -7522,6 +8233,7 @@
     activateTab,
     closeTab,
     openDiffTab,
+    openMultiDiffTab,
     openFileTab,
     openLocalModal,
     openSshModal,
@@ -7539,6 +8251,7 @@
     openInEditor,
     toggleTerminalDrawer,
     refreshGraphView,
+    refreshRepoGitStatus,
     applyTheme,
     APP_ICON_STYLES,
     setAppIconPrefs

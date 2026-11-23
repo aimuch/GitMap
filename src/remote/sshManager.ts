@@ -154,6 +154,34 @@ function formatKnownHostToken(host: string, port: number): string {
   return cleanHost;
 }
 
+function knownHostPatternMatches(pattern: string, candidates: string[]): boolean {
+  if (pattern.startsWith('|1|')) {
+    // OpenSSH hashed hostname format: |1|<base64_salt>|<base64_hmac_sha1>
+    const parts = pattern.split('|');
+    if (parts.length >= 4) {
+      try {
+        const salt = Buffer.from(parts[2], 'base64');
+        const expected = Buffer.from(parts[3], 'base64');
+        for (const c of candidates) {
+          const digest = crypto.createHmac('sha1', salt).update(c).digest();
+          if (digest.length === expected.length && crypto.timingSafeEqual(digest, expected)) {
+            return true;
+          }
+        }
+      } catch (_) {}
+    }
+    return false;
+  }
+  const lower = pattern.toLowerCase();
+  if (candidates.includes(lower)) return true;
+  if (lower.includes('*') || lower.includes('?')) {
+    const escaped = lower.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+    const re = new RegExp(`^${escaped}$`);
+    return candidates.some((c) => re.test(c));
+  }
+  return false;
+}
+
 function knownHostEntryMatches(hostField: string, host: string, port: number): boolean {
   const candidates = [formatKnownHostToken(host, port)];
   if (!port || port === 22) {
@@ -161,29 +189,20 @@ function knownHostEntryMatches(hostField: string, host: string, port: number): b
     if (!candidates.includes(bracket22)) candidates.push(bracket22);
   }
 
+  let matched = false;
   for (const token of hostField.split(',')) {
     const trimmed = token.trim();
-    if (!trimmed || trimmed.startsWith('!')) continue;
-    if (trimmed.startsWith('|1|')) {
-      // OpenSSH hashed hostname format: |1|<base64_salt>|<base64_hmac_sha1>
-      const parts = trimmed.split('|');
-      if (parts.length >= 4) {
-        try {
-          const salt = Buffer.from(parts[2], 'base64');
-          const expected = Buffer.from(parts[3], 'base64');
-          for (const c of candidates) {
-            const digest = crypto.createHmac('sha1', salt).update(c).digest();
-            if (digest.length === expected.length && crypto.timingSafeEqual(digest, expected)) {
-              return true;
-            }
-          }
-        } catch (_) {}
-      }
-    } else if (candidates.includes(trimmed.toLowerCase())) {
-      return true;
+    if (!trimmed) continue;
+    if (trimmed.startsWith('!')) {
+      // Per OpenSSH known_hosts semantics, a matching negated pattern rejects the whole line
+      if (knownHostPatternMatches(trimmed.slice(1), candidates)) return false;
+      continue;
+    }
+    if (!matched && knownHostPatternMatches(trimmed, candidates)) {
+      matched = true;
     }
   }
-  return false;
+  return matched;
 }
 
 interface KnownHostRecord {
@@ -224,9 +243,11 @@ function loadKnownHostKeysForTarget(files: string[], host: string, port: number)
 /** Host key algorithms that yield a key of each known_hosts key type (an RSA key is offered under three signature names). */
 const HOST_KEY_ALGOS_FOR_TYPE: { [keyType: string]: string[] } = {
   'ssh-ed25519': ['ssh-ed25519'],
+  'sk-ssh-ed25519@openssh.com': ['sk-ssh-ed25519@openssh.com'],
   'ecdsa-sha2-nistp256': ['ecdsa-sha2-nistp256'],
   'ecdsa-sha2-nistp384': ['ecdsa-sha2-nistp384'],
   'ecdsa-sha2-nistp521': ['ecdsa-sha2-nistp521'],
+  'sk-ecdsa-sha2-nistp256@openssh.com': ['sk-ecdsa-sha2-nistp256@openssh.com'],
   'ssh-rsa': ['rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa'],
   'ssh-dss': ['ssh-dss']
 };
@@ -240,24 +261,46 @@ const SSH2_HOST_KEY_LISTS: { defaults: string[]; supported: string[] } = (() => 
       return { defaults: c.DEFAULT_SERVER_HOST_KEY.slice(), supported: c.SUPPORTED_SERVER_HOST_KEY.slice() };
     }
   } catch (_) {}
-  const fallback = ['ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521', 'rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa'];
+  const fallback = ['ssh-ed25519', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521', 'rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa'];
   return { defaults: fallback, supported: fallback };
 })();
 const DEFAULT_HOST_KEY_ALGOS = SSH2_HOST_KEY_LISTS.defaults;
+const SECURITY_RANK_ORDER = [
+  'ssh-ed25519',
+  'sk-ssh-ed25519@openssh.com',
+  'ecdsa-sha2-nistp256',
+  'ecdsa-sha2-nistp384',
+  'ecdsa-sha2-nistp521',
+  'sk-ecdsa-sha2-nistp256@openssh.com',
+  'rsa-sha2-512',
+  'rsa-sha2-256',
+  'ssh-rsa',
+  'ssh-dss'
+];
 
 /**
- * Host key algorithm order for a host, like OpenSSH: the key types already in known_hosts come first, so a server
- * known by its RSA key presents that key instead of a newer ed25519 one (which used to be refused as a changed key).
- * The other algorithms stay allowed after them. → undefined when nothing is known (ssh2's default order).
+ * Host key algorithm order for a host, matching OpenSSH's `order_hostkeyalgs`:
+ * partition supported algorithms into [known-in-security-order, ...remaining-defaults] so a server known by its RSA
+ * key presents that key instead of an unknown ed25519 key, while a server with BOTH RSA and ed25519 in known_hosts
+ * still prefers the stronger ed25519 rather than downgrading to RSA based on known_hosts file line order.
+ * Returns undefined when nothing supported is known (uses ssh2's default order).
  */
 export function orderHostKeyAlgorithms(knownKeyTypes: string[]): string[] | undefined {
-  const preferred: string[] = [];
+  const knownAlgos = new Set<string>();
   for (const t of knownKeyTypes) {
-    for (const a of HOST_KEY_ALGOS_FOR_TYPE[t] || []) {
-      if (!preferred.includes(a) && SSH2_HOST_KEY_LISTS.supported.includes(a)) preferred.push(a);
+    const mapped = HOST_KEY_ALGOS_FOR_TYPE[t] || [t];
+    for (const a of mapped) {
+      if (SSH2_HOST_KEY_LISTS.supported.includes(a)) knownAlgos.add(a);
     }
   }
-  if (preferred.length === 0) return undefined;
+  if (knownAlgos.size === 0) return undefined;
+  const preferred: string[] = [];
+  for (const a of SECURITY_RANK_ORDER) {
+    if (knownAlgos.has(a)) preferred.push(a);
+  }
+  for (const a of knownAlgos) {
+    if (!preferred.includes(a)) preferred.push(a);
+  }
   return preferred.concat(DEFAULT_HOST_KEY_ALGOS.filter((a) => !preferred.includes(a)));
 }
 
@@ -704,13 +747,12 @@ export class SshManager {
       if (exactMatch) {
         return { ok: true };
       }
-      const sameAlgoMismatch = existing.some((rec) => rec.keyType === keyType);
-      if (sameAlgoMismatch || existing.length > 0) {
-        return {
-          ok: false,
-          error: `REMOTE HOST IDENTIFICATION HAS CHANGED for ${profile.host}:${profile.port} (${keyType} ${fingerprint})! Connection refused to protect against a Man-in-the-Middle attack.`
-        };
-      }
+      const sameAlgo = existing.find((rec) => rec.keyType === keyType);
+      const sourceFile = (sameAlgo || existing[0]).sourceFile;
+      return {
+        ok: false,
+        error: `REMOTE HOST IDENTIFICATION HAS CHANGED for ${profile.host}:${profile.port} (${keyType} ${fingerprint}; conflicting entry in ${sourceFile})! Connection refused to protect against a Man-in-the-Middle attack.`
+      };
     }
 
     // Unknown host (Trust On First Use): prompt interactive UI user if available, otherwise accept-new & persist
@@ -1349,7 +1391,7 @@ export class SshManager {
         isSymlink,
         isGitRepo: false,
         gitBranch: null,
-        size: item.attrs?.size || 0,
+        size: isDir ? 0 : (item.attrs?.size || 0),
         mtime: item.attrs?.mtime || 0
       });
     }

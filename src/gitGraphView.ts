@@ -980,15 +980,40 @@ export class GitGraphView extends Disposable {
 				break;
 			}
 			case 'loadCommitMessage': {
-				const message = await this.gitFeatures.getCommitMessage(msg.repo, msg.commitHash);
-				const pushedTo = message !== null ? await this.gitFeatures.getRemoteBranchContaining(msg.repo, msg.commitHash) : null;
-				this.sendMessage({ command: 'loadCommitMessage', commitHash: msg.commitHash, message: message !== null ? message : '', pushedTo: pushedTo, error: message !== null ? null : t('Unable to read the message of the commit.') });
+				const [message, author, headHash] = await Promise.all([
+					this.gitFeatures.getCommitMessage(msg.repo, msg.commitHash),
+					this.gitFeatures.getCommitAuthor(msg.repo, msg.commitHash),
+					this.gitFeatures.resolveCommit(msg.repo, 'HEAD')
+				]);
+				const isHead = headHash !== null && headHash === msg.commitHash;
+				const [pushedTo, stagedCount] = await Promise.all([
+					message !== null ? this.gitFeatures.getRemoteBranchContaining(msg.repo, msg.commitHash) : Promise.resolve(null),
+					isHead ? this.gitFeatures.getStagedFileCount(msg.repo) : Promise.resolve(0)
+				]);
+				this.sendMessage({
+					command: 'loadCommitMessage',
+					commitHash: msg.commitHash,
+					message: message !== null ? message : '',
+					pushedTo: pushedTo,
+					author: author,
+					stagedCount: stagedCount,
+					error: message !== null ? null : t('Unable to read the message of the commit.')
+				});
 				break;
 			}
 			case 'editCommitMessage':
 				this.sendMessage({
 					command: 'editCommitMessage',
-					error: await this.undoManager.trackHead(msg.repo, t('Edit Message of "{0}"', abbrevCommit(msg.commitHash)), () => this.editCommitMessage(msg.repo, msg.commitHash, msg.message, signCommits), (error) => error === null)
+					error: await this.undoManager.trackHead(
+						msg.repo,
+						t('Amend Commit "{0}"', abbrevCommit(msg.commitHash)),
+						() => this.editCommitMessage(msg.repo, msg.commitHash, msg.message, signCommits, {
+							includeStaged: msg.includeStaged,
+							author: msg.author,
+							resetAuthorDate: msg.resetAuthorDate
+						}),
+						(error) => error === null
+					)
 				});
 				break;
 			case 'undoCommit':
@@ -1116,12 +1141,26 @@ export class GitGraphView extends Disposable {
 	}
 
 	/**
-	 * Change the message of a commit of the current branch: the commit HEAD refers to is amended, an older commit is reworded by an
-	 * interactive rebase from its parent (the commits between it and HEAD can't be merges).
+	 * Change a commit of the current branch: the commit HEAD refers to is amended (`git commit --amend`, supporting message,
+	 * staged changes, author override & date reset), while an older commit is reworded by an interactive rebase from its parent.
 	 */
-	private async editCommitMessage(repo: string, hash: string, message: string, sign: boolean): Promise<ErrorInfo> {
+	private async editCommitMessage(
+		repo: string,
+		hash: string,
+		message: string,
+		sign: boolean,
+		amendOpts?: { includeStaged?: boolean; author?: string | null; resetAuthorDate?: boolean }
+	): Promise<ErrorInfo> {
 		const head = await this.gitFeatures.resolveCommit(repo, 'HEAD');
-		if (head === hash) return this.gitFeatures.amendMessage(repo, message, sign);
+		if (head === hash) {
+			return this.gitFeatures.amendCommit(repo, {
+				message,
+				sign,
+				includeStaged: !!amendOpts?.includeStaged,
+				author: amendOpts?.author || null,
+				resetAuthorDate: !!amendOpts?.resetAuthorDate
+			});
+		}
 		if (message.trim() === '') return t('The message can\'t be empty.');
 		const parent = await this.gitFeatures.resolveCommit(repo, hash + '^');
 		if (parent === null) return t('The message of the first commit can only be changed while it\'s the latest commit.');

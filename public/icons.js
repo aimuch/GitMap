@@ -22,6 +22,7 @@
     remote: svg('<path d="m8 3-5 5 5 5"/><path d="M3 8h13"/><path d="m16 21 5-5-5-5"/><path d="M21 16H8"/>'),
     close: svg('<path d="M18 6 6 18M6 6l12 12"/>'),
     folder: svg('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>', ' data-kind="folder"'),
+    foldersTop: svg('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 16v-6"/><path d="m9.5 12.5 2.5-2.5 2.5 2.5"/>'),
     folderOpen: svg('<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>'),
     gitRepo: svg('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><circle cx="9.5" cy="12" r="1.4"/><circle cx="15" cy="15.5" r="1.4"/><path d="M9.5 13.4v1.1a1 1 0 0 0 1 1h3.1"/>', ' data-kind="git"'),
     file: svg('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>', ' data-kind="file"'),
@@ -85,6 +86,9 @@
     dockLeft: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M11 4v16"/><rect x="4.5" y="5.5" width="5" height="13" rx="0.8" fill="currentColor" stroke="none"/>'),
     dockRight: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M13 4v16"/><rect x="14.5" y="5.5" width="5" height="13" rx="0.8" fill="currentColor" stroke="none"/>'),
     dockTop: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 11h18"/><rect x="4.5" y="5.5" width="15" height="4" rx="0.8" fill="currentColor" stroke="none"/>'),
-    dockBottom: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 13h18"/><rect x="4.5" y="14.5" width="15" height="4" rx="0.8" fill="currentColor" stroke="none"/>')
+    dockBottom: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 13h18"/><rect x="4.5" y="14.5" width="15" height="4" rx="0.8" fill="currentColor" stroke="none"/>'),
+    cpu: svg('<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>'),
+    patch: svg('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M12 11v6"/><path d="M9 14h6"/>'),
+    flame: svg('<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>')
   };
 })();

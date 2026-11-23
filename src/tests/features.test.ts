@@ -793,6 +793,10 @@ describe('GitMap 11 Advanced Features End-to-End Suite', () => {
     assert.equal(review.findings.length, 1);
     assert.equal(review.findings[0].severity, 'high');
     assert.equal(review.findings[0].file, 'calc.ts');
+    assert.ok(review.scorecard, 'review includes QuantOrb scorecard');
+    assert.equal(review.scorecard.verdict, 'RISKY');
+    assert.equal(review.scorecard.score, 75);
+    assert.equal(review.scorecard.moduleGroups.length, 1);
 
     const notes = await rpc.call('ai:releaseNotes', { repo, fromRef: 'v0.1.0', toRef: 'HEAD', lang: 'en' });
     assert.equal(notes.commitCount, 1);
@@ -946,31 +950,75 @@ describe('GitMap 11 Advanced Features End-to-End Suite', () => {
     assert.equal(del.trashed, false, 'browser mode has no Trash: permanent');
     assert.equal(fs.existsSync(path.join(repoDir, 'docs')), false);
 
-    // Desktop app: deletes go through the Trash hook (recoverable) instead of rm
+    // Desktop app: deletes go through the Trash hook (recoverable) instead of rm; pre-validates batch before deleting
     const trashed: string[] = [];
     const trashTarget = path.join(repoDir, 'to-trash.txt');
+    const safeSurvivor = path.join(repoDir, 'survivor.txt');
     fs.writeFileSync(trashTarget, 'keep me recoverable');
+    fs.writeFileSync(safeSurvivor, 'must not be deleted on invalid batch');
     appServer!.setDesktopHooks({ trashItem: async (p: string) => { trashed.push(p); } });
     try {
+      // Batch with one protected path must reject BEFORE deleting earlier valid paths
+      await assert.rejects(
+        rpc.call('local:delete', { paths: [safeSurvivor, os.homedir()] }),
+        /protected/i
+      );
+      assert.equal(trashed.length, 0, 'invalid batch must not partially trash earlier items');
+      assert.equal(fs.existsSync(safeSurvivor), true);
+
       const delT = await rpc.call('local:delete', { paths: [trashTarget] });
       assert.equal(delT.trashed, true);
       assert.deepEqual(trashed, [trashTarget], 'the item was handed to the system Trash');
     } finally {
       appServer!.setDesktopHooks({});
       fs.rmSync(trashTarget, { force: true });
+      fs.rmSync(safeSurvivor, { force: true });
     }
 
-    // A GBK file is shown read-only and can't be overwritten (saving a lossy UTF-8 view would destroy its bytes)
+    // A GBK file is shown read-only and can't be overwritten, but can be previewed cleanly with explicit encoding
     const gbkFile = path.join(repoDir, 'gbk.txt');
     const gbkBytes = Buffer.from([0xc4, 0xe3, 0xba, 0xc3, 0x0a]); // "你好\n" in GBK
     fs.writeFileSync(gbkFile, gbkBytes);
     const gbkRead = await rpc.call('file:read', { filePath: gbkFile });
     assert.equal(gbkRead.notUtf8, true, 'non-UTF-8 text is flagged');
+    const gbkDecoded = await rpc.call('file:read', { filePath: gbkFile, encoding: 'gb18030' });
+    assert.equal(gbkDecoded.notUtf8, true, 'still flagged non-UTF-8 so edits remain blocked');
+    assert.equal(gbkDecoded.content, '你好\n', 'explicit preview encoding decodes GBK cleanly');
     await assert.rejects(rpc.call('file:write', { filePath: gbkFile, content: 'overwritten' }), /UTF-8/);
     assert.ok(fs.readFileSync(gbkFile).equals(gbkBytes), 'the GBK bytes are untouched');
+
+    // UTF-16 LE BOM file is readable AND protected from UTF-8 overwrite
+    const utf16File = path.join(repoDir, 'utf16.txt');
+    const utf16Bytes = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('hello UTF-16\n', 'utf16le')]);
+    fs.writeFileSync(utf16File, utf16Bytes);
+    const utf16Read = await rpc.call('file:read', { filePath: utf16File });
+    assert.equal(utf16Read.isBinary, false, 'UTF-16 BOM text is not misclassified as binary');
+    assert.equal(utf16Read.notUtf8, true, 'UTF-16 is flagged non-UTF-8 read-only');
+    assert.ok(utf16Read.content.includes('hello UTF-16'), 'UTF-16 content decoded cleanly via BOM');
+    await assert.rejects(rpc.call('file:write', { filePath: utf16File, content: 'corrupt' }), /UTF-8/);
+    assert.ok(fs.readFileSync(utf16File).equals(utf16Bytes), 'UTF-16 bytes are untouched');
+    fs.rmSync(utf16File, { force: true });
+
     const utf8Read = await rpc.call('file:read', { filePath: path.join(repoDir, 'README.md') }).catch(() => null);
     if (utf8Read) assert.notEqual(utf8Read.notUtf8, true, 'plain UTF-8 stays editable');
     fs.rmSync(gbkFile, { force: true });
+
+    // Lightweight scm:treeStatus collapses untracked dirs instead of enumerating every nested file
+    const treeRepo = path.join(tmpRoot, 'tree-status-repo');
+    fs.mkdirSync(path.join(treeRepo, 'untracked-pkg', 'nested'), { recursive: true });
+    execGitSync(treeRepo, ['init', '-b', 'main']);
+    execGitSync(treeRepo, ['config', 'user.name', 'Andy']);
+    execGitSync(treeRepo, ['config', 'user.email', 'andy@example.com']);
+    fs.writeFileSync(path.join(treeRepo, 'tracked.txt'), 'v1\n');
+    execGitSync(treeRepo, ['add', 'tracked.txt']);
+    execGitSync(treeRepo, ['commit', '-m', 'init']);
+    fs.writeFileSync(path.join(treeRepo, 'tracked.txt'), 'v2\n');
+    fs.writeFileSync(path.join(treeRepo, 'untracked-pkg', 'nested', 'a.txt'), 'x');
+    const treeSt = await rpc.call('scm:treeStatus', { repo: treeRepo });
+    assert.equal(treeSt.error, null);
+    assert.equal(treeSt.files['tracked.txt'], 'M', 'modified tracked file reported');
+    assert.ok(Array.isArray(treeSt.untrackedDirs) && treeSt.untrackedDirs.includes('untracked-pkg'), 'untracked folder reported as a single untrackedDirs entry');
+    assert.equal(treeSt.files['untracked-pkg/nested/a.txt'], undefined, '-unormal does not enumerate nested files inside untracked folders');
 
     // Remote SSH createFile + nested mkdir
     const sshMk = await rpc.call('ssh:mkdir', { hostId: 'tunnel-box', path: remoteHome, name: 'remote-repo/pkg' });
@@ -983,5 +1031,269 @@ describe('GitMap 11 Advanced Features End-to-End Suite', () => {
       content: 'print("ok")\n'
     });
     assert.equal(fs.readFileSync(sshCf.path, 'utf8'), 'print("ok")\n');
+  });
+
+  it('Amend Commit (--amend): preserves multi-line message, supports --only, folding staged files, author override & date reset', async () => {
+    const repoDir = path.join(tmpRoot, 'repo-amend');
+    fs.mkdirSync(repoDir, { recursive: true });
+    execGitSync(repoDir, ['init', '-b', 'main']);
+    execGitSync(repoDir, ['config', 'user.name', 'Andy']);
+    execGitSync(repoDir, ['config', 'user.email', 'andy@example.com']);
+    fs.writeFileSync(path.join(repoDir, 'base.txt'), 'v1\n');
+    execGitSync(repoDir, ['add', 'base.txt']);
+    execGitSync(repoDir, ['commit', '-m', 'feat: initial commit\n\nSecond paragraph body']);
+
+    const st0 = await rpc.call('scm:status', { repo: repoDir });
+    assert.equal(st0.headSubject, 'feat: initial commit');
+    assert.equal(st0.headMessage, 'feat: initial commit\n\nSecond paragraph body', 'returns full multi-line HEAD message');
+    assert.equal(st0.headAuthor, 'Andy <andy@example.com>');
+
+    // Stage an extra file, then amend with onlyMessage=true: staged file stays staged
+    fs.writeFileSync(path.join(repoDir, 'extra.txt'), 'staged content\n');
+    execGitSync(repoDir, ['add', 'extra.txt']);
+    const afterOnly = await rpc.call('scm:commit', {
+      repo: repoDir,
+      message: 'feat: amended message only\n\nKept body',
+      amend: true,
+      onlyMessage: true
+    });
+    assert.equal(afterOnly.staged.length, 1, '--only keeps staged file in index');
+    assert.equal(afterOnly.headMessage, 'feat: amended message only\n\nKept body');
+
+    // Now amend folding staged file + author override + date reset
+    const afterFold = await rpc.call('scm:commit', {
+      repo: repoDir,
+      message: 'feat: amended with staged\n\nBody v2',
+      amend: true,
+      onlyMessage: false,
+      author: 'Grace Hopper <grace@example.com>',
+      resetAuthorDate: true
+    });
+    assert.equal(afterFold.staged.length, 0, 'staged file folded into HEAD');
+    assert.equal(afterFold.headMessage, 'feat: amended with staged\n\nBody v2');
+    assert.equal(afterFold.headAuthor, 'Grace Hopper <grace@example.com>');
+    const headFiles = execGitSync(repoDir, ['show', '--name-only', '--format=', 'HEAD']).trim().split(/\r?\n/);
+    assert.ok(headFiles.includes('extra.txt'), 'extra.txt is now part of HEAD commit');
+  });
+
+  it('Cross-Branch Specific Commit Comparison: lists refs/branch commits and compares non-tip commits across branches', async () => {
+    const repoDir = path.join(tmpRoot, 'repo-compare-commits');
+    fs.mkdirSync(repoDir, { recursive: true });
+    execGitSync(repoDir, ['init', '-b', 'main']);
+    execGitSync(repoDir, ['config', 'user.name', 'Andy']);
+    execGitSync(repoDir, ['config', 'user.email', 'andy@example.com']);
+    fs.writeFileSync(path.join(repoDir, 'shared.txt'), 'common\n');
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '-m', 'chore: common base']);
+    const baseHash = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+
+    // Branch main: two commits (m1, m2)
+    fs.writeFileSync(path.join(repoDir, 'main-1.txt'), 'm1\n');
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '-m', 'feat(main): m1']);
+    const m1 = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+
+    fs.writeFileSync(path.join(repoDir, 'main-2.txt'), 'm2\n');
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '-m', 'feat(main): m2']);
+
+    // Diverged branch feat/alpha from base: two commits (a1, a2)
+    execGitSync(repoDir, ['checkout', '-b', 'feat/alpha', baseHash]);
+    fs.writeFileSync(path.join(repoDir, 'alpha-1.txt'), 'a1\n');
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '-m', 'feat(alpha): a1']);
+    const a1 = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+
+    fs.writeFileSync(path.join(repoDir, 'alpha-2.txt'), 'a2\n');
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '-m', 'feat(alpha): a2']);
+
+    const refs = await rpc.call('compare:refs', { repo: repoDir });
+    assert.equal(refs.headBranch, 'feat/alpha');
+    assert.ok(refs.localBranches.some((b: any) => b.name === 'main'));
+    assert.ok(refs.localBranches.some((b: any) => b.name === 'feat/alpha'));
+
+    const mainLog = await rpc.call('compare:branchCommits', { repo: repoDir, ref: 'main' });
+    const alphaLog = await rpc.call('compare:branchCommits', { repo: repoDir, ref: 'feat/alpha' });
+    assert.ok(mainLog.commits.some((c: any) => c.hash === m1));
+    assert.ok(alphaLog.commits.some((c: any) => c.hash === a1));
+
+    // Direct two-dot comparison between specific non-tip commits a1 and m1 (must NOT include m2 or a2)
+    const direct = await rpc.call('compare:commits', { repo: repoDir, leftHash: a1, rightHash: m1, fromMergeBase: false });
+    assert.equal(direct.mergeBase, baseHash);
+    assert.equal(direct.leftOnlyCount, 1);
+    assert.equal(direct.rightOnlyCount, 1);
+    const directFiles = direct.fileChanges.map((f: any) => f.newFilePath).sort();
+    assert.deepEqual(directFiles, ['alpha-1.txt', 'main-1.txt'], 'direct diff compares exactly tree(m1) vs tree(a1)');
+
+    // Three-dot comparison since merge base: only alpha-1.txt (changes introduced by a1 since base)
+    const threeDot = await rpc.call('compare:commits', { repo: repoDir, leftHash: a1, rightHash: m1, fromMergeBase: true });
+    assert.equal(threeDot.fromMergeBase, true);
+    const threeDotFiles = threeDot.fileChanges.map((f: any) => f.newFilePath);
+    assert.deepEqual(threeDotFiles, ['alpha-1.txt']);
+  });
+
+  it('AI Commit Composer, Execute Commit Plan & Soft Undo preserve unassigned files cleanly', async () => {
+    const repoDir = path.join(tmpRoot, 'repo-composer');
+    fs.mkdirSync(path.join(repoDir, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(repoDir, 'docs'), { recursive: true });
+    execGitSync(repoDir, ['init', '-b', 'main']);
+    execGitSync(repoDir, ['config', 'user.name', 'Andy']);
+    execGitSync(repoDir, ['config', 'user.email', 'andy@example.com']);
+    fs.writeFileSync(path.join(repoDir, 'README.md'), '# Init\n');
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '-m', 'chore: initial commit']);
+
+    fs.writeFileSync(path.join(repoDir, 'src', 'engine.ts'), 'export const engine = true;\n');
+    fs.writeFileSync(path.join(repoDir, 'docs', 'guide.md'), '# Guide\n');
+    fs.writeFileSync(path.join(repoDir, 'scratch.txt'), 'leave me unstaged\n');
+
+    const composed = await rpc.call('ai:composeCommits', { repo: repoDir, language: 'en', style: 'conventional' });
+    assert.ok(Array.isArray(composed.drafts) && composed.drafts.length >= 1);
+    const allComposedFiles = composed.drafts.flatMap((d: any) => d.files).sort();
+    assert.deepEqual(allComposedFiles, ['docs/guide.md', 'scratch.txt', 'src/engine.ts']);
+    assert.ok(composed.branchContext.includes('chore: initial commit'));
+
+    // Execute 2 explicit atomic drafts while intentionally leaving scratch.txt untouched
+    const execRes = await rpc.call('scm:executeCommitPlan', {
+      repo: repoDir,
+      drafts: [
+        { message: 'feat(engine): add core engine', files: ['src/engine.ts'] },
+        { message: 'docs: add user guide', files: ['docs/guide.md'] }
+      ]
+    });
+    assert.equal(execRes.ok, true);
+    assert.equal(execRes.commits.length, 2);
+    assert.equal(execRes.commits[0].subject, 'feat(engine): add core engine');
+    assert.equal(execRes.commits[1].subject, 'docs: add user guide');
+    assert.ok(execRes.backupRef && execRes.backupRef.startsWith('refs/gitmap-backup/compose-'));
+
+    const postStatus = await rpc.call('scm:status', { repo: repoDir });
+    assert.equal(postStatus.staged.length, 0);
+    assert.equal(postStatus.unstaged.length, 1);
+    assert.equal(postStatus.unstaged[0].path, 'scratch.txt');
+
+    // Soft-undo the latest commit (docs: add user guide)
+    const undone = await rpc.call('scm:undoLastCommit', { repo: repoDir });
+    assert.equal(undone.ok, true);
+    assert.equal(undone.subject, 'docs: add user guide');
+    assert.ok(undone.backupRef.startsWith('refs/gitmap-backup/undo-'));
+    assert.equal(undone.status.staged.some((f: any) => f.path === 'docs/guide.md'), true, 'undone commit files stay staged');
+  });
+
+  it('Rebase & Merge Impact Preview detects force-push risk and dry-run merge conflicts', async () => {
+    const bareDir = path.join(tmpRoot, 'remote-impact.git');
+    const repoDir = path.join(tmpRoot, 'repo-impact');
+    fs.mkdirSync(bareDir, { recursive: true });
+    fs.mkdirSync(repoDir, { recursive: true });
+    execGitSync(bareDir, ['init', '--bare']);
+    execGitSync(repoDir, ['init', '-b', 'main']);
+    execGitSync(repoDir, ['config', 'user.name', 'Andy']);
+    execGitSync(repoDir, ['config', 'user.email', 'andy@example.com']);
+    execGitSync(repoDir, ['remote', 'add', 'origin', bareDir]);
+
+    fs.writeFileSync(path.join(repoDir, 'file.txt'), 'v1\n');
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '-m', 'c1']);
+    const c1 = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+
+    fs.writeFileSync(path.join(repoDir, 'file.txt'), 'v2\n');
+    execGitSync(repoDir, ['commit', '-am', 'c2']);
+    const c2 = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+    execGitSync(repoDir, ['push', '-u', 'origin', 'main']);
+
+    // Local unpushed commit c3
+    fs.writeFileSync(path.join(repoDir, 'file.txt'), 'v3-main\n');
+    execGitSync(repoDir, ['commit', '-am', 'c3']);
+
+    // Rebase only unpushed c3 (base = c2): safe, no force-push
+    const safePreview = await rpc.call('git:impactPreview', { repo: repoDir, operation: 'rebase', baseHash: c2 });
+    assert.equal(safePreview.rewrittenCommits, 1);
+    assert.equal(safePreview.forcePushRequired, false);
+    assert.equal(safePreview.riskLevel, 'OK');
+
+    // Rebase pushed c2 + c3 (base = c1): detects origin/main force-push required!
+    const riskyPreview = await rpc.call('git:impactPreview', { repo: repoDir, operation: 'rebase', baseHash: c1 });
+    assert.equal(riskyPreview.rewrittenCommits, 2);
+    assert.equal(riskyPreview.forcePushRequired, true);
+    assert.equal(riskyPreview.pushedToRemote, 'origin/main');
+    assert.equal(riskyPreview.riskLevel, 'RISKY');
+
+    // Create conflicting branch from c2 to test merge dry-run impact preview
+    execGitSync(repoDir, ['checkout', '-b', 'feat/conflict', c2]);
+    fs.writeFileSync(path.join(repoDir, 'file.txt'), 'v3-branch\n');
+    execGitSync(repoDir, ['commit', '-am', 'branch edit']);
+    execGitSync(repoDir, ['checkout', 'main']);
+
+    const mergePreview = await rpc.call('git:impactPreview', { repo: repoDir, operation: 'merge', targetRef: 'feat/conflict' });
+    assert.equal(mergePreview.operation, 'merge');
+    assert.equal(mergePreview.rewrittenCommits, 1);
+    assert.ok(mergePreview.conflictFiles.includes('file.txt'), 'dry-run merge-tree detects file.txt conflict');
+    assert.equal(mergePreview.riskLevel, 'DANGER');
+  });
+
+  it('Launchpad, Activity Heatmap, Portable Review Patch Bundles & AI Quick Switch work end-to-end', async () => {
+    const repoDir = path.join(tmpRoot, 'repo-patch-lp');
+    fs.mkdirSync(repoDir, { recursive: true });
+    execGitSync(repoDir, ['init', '-b', 'main']);
+    execGitSync(repoDir, ['config', 'user.name', 'Andy']);
+    execGitSync(repoDir, ['config', 'user.email', 'andy@example.com']);
+    fs.writeFileSync(path.join(repoDir, 'hello.ts'), 'export const greeting = "hello";\n');
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '-m', 'feat: initial greeting']);
+
+    // Modify file in working tree so repo is dirty & patch exportable
+    fs.writeFileSync(path.join(repoDir, 'hello.ts'), 'export const greeting = "hello gitmap";\nexport const version = 2;\n');
+
+    // 1. Launchpad & Activity Heatmap
+    const lp = await rpc.call('repos:launchpad', { repos: [repoDir] });
+    assert.equal(lp.launchpad.totals.repos, 1);
+    assert.equal(lp.launchpad.totals.dirty, 1);
+    assert.ok(lp.launchpad.worktreeCounts[repoDir] >= 1);
+
+    const hm = await rpc.call('repos:activityHeatmap', { repos: [repoDir], weeks: 16 });
+    assert.equal(hm.days.length, 112);
+    assert.ok(hm.totalCommits >= 1);
+    assert.ok(hm.activeDays >= 1);
+
+    // 2. Export Review Patch Bundle -> Discard -> Inspect -> Apply -> Verify restored
+    const exported = await rpc.call('patch:exportBundle', {
+      repo: repoDir,
+      scope: 'working',
+      note: 'Please review the updated greeting export'
+    });
+    assert.equal(exported.bundle.format, 'gitmap-patch-bundle');
+    assert.equal(exported.bundle.branch, 'main');
+    assert.equal(exported.bundle.note, 'Please review the updated greeting export');
+    assert.deepEqual(exported.bundle.files, ['hello.ts']);
+    assert.ok(exported.bundle.stats.insertions >= 2);
+
+    execGitSync(repoDir, ['checkout', '--', 'hello.ts']);
+    assert.equal(fs.readFileSync(path.join(repoDir, 'hello.ts'), 'utf8'), 'export const greeting = "hello";\n');
+
+    const bundleJson = JSON.stringify(exported.bundle);
+    const inspected = await rpc.call('patch:inspect', { repo: repoDir, raw: bundleJson });
+    assert.equal(inspected.valid, true);
+    assert.equal(inspected.isBundle, true);
+    assert.equal(inspected.cleanApply, true);
+    assert.equal(inspected.bundleMeta.note, 'Please review the updated greeting export');
+
+    const applied = await rpc.call('patch:apply', { repo: repoDir, raw: bundleJson });
+    assert.equal(applied.ok, true);
+    assert.deepEqual(applied.appliedFiles, ['hello.ts']);
+    assert.ok(fs.readFileSync(path.join(repoDir, 'hello.ts'), 'utf8').includes('hello gitmap'));
+
+    // Also inspect raw unified .patch directly (non-JSON)
+    execGitSync(repoDir, ['checkout', '--', 'hello.ts']);
+    const rawInspect = await rpc.call('patch:inspect', { repo: repoDir, raw: exported.bundle.patch });
+    assert.equal(rawInspect.isBundle, false);
+    assert.equal(rawInspect.cleanApply, true);
+
+    // 3. AI Quick Model Switch (save previous, switch, verify, restore)
+    const beforeAi = await rpc.call('ai:info');
+    const switched = await rpc.call('ai:quickSwitch', { provider: 'Qwen', model: 'qwen-max' });
+    assert.equal(switched.provider, 'Qwen');
+    assert.equal(switched.model, 'qwen-max');
+    await rpc.call('ai:quickSwitch', { provider: beforeAi.provider, model: beforeAi.model || '' });
   });
 });

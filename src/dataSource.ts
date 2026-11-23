@@ -1520,17 +1520,28 @@ export class DataSource extends Disposable {
 	public async getWorkingTreeStatus(repo: string): Promise<{
 		branch: string | null;
 		headSubject: string | null;
+		headMessage: string | null;
+		headAuthor: string | null;
 		staged: Array<{ path: string; oldPath: string | null; status: string }>;
 		unstaged: Array<{ path: string; oldPath: string | null; status: string }>;
 		conflicted: Array<{ path: string; status: string }>;
 		error: string | null;
 	}> {
 		try {
-			const [porcelain, branch, headSubject] = await Promise.all([
+			const [porcelain, branch, headInfo] = await Promise.all([
 				this.spawnGit(['-c', 'core.quotepath=false', 'status', '--porcelain=v1', '-z', '-uall'], repo, (stdout) => stdout),
 				this.spawnGit(['symbolic-ref', '-q', '--short', 'HEAD'], repo, (s) => s.trim()).catch(() => null),
-				this.getCommitSubject(repo, 'HEAD')
+				this.spawnGit(['-c', 'log.showSignature=false', 'log', '-1', '--format=%s%x00%an <%ae>%x00%B', 'HEAD', '--'], repo, (s) => s).catch(() => null)
 			]);
+			let headSubject: string | null = null;
+			let headAuthor: string | null = null;
+			let headMessage: string | null = null;
+			if (headInfo) {
+				const parts = headInfo.split('\0');
+				headSubject = (parts[0] || '').trim() || null;
+				headAuthor = (parts[1] || '').trim() || null;
+				headMessage = (parts[2] || '').replace(/\s+$/, '') || headSubject;
+			}
 			const staged: Array<{ path: string; oldPath: string | null; status: string }> = [];
 			const unstaged: Array<{ path: string; oldPath: string | null; status: string }> = [];
 			const conflicted: Array<{ path: string; status: string }> = [];
@@ -1563,9 +1574,68 @@ export class DataSource extends Disposable {
 					unstaged.push({ path: filePath, oldPath: null, status: y === '?' ? 'U' : y });
 				}
 			}
-			return { branch, headSubject, staged, unstaged, conflicted, error: null };
+			return { branch, headSubject, headMessage, headAuthor, staged, unstaged, conflicted, error: null };
 		} catch (err) {
-			return { branch: null, headSubject: null, staged: [], unstaged: [], conflicted: [], error: String(err) };
+			return { branch: null, headSubject: null, headMessage: null, headAuthor: null, staged: [], unstaged: [], conflicted: [], error: String(err) };
+		}
+	}
+
+	/**
+	 * Lightweight single-command Git status for Repository Explorer decorations.
+	 * Uses `-unormal` (so large untracked directories collapse to a single `dir/` entry instead of walking every file)
+	 * and skips `symbolic-ref` / `log -1`. Clients inherit `U` down to descendants of `untrackedDirs` in O(depth).
+	 */
+	public async getTreeGitStatus(repo: string): Promise<{
+		files: { [relPath: string]: string };
+		untrackedDirs: string[];
+		error: string | null;
+	}> {
+		const RANK: { [code: string]: number } = { C: 5, D: 4, M: 3, R: 3, A: 2, U: 1 };
+		const files: { [relPath: string]: string } = {};
+		const untrackedDirs: string[] = [];
+		const put = (rel: string, code: string) => {
+			if (!rel || !RANK[code]) return;
+			const cur = files[rel];
+			if (!cur || RANK[code] > RANK[cur]) files[rel] = code;
+		};
+		try {
+			const porcelain = await this.spawnGit(
+				['-c', 'core.quotepath=false', 'status', '--porcelain=v1', '-z', '-unormal'],
+				repo,
+				(stdout) => stdout
+			);
+			const tokens = porcelain.split('\0');
+			let idx = 0;
+			while (idx < tokens.length) {
+				const entry = tokens[idx++];
+				if (entry.length < 4) continue;
+				const x = entry[0];
+				const y = entry[1];
+				const rawPath = entry.substring(3);
+				if ((x === 'R' || x === 'C' || y === 'R' || y === 'C') && idx < tokens.length) {
+					idx++; // skip original path token
+				}
+				const isConflict = x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D');
+				if (isConflict) {
+					put(rawPath.replace(/\/+$/, ''), 'C');
+					continue;
+				}
+				if (x === '?' && y === '?') {
+					if (rawPath.endsWith('/')) {
+						const cleanDir = rawPath.replace(/\/+$/, '');
+						if (cleanDir) untrackedDirs.push(cleanDir);
+					} else {
+						put(rawPath, 'U');
+					}
+					continue;
+				}
+				const cleanPath = rawPath.replace(/\/+$/, '');
+				if (x !== ' ' && x !== '?') put(cleanPath, x === 'C' ? 'A' : x);
+				if (y !== ' ') put(cleanPath, y === '?' ? 'U' : y);
+			}
+			return { files, untrackedDirs, error: null };
+		} catch (err) {
+			return { files: {}, untrackedDirs: [], error: String(err) };
 		}
 	}
 
@@ -1595,13 +1665,124 @@ export class DataSource extends Disposable {
 		return this.runGitCommand(['rm', '--cached', '-r', '.'], repo);
 	}
 
-	public commitWorkingTree(repo: string, message: string, amend: boolean = false): Promise<ErrorInfo> {
+	public commitWorkingTree(
+		repo: string,
+		message: string,
+		amend: boolean = false,
+		options?: { onlyMessage?: boolean; author?: string | null; resetAuthorDate?: boolean }
+	): Promise<ErrorInfo> {
 		const trimmed = message.trim();
 		if (!trimmed) return Promise.resolve('Commit message cannot be empty.');
-		const args = ['commit', '-F', '-'];
-		if (amend) args.push('--amend');
+		const args = ['commit'];
+		if (amend) {
+			args.push('--amend');
+			if (options?.onlyMessage) args.push('--only');
+			args.push('--allow-empty');
+		}
+		args.push('-F', '-');
+		if (options?.author && options.author.trim()) {
+			const cleanAuthor = options.author.trim().replace(/[\r\n\0]/g, '');
+			if (cleanAuthor.startsWith('-')) return Promise.resolve('Invalid author format.');
+			args.push('--author=' + cleanAuthor);
+		}
+		if (options?.resetAuthorDate) args.push('--date=now');
 		if (getConfig(repo).signCommits) args.push('-S');
 		return this._spawnGit(args, repo, () => null, false, trimmed + '\n').catch((err) => String(err));
+	}
+
+	/** List local branches, remote branches, and tags sorted by most recent commit for cross-branch commit comparison. */
+	public async listCompareRefs(repo: string): Promise<{
+		headBranch: string | null;
+		localBranches: Array<{ name: string; hash: string; isHead: boolean }>;
+		remoteBranches: Array<{ name: string; hash: string }>;
+		tags: Array<{ name: string; hash: string }>;
+	}> {
+		const raw = await this.spawnGit(
+			['for-each-ref', '--sort=-committerdate', '--format=%(refname)%1f%(refname:short)%1f%(objectname)%1f%(HEAD)', 'refs/heads', 'refs/remotes', 'refs/tags'],
+			repo,
+			(s) => s
+		).catch(() => '');
+		let headBranch: string | null = null;
+		const localBranches: Array<{ name: string; hash: string; isHead: boolean }> = [];
+		const remoteBranches: Array<{ name: string; hash: string }> = [];
+		const tags: Array<{ name: string; hash: string }> = [];
+		for (const line of raw.split(/\r?\n/)) {
+			if (!line) continue;
+			const [fullRef, shortName, hash, headMark] = line.split('\x1f');
+			if (!fullRef || !shortName || !hash) continue;
+			if (fullRef.startsWith('refs/heads/')) {
+				const isHead = headMark === '*';
+				if (isHead) headBranch = shortName;
+				localBranches.push({ name: shortName, hash, isHead });
+			} else if (fullRef.startsWith('refs/remotes/')) {
+				if (shortName.endsWith('/HEAD')) continue;
+				remoteBranches.push({ name: shortName, hash });
+			} else if (fullRef.startsWith('refs/tags/')) {
+				tags.push({ name: shortName, hash });
+			}
+		}
+		return { headBranch, localBranches, remoteBranches, tags };
+	}
+
+	/** Load recent commits reachable from a specific branch/tag/ref (optionally filtered by search query). */
+	public async getBranchCommitList(
+		repo: string,
+		ref: string,
+		limit: number = 120,
+		query: string = ''
+	): Promise<Array<{ hash: string; shortHash: string; subject: string; author: string; date: number }>> {
+		const cleanRef = String(ref || 'HEAD').trim();
+		if (!cleanRef || cleanRef.startsWith('-')) throw new Error('Invalid Git ref.');
+		const maxCount = Math.max(10, Math.min(300, Number(limit) || 120));
+		const args = ['-c', 'log.showSignature=false', 'log', `-n`, String(maxCount), '--format=%H%x1f%h%x1f%s%x1f%an%x1f%at'];
+		const q = String(query || '').trim();
+		if (q && !q.startsWith('-')) {
+			args.push('--regexp-ignore-case', `--grep=${q}`);
+		}
+		args.push(cleanRef, '--');
+		const raw = await this.spawnGit(args, repo, (s) => s);
+		const out: Array<{ hash: string; shortHash: string; subject: string; author: string; date: number }> = [];
+		for (const line of raw.split(/\r?\n/)) {
+			if (!line) continue;
+			const [hash, shortHash, subject, author, dateStr] = line.split('\x1f');
+			if (!hash) continue;
+			out.push({
+				hash,
+				shortHash: shortHash || hash.slice(0, 8),
+				subject: subject || '',
+				author: author || '',
+				date: parseInt(dateStr || '0', 10) || 0
+			});
+		}
+		return out;
+	}
+
+	/** Read metadata summaries for a list of commit hashes (order preserved). */
+	public async getCommitsSummary(
+		repo: string,
+		hashes: string[]
+	): Promise<Array<{ hash: string; shortHash: string; subject: string; author: string; date: number }>> {
+		const safe = hashes.filter((h) => /^[0-9a-fA-F]{4,64}$/.test(h)).slice(0, 50);
+		if (safe.length === 0) return [];
+		const raw = await this.spawnGit(
+			['-c', 'log.showSignature=false', 'log', '--no-walk=unsorted', '--format=%H%x1f%h%x1f%s%x1f%an%x1f%at', ...safe, '--'],
+			repo,
+			(s) => s
+		).catch(() => '');
+		const out: Array<{ hash: string; shortHash: string; subject: string; author: string; date: number }> = [];
+		for (const line of raw.split(/\r?\n/)) {
+			if (!line) continue;
+			const [hash, shortHash, subject, author, dateStr] = line.split('\x1f');
+			if (!hash) continue;
+			out.push({
+				hash,
+				shortHash: shortHash || hash.slice(0, 8),
+				subject: subject || '',
+				author: author || '',
+				date: parseInt(dateStr || '0', 10) || 0
+			});
+		}
+		return out;
 	}
 
 

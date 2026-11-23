@@ -98,8 +98,10 @@ class TableColumns {
 			this.view.graph.limitMaxWidth(columnWidths[0] + COLUMN_LEFT_RIGHT_PADDING);
 		};
 
+		const renderedCols = new Set<number>();
 		for (let i = 0; i < cols.length; i++) {
 			let col = parseInt(cols[i].dataset.col!);
+			renderedCols.add(col);
 			cols[i].innerHTML += (i > 0 ? '<span class="resizeCol left" data-col="' + (col - 1) + '"></span>' : '') + (i < cols.length - 1 ? '<span class="resizeCol right" data-col="' + col + '"></span>' : '');
 		}
 
@@ -150,7 +152,8 @@ class TableColumns {
 				} else {
 					let colWidth = col !== 1 ? columnWidths[col] : cols[1].clientWidth - COLUMN_LEFT_RIGHT_PADDING;
 					let nextCol = col + 1;
-					while (columnWidths[nextCol] === COLUMN_HIDDEN) nextCol++;
+					while (nextCol < columnWidths.length && !renderedCols.has(nextCol)) nextCol++;
+					if (nextCol >= columnWidths.length || colIndex + 1 >= cols.length) return;
 
 					if (colWidth + mouseDeltaX < COLUMN_MIN_WIDTH) mouseDeltaX = -colWidth + COLUMN_MIN_WIDTH;
 					if (columnWidths[nextCol] - mouseDeltaX < COLUMN_MIN_WIDTH) mouseDeltaX = columnWidths[nextCol] - COLUMN_MIN_WIDTH;
@@ -174,28 +177,53 @@ class TableColumns {
 			}
 		};
 
+		const defaultColWidth = [0, 0, 128 - COLUMN_LEFT_RIGHT_PADDING, 128 - COLUMN_LEFT_RIGHT_PADDING, 80 - COLUMN_LEFT_RIGHT_PADDING];
 		addListenerToClass('resizeCol', 'mousedown', (e) => {
 			if (e.target === null) return;
 			col = parseInt((<HTMLElement>e.target).dataset.col!);
-			while (columnWidths[col] === COLUMN_HIDDEN) col--;
+			while (col > 0 && !renderedCols.has(col)) col--;
 			mouseX = (<MouseEvent>e).clientX;
 
 			let isAuto = columnWidths[0] === COLUMN_AUTO;
 			for (let i = 0; i < cols.length; i++) {
 				let curCol = parseInt(cols[i].dataset.col!);
-				if (isAuto && curCol !== 1) columnWidths[curCol] = cols[i].clientWidth - COLUMN_LEFT_RIGHT_PADDING;
+				if (isAuto && curCol !== 1) {
+					const measured = cols[i].clientWidth - COLUMN_LEFT_RIGHT_PADDING;
+					columnWidths[curCol] = measured >= COLUMN_MIN_WIDTH ? measured : (defaultColWidth[curCol] || COLUMN_MIN_WIDTH);
+				}
 				if (curCol === col) colIndex = i;
 			}
-			if (isAuto) makeTableFixedLayout();
+			if (isAuto) {
+				// Preserve sane default widths for temporarily auto-hidden columns so widening later stays valid
+				for (let c = 2; c <= 4; c++) {
+					if (columnWidths[c] === COLUMN_AUTO && !renderedCols.has(c)) {
+						columnWidths[c] = defaultColWidth[c];
+					}
+				}
+				makeTableFixedLayout();
+			}
 			eventOverlay.create('colResize', processResizingColumn, stopResizingColumn);
 		});
 
 		colHeadersElem.addEventListener('contextmenu', (e: MouseEvent) => {
 			handledEvent(e);
 
-			const toggleColumnState = (col: number, defaultWidth: number) => {
-				columnWidths[col] = columnWidths[col] !== COLUMN_HIDDEN ? COLUMN_HIDDEN : columnWidths[0] === COLUMN_AUTO ? COLUMN_AUTO : defaultWidth - COLUMN_LEFT_RIGHT_PADDING;
-				this.view.saveColumnWidths(columnWidths);
+			const effVis = this.view.getColumnVisibility();
+			const toggleColumnState = (col: number, colKey: 'date' | 'author' | 'commit', defaultWidth: number) => {
+				const prefShown = columnWidths[col] !== COLUMN_HIDDEN;
+				const autoHidden = prefShown && this.view.isColumnAutoHidden(colKey);
+				if (autoHidden) {
+					// Column was auto-collapsed by narrow view: user explicitly wants to see it now
+					this.view.narrowColumnOverrides.add(colKey);
+				} else if (prefShown) {
+					this.view.narrowColumnOverrides.delete(colKey);
+					columnWidths[col] = COLUMN_HIDDEN;
+					this.view.saveColumnWidths(columnWidths);
+				} else {
+					this.view.narrowColumnOverrides.add(colKey);
+					columnWidths[col] = columnWidths[0] === COLUMN_AUTO ? COLUMN_AUTO : defaultWidth - COLUMN_LEFT_RIGHT_PADDING;
+					this.view.saveColumnWidths(columnWidths);
+				}
 				this.view.render();
 			};
 
@@ -213,7 +241,16 @@ class TableColumns {
 						visible: this.view.fileHistory === null,
 						checked: this.view.isChangesColumnShown(),
 						onClick: () => {
-							this.view.saveRepoStateValue(this.view.currentRepo, 'showChangesColumn', !this.view.isChangesColumnShown());
+							const prefShown = this.view.gitRepos[this.view.currentRepo].showChangesColumn !== false;
+							if (prefShown && this.view.isColumnAutoHidden('changes')) {
+								this.view.narrowColumnOverrides.add('changes');
+							} else if (prefShown) {
+								this.view.narrowColumnOverrides.delete('changes');
+								this.view.saveRepoStateValue(this.view.currentRepo, 'showChangesColumn', false);
+							} else {
+								this.view.narrowColumnOverrides.add('changes');
+								this.view.saveRepoStateValue(this.view.currentRepo, 'showChangesColumn', true);
+							}
 							this.view.render();
 							this.view.requestCommitStats(false);
 						}
@@ -222,22 +259,22 @@ class TableColumns {
 						title: t('Date'),
 						icon: MENU_ICONS.calendar,
 						visible: true,
-						checked: columnWidths[2] !== COLUMN_HIDDEN,
-						onClick: () => toggleColumnState(2, 128)
+						checked: effVis.date,
+						onClick: () => toggleColumnState(2, 'date', 128)
 					},
 					{
 						title: t('Author'),
 						icon: MENU_ICONS.person,
 						visible: true,
-						checked: columnWidths[3] !== COLUMN_HIDDEN,
-						onClick: () => toggleColumnState(3, 128)
+						checked: effVis.author,
+						onClick: () => toggleColumnState(3, 'author', 128)
 					},
 					{
 						title: t('Commit'),
 						icon: MENU_ICONS.commit,
 						visible: true,
-						checked: columnWidths[4] !== COLUMN_HIDDEN,
-						onClick: () => toggleColumnState(4, 80)
+						checked: effVis.commit,
+						onClick: () => toggleColumnState(4, 'commit', 80)
 					}
 				],
 				[

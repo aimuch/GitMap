@@ -473,3 +473,695 @@
     display: none !important;
   }
 }
+
+/* ── 6. SCM Amend Options & Cross-Branch Commit Compare Modal ── */
+.scm-amend-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  margin-top: 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--vscode-focusBorder) 8%, var(--vscode-editorWidget-background));
+  border: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 28%, var(--vscode-panel-border));
+  font-size: 12px;
+}
+.scm-amend-author {
+  flex: 1 1 200px;
+  min-width: 160px;
+  height: 24px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-input-border);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-size: 11.5px;
+  font-family: var(--vscode-editor-font-family);
+}
+
+.gm-cc-pickers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  margin-bottom: 10px;
+}
+.gm-cc-side {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background);
+  overflow: hidden;
+  min-width: 0;
+}
+.gm-cc-side-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  flex-wrap: wrap;
+}
+.gm-cc-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  flex: none;
+}
+.gm-cc-badge.left {
+  background: color-mix(in srgb, var(--vscode-charts-blue, #3794ff) 22%, transparent);
+  color: var(--vscode-charts-blue, #3794ff);
+}
+.gm-cc-badge.right {
+  background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #73c991) 22%, transparent);
+  color: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
+}
+.gm-cc-ref-sel {
+  flex: 0 1 170px;
+  max-width: 185px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--vscode-dropdown-border);
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  font-size: 12px;
+}
+.gm-cc-search {
+  flex: 1 1 140px;
+  min-width: 110px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 5px;
+  border: 1px solid var(--vscode-input-border);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-size: 12px;
+}
+.gm-cc-mid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gm-cc-commit-list {
+  height: 184px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  gap: 2px;
+}
+.gm-cc-commit-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+}
+.gm-cc-commit-item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.gm-cc-commit-item.selected {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+.gm-cc-commit-item.selected .gm-cc-meta,
+.gm-cc-commit-item.selected .gm-cc-sha {
+  color: inherit;
+  opacity: 0.9;
+}
+.gm-cc-sha {
+  flex: none;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 11px;
+  color: var(--vscode-textLink-foreground);
+}
+.gm-cc-subj {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gm-cc-meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+.gm-cc-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-panel-border);
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.gm-cc-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gm-cc-tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.gm-cc-tabs {
+  display: flex;
+  gap: 4px;
+}
+.gm-cc-tab {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.gm-cc-tab:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
+}
+.gm-cc-tab.active {
+  background: var(--vscode-editorWidget-background);
+  border-color: var(--vscode-panel-border);
+  color: var(--vscode-foreground);
+}
+.gm-cc-file-filter {
+  width: 240px;
+  max-width: 45%;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 5px;
+  border: 1px solid var(--vscode-input-border);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-size: 12px;
+}
+.gm-cc-results {
+  max-height: 270px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  background: var(--vscode-editor-background);
+  padding: 4px;
+}
+.gm-cc-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12.5px;
+}
+.gm-cc-file-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.gm-cc-file-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 12px;
+}
+.gm-cc-file-stats {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 11.5px;
+}
+.gm-cc-add { color: var(--vscode-gitDecoration-addedResourceForeground, #73c991); font-weight: 600; }
+.gm-cc-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39); font-weight: 600; }
+.gm-cc-empty {
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+.gm-cc-delta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 4px;
+}
+.gm-cc-delta-col {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  overflow: hidden;
+  min-width: 0;
+}
+.gm-cc-delta-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--vscode-editorWidget-background);
+  border-bottom: 1px solid var(--vscode-panel-border);
+  font-size: 12px;
+}
+.gm-cc-delta-head b { margin-left: auto; }
+.gm-cc-delta-list {
+  max-height: 210px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.gm-cc-delta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+@media (max-width: 780px) {
+  .gm-cc-pickers,
+  .gm-cc-delta-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── 7. QuantOrb Risk Verdict Scorecard, Rebase Impact Preview & Worktree Active ── */
+.gm-verdict-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.gm-verdict-pill.verdict-clean { background: rgba(34, 197, 94, 0.18); color: #16a34a; border: 1px solid rgba(34, 197, 94, 0.45); }
+.gm-verdict-pill.verdict-ok { background: rgba(59, 130, 246, 0.18); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.45); }
+.gm-verdict-pill.verdict-risky { background: rgba(245, 158, 11, 0.18); color: #d97706; border: 1px solid rgba(245, 158, 11, 0.45); }
+.gm-verdict-pill.verdict-danger { background: rgba(239, 68, 68, 0.18); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.45); }
+body.vscode-dark .gm-verdict-pill.verdict-clean { color: #4ade80; }
+body.vscode-dark .gm-verdict-pill.verdict-ok { color: #60a5fa; }
+body.vscode-dark .gm-verdict-pill.verdict-risky { color: #fbbf24; }
+body.vscode-dark .gm-verdict-pill.verdict-danger { color: #f87171; }
+
+.gm-scorecard {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--vscode-editorWidget-background);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gm-scorecard.verdict-danger { border-color: rgba(239, 68, 68, 0.5); }
+.gm-scorecard.verdict-risky { border-color: rgba(245, 158, 11, 0.48); }
+.gm-scorecard.verdict-clean { border-color: rgba(34, 197, 94, 0.45); }
+.gm-scorecard-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.gm-score-ring {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid var(--vscode-focusBorder);
+  background: color-mix(in srgb, var(--vscode-focusBorder) 10%, transparent);
+}
+.gm-score-ring.verdict-clean { border-color: #22c55e; background: rgba(34, 197, 94, 0.1); }
+.gm-score-ring.verdict-ok { border-color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
+.gm-score-ring.verdict-risky { border-color: #f59e0b; background: rgba(245, 158, 11, 0.1); }
+.gm-score-ring.verdict-danger { border-color: #ef4444; background: rgba(239, 68, 68, 0.12); }
+.gm-score-num {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.gm-score-sub {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+}
+.gm-scorecard-meta { flex: 1; min-width: 0; }
+.gm-dim-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.gm-dim-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--vscode-sideBar-background) 65%, transparent);
+  border: 1px solid var(--vscode-panel-border);
+}
+.gm-dim-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.gm-dim-head strong {
+  color: var(--vscode-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.gm-dim-track {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.22);
+  overflow: hidden;
+}
+.gm-dim-fill { display: block; height: 100%; border-radius: 999px; }
+.gm-dim-fill.ok { background: #22c55e; }
+.gm-dim-fill.warn { background: #f59e0b; }
+.gm-dim-fill.bad { background: #ef4444; }
+
+.gm-module-group {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background);
+  overflow: hidden;
+}
+.gm-module-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 11px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  font-size: 12.5px;
+}
+.gm-module-group-head:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.gm-module-group-body {
+  padding: 0 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gm-impact-card {
+  margin: 8px 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editorWidget-background);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gm-impact-card.verdict-danger { border-color: rgba(239, 68, 68, 0.55); background: rgba(239, 68, 68, 0.06); }
+.gm-impact-card.verdict-risky { border-color: rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.06); }
+.gm-impact-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.gm-impact-stat {
+  font-size: 11.5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.14);
+  color: var(--vscode-descriptionForeground);
+}
+.gm-impact-warn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #f59e0b;
+}
+.gm-impact-safe {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #22c55e;
+}
+.gm-wt-active {
+  border-color: var(--vscode-focusBorder) !important;
+  box-shadow: inset 3px 0 0 var(--vscode-focusBorder);
+}
+
+/* ── 8. Launchpad Action Buckets & rare-ui Interactive Activity Heatmap ── */
+.gm-heatmap-card {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--vscode-editorWidget-background);
+  margin-bottom: 10px;
+}
+.gm-heatmap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.gm-heatmap-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--vscode-descriptionForeground);
+}
+.gm-heatmap-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gm-heatmap-grid-wrap {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.gm-heatmap-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 13px);
+  grid-auto-columns: 13px;
+  gap: 3px;
+  width: max-content;
+}
+.gm-hm-cell {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  border: 1px solid rgba(128, 128, 128, 0.14);
+  padding: 0;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
+  transition: transform 0.1s ease, outline-color 0.1s ease;
+}
+.gm-hm-cell:hover {
+  transform: scale(1.25);
+  z-index: 2;
+}
+.gm-hm-cell.selected {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+  z-index: 3;
+}
+.gm-hm-cell.lv-1 { background: #166534; border-color: rgba(34, 197, 94, 0.25); }
+.gm-hm-cell.lv-2 { background: #15803d; border-color: rgba(34, 197, 94, 0.35); }
+.gm-hm-cell.lv-3 { background: #22c55e; border-color: rgba(34, 197, 94, 0.5); }
+.gm-hm-cell.lv-4 { background: #4ade80; border-color: rgba(74, 222, 128, 0.65); }
+body.vscode-light .gm-hm-cell.lv-1 { background: #bbf7d0; border-color: #86efac; }
+body.vscode-light .gm-hm-cell.lv-2 { background: #4ade80; border-color: #22c55e; }
+body.vscode-light .gm-hm-cell.lv-3 { background: #16a34a; border-color: #15803d; }
+body.vscode-light .gm-hm-cell.lv-4 { background: #166534; border-color: #14532d; }
+
+.gm-heatmap-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: var(--vscode-descriptionForeground);
+}
+.gm-hm-day-detail {
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--vscode-focusBorder) 8%, var(--vscode-sideBar-background));
+  border: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 32%, var(--vscode-panel-border));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.gm-launchpad-buckets {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.gm-bucket-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-foreground);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.gm-bucket-card:hover { background: var(--vscode-list-hoverBackground); }
+.gm-bucket-card.active {
+  border-color: var(--vscode-focusBorder);
+  background: color-mix(in srgb, var(--vscode-focusBorder) 12%, var(--vscode-editorWidget-background));
+}
+.gm-bucket-num {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.gm-bucket-label {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.gm-bucket-card.tone-err .gm-bucket-num { color: #ef4444; }
+.gm-bucket-card.tone-warn .gm-bucket-num { color: #f59e0b; }
+.gm-bucket-card.tone-info .gm-bucket-num { color: #3b82f6; }
+.gm-bucket-card.tone-ok .gm-bucket-num { color: #22c55e; }
+
+/* ── 9. AI Commit Composer & Review Patch Bundles ── */
+.gm-composer-draft {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: var(--vscode-editorWidget-background);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gm-composer-draft-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gm-composer-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gm-composer-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-panel-border);
+  background: color-mix(in srgb, var(--vscode-sideBar-background) 75%, transparent);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 11.5px;
+  max-width: 100%;
+}
+.gm-composer-file-chip select {
+  height: 20px;
+  font-size: 10.5px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+}
+
+.gm-patch-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.gm-patch-meta-item {
+  padding: 6px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editorWidget-background);
+  font-size: 11.5px;
+}
+.gm-patch-meta-item span {
+  display: block;
+  font-size: 10.5px;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 2px;
+}
+.gm-patch-check-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  margin: 8px 0;
+}
+.gm-patch-check-banner.ok {
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.42);
+  color: #22c55e;
+}
+.gm-patch-check-banner.warn {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #f59e0b;
+}
+
+@media (max-width: 780px) {
+  .gm-dim-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gm-launchpad-buckets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gm-hm-cell { transition: none !important; transform: none !important; }
+}

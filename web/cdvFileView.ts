@@ -27,9 +27,16 @@ class CdvFileView {
 		if (fileWasViewed) {
 			expandedCommit.lastViewedFile = filePath;
 			// Highlight it (not just the small eye icon) and mark it viewed, so it's easy to find on returning from the diff
-			cdvViewedFiles.add(filePath);
+			markCdvFileViewed(filePath);
 			filesElem.querySelectorAll('.fileTreeFileRecord.lastViewedFile').forEach((el) => el.classList.remove('lastViewedFile'));
 			fileElem.classList.add('lastViewedFile', 'viewedFile');
+			if (isCdvSinkViewedEnabled()) fileElem.classList.add('sinkViewed');
+			const checkBtn = fileElem.querySelector('.cdvViewedCheck');
+			if (checkBtn !== null) {
+				checkBtn.classList.add('checked');
+				checkBtn.setAttribute('aria-pressed', 'true');
+				checkBtn.setAttribute('title', t('Mark as Unviewed'));
+			}
 			let lastViewedElem = document.getElementById('cdvLastFileViewed');
 			if (lastViewedElem !== null) lastViewedElem.remove();
 			lastViewedElem = document.createElement('span');
@@ -37,13 +44,14 @@ class CdvFileView {
 			lastViewedElem.title = t('Last File Viewed');
 			lastViewedElem.innerHTML = SVG_ICONS.eyeOpen;
 			insertBeforeFirstChildWithClass(lastViewedElem, fileElem, 'fileTreeFileAction');
+			this.updateCdvReviewBar();
 		}
 
 		if (expandedCommit.codeReview !== null) {
 			if (isReviewed !== null) {
 				if (isReviewed) {
 					expandedCommit.codeReview.remainingFiles = expandedCommit.codeReview.remainingFiles.filter((path: string) => path !== filePath);
-				} else {
+				} else if (!expandedCommit.codeReview.remainingFiles.includes(filePath)) {
 					expandedCommit.codeReview.remainingFiles.push(filePath);
 				}
 
@@ -66,6 +74,107 @@ class CdvFileView {
 		}
 
 		this.view.saveState();
+		if (fileWasViewed && isCdvSinkViewedEnabled()) {
+			// Re-order after marking viewed so viewed items sink to bottom cleanly
+			this.changeFileViewType(this.getFileViewType(), true);
+		}
+	}
+
+	public updateCdvReviewBar() {
+		const expandedCommit = this.view.expandedCommit;
+		if (expandedCommit === null || expandedCommit.fileChanges === null) return;
+		const bar = document.getElementById('cdvReviewBar');
+		if (bar === null) return;
+		const prog = getCdvViewedProgress(expandedCommit.fileChanges);
+		const textEl = document.getElementById('cdvReviewProgressText');
+		const fillEl = document.getElementById('cdvReviewProgressFill');
+		const sinkBtn = document.getElementById('cdvSinkViewedBtn');
+		if (textEl !== null) textEl.textContent = t('Reviewed {0} / {1}', prog.viewed, prog.total);
+		if (fillEl !== null) fillEl.style.width = prog.percent + '%';
+		bar.classList.toggle('allReviewed', prog.total > 0 && prog.viewed >= prog.total);
+		if (sinkBtn !== null) {
+			const sinkOn = isCdvSinkViewedEnabled();
+			sinkBtn.classList.toggle('active', sinkOn);
+			sinkBtn.setAttribute('aria-pressed', sinkOn ? 'true' : 'false');
+		}
+	}
+
+	public openNextUnviewedFile() {
+		const expandedCommit = this.view.expandedCommit;
+		const filesElem = getCdvFileViewElem();
+		if (expandedCommit === null || expandedCommit.fileChanges === null || filesElem === null) return;
+		const changes = expandedCommit.fileChanges;
+		if (changes.length === 0) return;
+
+		// Build ordered diffable indices following current visible order in DOM
+		const records = Array.from(filesElem.querySelectorAll('.fileTreeFileRecord[data-index]')) as HTMLElement[];
+		const orderedIndices: number[] = [];
+		for (let i = 0; i < records.length; i++) {
+			const idx = parseInt(records[i].dataset.index || '-1', 10);
+			if (idx >= 0 && idx < changes.length) orderedIndices.push(idx);
+		}
+		if (orderedIndices.length === 0) {
+			for (let i = 0; i < changes.length; i++) orderedIndices.push(i);
+		}
+
+		const isDiffable = (file: GG.GitFileChange) =>
+			file.type === GG.GitFileStatus.Untracked || (file.additions !== null && file.deletions !== null);
+
+		const lastPos = expandedCommit.lastViewedFile !== null
+			? orderedIndices.findIndex((idx) => changes[idx].newFilePath === expandedCommit.lastViewedFile)
+			: -1;
+
+		let targetIdx = -1;
+		for (let offset = 1; offset <= orderedIndices.length; offset++) {
+			const candidateIdx = orderedIndices[(lastPos + offset) % orderedIndices.length];
+			const f = changes[candidateIdx];
+			if (isDiffable(f) && !isCdvFileViewed(f.newFilePath)) {
+				targetIdx = candidateIdx;
+				break;
+			}
+		}
+
+		if (targetIdx === -1) {
+			// All diffable files have been viewed! Pulse the review bar to celebrate completion.
+			const bar = document.getElementById('cdvReviewBar');
+			if (bar !== null) {
+				bar.classList.remove('reviewPulse');
+				void bar.offsetWidth;
+				bar.classList.add('reviewPulse');
+			}
+			return;
+		}
+
+		const targetElem = <HTMLElement | null>filesElem.querySelector('.fileTreeFileRecord[data-index="' + targetIdx + '"]');
+		if (targetElem === null) return;
+
+		// Auto-expand any collapsed ancestor folders in tree view so the jumped-to file is visible
+		let ancestor: HTMLElement | null = targetElem.parentElement;
+		while (ancestor !== null && ancestor !== filesElem) {
+			if (ancestor.tagName === 'UL' && ancestor.classList.contains('fileTreeFolderContents') && ancestor.classList.contains('hidden')) {
+				ancestor.classList.remove('hidden');
+				const parentLi = ancestor.parentElement;
+				if (parentLi !== null && parentLi.tagName === 'LI') {
+					parentLi.classList.remove('closed');
+					const folderElem = <HTMLElement | null>parentLi.querySelector(':scope > .fileTreeFolder');
+					if (folderElem !== null && typeof folderElem.dataset.folderpath === 'string' && expandedCommit.fileTree !== null) {
+						const folderPath = decodeURIComponent(folderElem.dataset.folderpath);
+						alterFileTreeFolderOpen(expandedCommit.fileTree, folderPath, true);
+						const iconElem = folderElem.querySelector('.fileTreeFolderIcon');
+						const nameElem = folderElem.querySelector('.gitFolderName');
+						if (iconElem !== null && nameElem !== null) {
+							const folderName = nameElem.textContent || '';
+							iconElem.innerHTML = fileIcons.getFolderIcon(folderName.substring(folderName.lastIndexOf(' / ') + 1).trim(), true);
+						}
+					}
+				}
+			}
+			ancestor = ancestor.parentElement;
+		}
+
+		targetElem.scrollIntoView({ block: 'nearest' });
+		const clickable = <HTMLElement | null>targetElem.querySelector('.fileTreeFile.gitDiffPossible');
+		if (clickable !== null) clickable.click();
 	}
 
 	public getFileViewType() {
@@ -220,6 +329,43 @@ class CdvFileView {
 				repo: decodeURIComponent((<HTMLElement>(<Element>e.target).closest('.fileTreeRepo')).dataset.path!)
 			});
 		});
+
+		addListenerToClass('cdvViewedCheck', 'click', (e) => {
+			handledEvent(e);
+			const expandedCommit = this.view.expandedCommit;
+			if (expandedCommit === null || expandedCommit.fileChanges === null || e.target === null) return;
+			const fileElem = getFileElemOfEventTarget(e.target);
+			const file = getFileOfFileElem(expandedCommit.fileChanges, fileElem);
+			const nowViewed = toggleCdvFileViewed(file.newFilePath);
+			fileElem.classList.toggle('viewedFile', nowViewed);
+			fileElem.classList.toggle('sinkViewed', nowViewed && isCdvSinkViewedEnabled());
+			const btn = <HTMLElement | null>fileElem.querySelector('.cdvViewedCheck');
+			if (btn !== null) {
+				btn.classList.toggle('checked', nowViewed);
+				btn.setAttribute('aria-pressed', nowViewed ? 'true' : 'false');
+				btn.setAttribute('title', nowViewed ? t('Mark as Unviewed') : t('Mark as Viewed'));
+			}
+			if (expandedCommit.codeReview !== null) {
+				this.cdvUpdateFileState(file, fileElem, nowViewed, false);
+			}
+			this.updateCdvReviewBar();
+			if (isCdvSinkViewedEnabled()) {
+				this.changeFileViewType(this.getFileViewType(), true);
+			}
+		});
+
+		const nextUnviewedBtn = document.getElementById('cdvNextUnviewedBtn');
+		if (nextUnviewedBtn !== null) {
+			nextUnviewedBtn.onclick = () => this.openNextUnviewedFile();
+		}
+		const sinkViewedBtn = document.getElementById('cdvSinkViewedBtn');
+		if (sinkViewedBtn !== null) {
+			sinkViewedBtn.onclick = () => {
+				setCdvSinkViewedEnabled(!isCdvSinkViewedEnabled());
+				this.updateCdvReviewBar();
+				this.changeFileViewType(this.getFileViewType(), true);
+			};
+		}
 
 		addListenerToClass('fileTreeFile', 'click', (e) => {
 			const expandedCommit = this.view.expandedCommit;

@@ -237,6 +237,7 @@
           renderSidebar();
         }
         await refreshRepoContext();
+        if (typeof App.refreshRepoGitStatus === 'function') App.refreshRepoGitStatus(true);
       } while (statusRefreshQueued);
     } catch (_) {
     } finally {
@@ -562,13 +563,15 @@
     const ui = openFeatureModal({
       title: T('可视化交互式变基 (Interactive Rebase)', 'Visual Interactive Rebase'),
       icon: ICONS.merge,
-      width: 'min(860px, 94vw)',
+      width: 'min(900px, 95vw)',
       bodyHtml: `<div class="browser-empty-state"><span class="fb-spinner"></span>Loading commits…</div>`
     });
 
     let steps = [];
     let baseHash = '';
     let dragFromIdx = -1;
+    let impactInfo = null;
+    let viewMode = 'visual'; // 'visual' | 'raw'
 
     const loadRange = async (baseArg) => {
       try {
@@ -586,10 +589,46 @@
           author: c.author,
           message: c.message
         }));
+        impactInfo = await rpc('git:impactPreview', { repo, operation: 'rebase', baseHash }).catch(() => null);
         renderSteps(baseArg || 10);
       } catch (err) {
         ui.bodyEl.innerHTML = `<div class="browser-empty-state error-text">${escapeHtml(err.message)}</div>`;
       }
+    };
+
+    const buildImpactHtml = () => {
+      if (!impactInfo) return '';
+      const verdictCls = 'verdict-' + String(impactInfo.riskLevel || 'OK').toLowerCase();
+      return `
+        <div class="gm-impact-card ${verdictCls}">
+          <div class="gm-impact-head">
+            <span class="gm-verdict-pill ${verdictCls}">${escapeHtml(impactInfo.riskLevel || 'OK')}</span>
+            <strong>${escapeHtml(T('变基影响预检 (Impact Preview)', 'Rebase Impact Preview'))}</strong>
+            <span class="gm-impact-stat">${escapeHtml(T(`将重写 ${impactInfo.rewrittenCommits} 个提交`, `${impactInfo.rewrittenCommits} commit(s) rewritten`))}</span>
+            <span class="gm-impact-stat">${escapeHtml(T(`涉及 ${impactInfo.affectedFilesCount} 个文件`, `${impactInfo.affectedFilesCount} file(s) touched`))}</span>
+          </div>
+          ${impactInfo.forcePushRequired
+            ? `<div class="gm-impact-warn">${ICONS.alert}<span>${escapeHtml(T(
+                `注意：这些提交已推送到远程分支 (${impactInfo.remoteBranches.slice(0, 3).join(', ')})，变基完成后需要 git push --force-with-lease。`,
+                `Warning: commits already pushed to ${impactInfo.remoteBranches.slice(0, 3).join(', ')}. Force push (--force-with-lease) will be required.`
+              ))}</span></div>`
+            : `<div class="gm-impact-safe">${ICONS.check}<span>${escapeHtml(T('仅影响尚未推送的本地提交，可安全变基（执行前自动创建备份引用）。', 'Only affects unpushed local commits — safe to rebase (automatic backup ref created).'))}</span></div>`
+          }
+        </div>
+      `;
+    };
+
+    const buildRawPlanText = () => {
+      const todoLines = steps.map((s) => `${s.action} ${s.shortHash} ${s.subject}`).join('\n');
+      const payload = {
+        operation: 'interactive-rebase',
+        baseHash,
+        impact: impactInfo || undefined,
+        cli: impactInfo ? impactInfo.cliPreview : `git rebase -i ${baseHash.slice(0, 8)}`,
+        todo: todoLines,
+        steps: steps.map((s) => ({ action: s.action, hash: s.hash, message: s.action === 'reword' || s.action === 'squash' ? s.message : undefined }))
+      };
+      return JSON.stringify(payload, null, 2);
     };
 
     const renderSteps = (baseVal) => {
@@ -598,39 +637,74 @@
           <label><span>${escapeHtml(T('基准范围（提交数或 Base Commit / 分支名）', 'Base Commit / Ref or Commit Count'))}</span>
             <input type="text" id="rbBaseInput" spellcheck="false" value="${escapeHtml(String(baseVal))}" placeholder="10 / main / a1b2c3d" />
           </label>
-          <button type="button" id="btnRbReload" class="mini-btn">${ICONS.refresh}<span>${escapeHtml(T('加载范围', 'Load Range'))}</span></button>
-        </div>
-        <p class="settings-hint">${escapeHtml(T(`当前基准 Base: ${baseHash.slice(0, 10)}（按从旧到新顺序应用，支持上下拖拽调整顺序；执行前会自动创建备份引用）`, `Base commit: ${baseHash.slice(0, 10)} (applied oldest-to-newest; drag rows to reorder; a safety backup ref is created automatically).`))}</p>
-        <div class="rebase-list" id="rbList">
-          ${steps.length === 0 ? `<div class="scm-empty">${escapeHtml(T('该范围内没有可重排的线性提交。', 'No linear commits in this range.'))}</div>` : steps.map((s, idx) => `
-            <div class="rebase-row action-${s.action}" draggable="true" data-idx="${idx}">
-              <div class="rebase-row-main">
-                <select class="rb-action-sel" data-idx="${idx}">
-                  <option value="pick" ${s.action === 'pick' ? 'selected' : ''}>pick</option>
-                  <option value="reword" ${s.action === 'reword' ? 'selected' : ''}>reword</option>
-                  <option value="squash" ${s.action === 'squash' ? 'selected' : ''}>squash</option>
-                  <option value="fixup" ${s.action === 'fixup' ? 'selected' : ''}>fixup</option>
-                  <option value="drop" ${s.action === 'drop' ? 'selected' : ''}>drop</option>
-                </select>
-                <code>${escapeHtml(s.shortHash)}</code>
-                <span class="rebase-subject" title="${escapeHtml(s.subject)}">${escapeHtml(s.subject)}</span>
-                <span style="font-size:11px;color:var(--vscode-descriptionForeground);">${escapeHtml(s.author)}</span>
-                <button type="button" class="mini-icon-btn act-rb-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>${ICONS.arrowUp}</button>
-                <button type="button" class="mini-icon-btn act-rb-down" data-idx="${idx}" ${idx === steps.length - 1 ? 'disabled' : ''}>${ICONS.arrowDown}</button>
-              </div>
-              ${(s.action === 'reword' || s.action === 'squash') ? `
-                <textarea class="scm-commit-textarea rb-msg-box" data-idx="${idx}" style="min-height:56px;">${escapeHtml(s.message || s.subject)}</textarea>
-              ` : ''}
+          <div style="display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap;">
+            <button type="button" id="btnRbReload" class="mini-btn">${ICONS.refresh}<span>${escapeHtml(T('加载范围', 'Load Range'))}</span></button>
+            <div class="segmented-control">
+              <button type="button" class="rb-mode-visual ${viewMode === 'visual' ? 'active' : ''}">${escapeHtml(T('可视化编排', 'Visual Plan'))}</button>
+              <button type="button" class="rb-mode-raw ${viewMode === 'raw' ? 'active' : ''}">Raw JSON / CLI</button>
             </div>
-          `).join('')}
+          </div>
         </div>
+        ${buildImpactHtml()}
+        ${viewMode === 'raw' ? `
+          <div class="feature-card" style="margin-top:8px;">
+            <div class="feature-card-top">
+              <strong>${escapeHtml(T('Rebase 计划 JSON 与等效 CLI', 'Rebase Plan JSON & Equivalent CLI'))}</strong>
+              <button type="button" class="mini-btn act-rb-copy-raw">${ICONS.copy}<span>${escapeHtml(T('复制 JSON', 'Copy JSON'))}</span></button>
+            </div>
+            <pre class="logs-pre" style="max-height:320px;margin:6px 0 0;">${escapeHtml(buildRawPlanText())}</pre>
+          </div>
+        ` : `
+          <p class="settings-hint">${escapeHtml(T(`当前基准 Base: ${baseHash.slice(0, 10)}（按从旧到新顺序应用，支持上下拖拽调整顺序；执行前会自动创建备份引用）`, `Base commit: ${baseHash.slice(0, 10)} (applied oldest-to-newest; drag rows to reorder; a safety backup ref is created automatically).`))}</p>
+          <div class="rebase-list" id="rbList">
+            ${steps.length === 0 ? `<div class="scm-empty">${escapeHtml(T('该范围内没有可重排的线性提交。', 'No linear commits in this range.'))}</div>` : steps.map((s, idx) => `
+              <div class="rebase-row action-${s.action}" draggable="true" data-idx="${idx}">
+                <div class="rebase-row-main">
+                  <select class="rb-action-sel" data-idx="${idx}">
+                    <option value="pick" ${s.action === 'pick' ? 'selected' : ''}>pick</option>
+                    <option value="reword" ${s.action === 'reword' ? 'selected' : ''}>reword</option>
+                    <option value="squash" ${s.action === 'squash' ? 'selected' : ''}>squash</option>
+                    <option value="fixup" ${s.action === 'fixup' ? 'selected' : ''}>fixup</option>
+                    <option value="drop" ${s.action === 'drop' ? 'selected' : ''}>drop</option>
+                  </select>
+                  <code>${escapeHtml(s.shortHash)}</code>
+                  <span class="rebase-subject" title="${escapeHtml(s.subject)}">${escapeHtml(s.subject)}</span>
+                  <span style="font-size:11px;color:var(--vscode-descriptionForeground);">${escapeHtml(s.author)}</span>
+                  <button type="button" class="mini-icon-btn act-rb-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>${ICONS.arrowUp}</button>
+                  <button type="button" class="mini-icon-btn act-rb-down" data-idx="${idx}" ${idx === steps.length - 1 ? 'disabled' : ''}>${ICONS.arrowDown}</button>
+                </div>
+                ${(s.action === 'reword' || s.action === 'squash') ? `
+                  <textarea class="scm-commit-textarea rb-msg-box" data-idx="${idx}" style="min-height:56px;">${escapeHtml(s.message || s.subject)}</textarea>
+                ` : ''}
+              </div>
+            `).join('')}
+          </div>
+        `}
       `;
 
+      const risky = !!(impactInfo && impactInfo.forcePushRequired);
       ui.footerEl.innerHTML = `
         <button type="button" class="mini-btn act-fm-close">${escapeHtml(T('取消', 'Cancel'))}</button>
-        <button type="button" class="mini-btn primary act-rb-exec" ${steps.length === 0 ? 'disabled' : ''}>${ICONS.check}<span>${escapeHtml(T('开始执行变基', 'Start Rebase'))}</span></button>
+        <button type="button" class="mini-btn ${risky ? 'danger' : 'primary'} act-rb-exec" ${steps.length === 0 ? 'disabled' : ''}>${ICONS.check}<span>${escapeHtml(risky ? T('开始执行变基（涉及已推送提交）', 'Start Rebase (Rewrites Pushed)') : T('开始执行变基', 'Start Rebase'))}</span></button>
       `;
       ui.footerEl.querySelector('.act-fm-close').onclick = ui.close;
+
+      ui.bodyEl.querySelector('.rb-mode-visual')?.addEventListener('click', () => {
+        viewMode = 'visual';
+        renderSteps(document.getElementById('rbBaseInput').value.trim());
+      });
+      ui.bodyEl.querySelector('.rb-mode-raw')?.addEventListener('click', () => {
+        viewMode = 'raw';
+        renderSteps(document.getElementById('rbBaseInput').value.trim());
+      });
+      ui.bodyEl.querySelector('.act-rb-copy-raw')?.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(buildRawPlanText());
+          showToast(T('已复制 Rebase 计划 JSON', 'Copied Rebase plan JSON'), 'info');
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      });
 
       document.getElementById('btnRbReload').addEventListener('click', () => {
         const raw = document.getElementById('rbBaseInput').value.trim();
@@ -677,16 +751,24 @@
         });
       });
 
-      ui.footerEl.querySelector('.act-rb-exec').addEventListener('click', async (e) => {
-        const execBtn = e.currentTarget;
+      const execBtn = ui.footerEl.querySelector('.act-rb-exec');
+      const runRebase = async () => {
         execBtn.disabled = true;
         try {
-          await rpc('rebase:execute', {
+          const res = await rpc('rebase:execute', {
             repo,
             baseHash,
             steps: steps.map((s) => ({ action: s.action, hash: s.hash, message: s.message }))
           });
-          showToast(T('交互式变基已完成（可在设置中随时恢复历史备份）', 'Interactive rebase completed (backup ref saved)'), 'info');
+          showToast(
+            T('交互式变基已完成（已创建安全备份引用）', 'Interactive rebase completed (backup ref saved)'),
+            'info',
+            {
+              detail: res && res.backupRef ? res.backupRef : '',
+              actionLabel: T('查看 Reflog', 'Open Reflog'),
+              onAction: () => openReflogModal()
+            }
+          );
           ui.close();
           activateTab('graph');
           refreshAllStatusesAndContext();
@@ -695,7 +777,17 @@
           execBtn.disabled = false;
           refreshAllStatusesAndContext();
         }
-      });
+      };
+
+      if (App.bindTwoStepDangerButton) {
+        App.bindTwoStepDangerButton(execBtn, {
+          shouldRequireArm: () => risky,
+          armedLabel: T('已推送远程 · 再次点击确认执行变基', 'Rewrites Pushed · Click Again to Confirm'),
+          onConfirm: runRebase
+        });
+      } else {
+        execBtn.addEventListener('click', runRebase);
+      }
     };
 
     await loadRange(initialBase || 10);
@@ -709,7 +801,7 @@
       title: T('Git Worktree 多工作树管理', 'Git Worktrees Manager'),
       badge: parseRepoDisplay(repo).name,
       icon: ICONS.layers,
-      width: 'min(840px, 94vw)',
+      width: 'min(860px, 94vw)',
       bodyHtml: `<div class="browser-empty-state"><span class="fb-spinner"></span>Loading worktrees…</div>`
     });
 
@@ -723,24 +815,28 @@
 
         ui.bodyEl.innerHTML = `
           <div style="display:flex;flex-direction:column;gap:8px;">
-            ${list.map((w) => `
-              <div class="feature-card">
+            ${list.map((w) => {
+              const isCurrent = w.repoUri === state.activeRepo;
+              return `
+              <div class="feature-card ${isCurrent ? 'gm-wt-active' : ''}">
                 <div class="feature-card-top">
-                  <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;">
                     <span class="icon-slot">${ICONS.gitRepo}</span>
                     <strong style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(w.path)}</strong>
                     ${w.branch ? `<span class="branch-pill">${ICONS.branch}${escapeHtml(w.branch)}</span>` : `<span class="scm-status-badge">detached @ ${escapeHtml((w.head || '').slice(0, 7))}</span>`}
                     ${w.isMain ? `<span class="ssh-chip">main</span>` : ''}
+                    ${isCurrent ? `<span class="gm-badge ok">${escapeHtml(T('当前图谱作用域', 'Active Scope'))}</span>` : ''}
                   </div>
-                  <div style="display:inline-flex;gap:5px;flex-shrink:0;">
-                    <button type="button" class="mini-btn act-wt-switch" data-uri="${escapeHtml(w.repoUri)}">${escapeHtml(T('切换图谱', 'Open Graph'))}</button>
+                  <div style="display:inline-flex;gap:5px;flex-shrink:0;align-items:center;">
+                    <button type="button" class="mini-btn ${isCurrent ? '' : 'primary'} act-wt-switch" data-uri="${escapeHtml(w.repoUri)}" title="${escapeHtml(T('将提交图谱直接聚焦到该工作树作用域', 'Scope the Commit Graph directly to this worktree'))}">${ICONS.compass}<span>${escapeHtml(T('在图谱中打开作用域', 'Open Graph Scope'))}</span></button>
                     <button type="button" class="mini-icon-btn act-wt-term" data-uri="${escapeHtml(w.repoUri)}" title="Integrated Terminal">${ICONS.terminal}</button>
                     <button type="button" class="mini-icon-btn act-wt-editor" data-uri="${escapeHtml(w.repoUri)}" title="Open in Editor">${ICONS.editor}</button>
-                    ${!w.isMain ? `<button type="button" class="mini-icon-btn danger act-wt-del" data-path="${escapeHtml(w.path)}" title="Remove Worktree">${ICONS.trash}</button>` : ''}
+                    ${!w.isMain ? `<button type="button" class="mini-btn danger act-wt-del" data-path="${escapeHtml(w.path)}" title="${escapeHtml(T('点击两次确认移除工作树', 'Click twice to remove worktree'))}">${ICONS.trash}<span>${escapeHtml(T('移除', 'Remove'))}</span></button>` : ''}
                   </div>
                 </div>
               </div>
-            `).join('')}
+            `;
+            }).join('')}
           </div>
           <form id="wtAddForm" class="feature-card" style="margin-top:4px;">
             <strong style="font-size:12.5px;">${escapeHtml(T('+ 新建并行工作树 (Create Worktree)', '+ Create New Parallel Worktree'))}</strong>
@@ -763,14 +859,19 @@
         ui.bodyEl.querySelectorAll('.act-wt-switch').forEach((b) => {
           b.addEventListener('click', async () => {
             const uri = b.getAttribute('data-uri');
-            const addRes = await rpc('repos:add', { path: uri });
-            state.repos = addRes.repos || state.repos;
-            state.activeRepo = addRes.root;
-            renderSidebar();
-            renderActiveRepoBadge();
-            ui.close();
-            activateTab('graph');
-            refreshAllStatusesAndContext();
+            try {
+              const res = await rpc('worktree:openInGraph', { repoUri: uri });
+              state.repos = res.repos || state.repos;
+              state.activeRepo = res.root || uri;
+              renderSidebar();
+              renderActiveRepoBadge();
+              ui.close();
+              activateTab('graph');
+              refreshAllStatusesAndContext();
+              showToast(T(`已切换图谱作用域至 Worktree：${parseRepoDisplay(state.activeRepo).name}`, `Graph scoped to worktree: ${parseRepoDisplay(state.activeRepo).name}`), 'info');
+            } catch (err) {
+              showToast(err.message, 'error');
+            }
           });
         });
         ui.bodyEl.querySelectorAll('.act-wt-term').forEach((b) => {
@@ -783,24 +884,26 @@
           b.addEventListener('click', () => openInEditor(b.getAttribute('data-uri')).catch((e) => showToast(e.message, 'error')));
         });
         ui.bodyEl.querySelectorAll('.act-wt-del').forEach((b) => {
-          b.addEventListener('click', async () => {
-            const wtPath = b.getAttribute('data-path');
-            const ok = await confirmDialog(
-              T('移除工作树', 'Remove Worktree'),
-              T(`确定移除工作树 "${wtPath}"？`, `Remove worktree "${wtPath}"?`),
-              T('移除', 'Remove'),
-              true
-            );
-            if (!ok) return;
+          const wtPath = b.getAttribute('data-path');
+          const doRemove = async () => {
             try {
               const res = await rpc('worktree:remove', { repo, path: wtPath, force: true });
               state.repos = res.repos || state.repos;
               renderSidebar();
+              showToast(T(`已移除工作树：${wtPath}`, `Removed worktree: ${wtPath}`), 'info');
               await render();
             } catch (err) {
               showToast(err.message, 'error');
             }
-          });
+          };
+          if (App.bindTwoStepDangerButton) {
+            App.bindTwoStepDangerButton(b, {
+              armedLabel: T('确认移除', 'Confirm Remove'),
+              onConfirm: doRemove
+            });
+          } else {
+            b.addEventListener('click', doRemove);
+          }
         });
 
         document.getElementById('wtAddForm').addEventListener('submit', async (e) => {
@@ -1030,31 +1133,48 @@
     await load();
   }
 
-  /* ==================== 8. AI Pre-Commit / Commit Code Review ==================== */
+  /* ==================== 8. AI Pre-Commit / Commit Code Review (QuantOrb Scorecard + Module Groups) ==================== */
   async function openAiCodeReviewModal(repoArg, initialScope) {
     const repo = repoArg || requireActiveRepo();
     if (!repo) return;
     let scope = initialScope || 'all';
+    let lastReviewResult = null;
+    let viewMode = 'modules'; // 'modules' | 'list' | 'json'
 
     const ui = openFeatureModal({
       title: T('AI 提交前代码审查 (AI Code Review)', 'AI Pre-Commit Code Review'),
       badge: parseRepoDisplay(repo).name,
       icon: ICONS.shield,
-      width: 'min(840px, 94vw)',
+      width: 'min(920px, 95vw)',
       bodyHtml: `
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <select id="aiRevScope" style="max-width:220px;">
-            <option value="all" ${scope === 'all' ? 'selected' : ''}>${escapeHtml(T('全部工作区更改 (HEAD)', 'All Working Tree Changes'))}</option>
-            <option value="staged" ${scope === 'staged' ? 'selected' : ''}>${escapeHtml(T('仅已暂存更改 (Staged)', 'Staged Changes Only'))}</option>
-            <option value="unstaged" ${scope === 'unstaged' ? 'selected' : ''}>${escapeHtml(T('仅未暂存更改 (Unstaged)', 'Unstaged Changes Only'))}</option>
-            <option value="commit" ${scope === 'commit' ? 'selected' : ''}>${escapeHtml(T('指定提交哈希 (Commit)', 'Specific Commit Hash'))}</option>
-          </select>
-          <input type="text" id="aiRevCommitHash" class="${scope === 'commit' ? '' : 'hidden'}" placeholder="Commit SHA / HEAD" style="max-width:200px;" value="HEAD" />
-          <button type="button" id="btnRunAiReview" class="mini-btn primary">${ICONS.sparkle}<span>${escapeHtml(T('开始 AI 审查', 'Run AI Review'))}</span></button>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:space-between;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <select id="aiRevScope" style="max-width:220px;">
+              <option value="all" ${scope === 'all' ? 'selected' : ''}>${escapeHtml(T('全部工作区更改 (HEAD)', 'All Working Tree Changes'))}</option>
+              <option value="staged" ${scope === 'staged' ? 'selected' : ''}>${escapeHtml(T('仅已暂存更改 (Staged)', 'Staged Changes Only'))}</option>
+              <option value="unstaged" ${scope === 'unstaged' ? 'selected' : ''}>${escapeHtml(T('仅未暂存更改 (Unstaged)', 'Unstaged Changes Only'))}</option>
+              <option value="commit" ${scope === 'commit' ? 'selected' : ''}>${escapeHtml(T('指定提交哈希 (Commit)', 'Specific Commit Hash'))}</option>
+            </select>
+            <input type="text" id="aiRevCommitHash" class="${scope === 'commit' ? '' : 'hidden'}" placeholder="Commit SHA / HEAD" style="max-width:190px;" value="HEAD" />
+            <button type="button" id="btnRunAiReview" class="mini-btn primary">${ICONS.sparkle}<span>${escapeHtml(T('开始 AI 审查', 'Run AI Review'))}</span></button>
+            <span id="aiRevStatusSlot"></span>
+          </div>
+          <div id="aiRevModelSlot"></div>
         </div>
-        <div id="aiRevResults"><div class="scm-empty">${escapeHtml(T('点击「开始 AI 审查」扫描潜在 Bug、安全漏洞与性能问题。', 'Click "Run AI Review" to scan for bugs, security risks, and regressions.'))}</div></div>
+        <div id="aiRevResults" style="margin-top:10px;">
+          <div class="gm-empty-card">
+            <div class="gm-empty-card-icon">${ICONS.shield}</div>
+            <div class="gm-empty-card-title">${escapeHtml(T('AI 风险评分卡与多维审查', 'AI Risk Scorecard & Multi-Dimension Review'))}</div>
+            <div class="gm-empty-card-desc">${escapeHtml(T('点击「开始 AI 审查」生成 CLEAN / OK / RISKY / DANGER 风险评级、安全性/缺陷/性能/可维护性四维评分及按模块归类的修复建议。', 'Click "Run AI Review" to generate a CLEAN/OK/RISKY/DANGER verdict, 4-dimension quality scorecard, and module-grouped findings.'))}</div>
+          </div>
+        </div>
       `
     });
+
+    const modelSlot = document.getElementById('aiRevModelSlot');
+    if (modelSlot && App.mountQuickAiModelPill) {
+      App.mountQuickAiModelPill(modelSlot, { alignRight: true });
+    }
 
     const scopeSel = document.getElementById('aiRevScope');
     const hashInput = document.getElementById('aiRevCommitHash');
@@ -1063,57 +1183,169 @@
       hashInput.classList.toggle('hidden', scope !== 'commit');
     });
 
+    const renderFindingCard = (f) => `
+      <div class="feature-card">
+        <div class="feature-card-top">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <span class="sev-badge sev-${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span>
+            <strong>${escapeHtml(f.title)}</strong>
+          </div>
+          ${f.file ? `<button type="button" class="mini-btn act-rev-open" data-file="${escapeHtml(f.file)}" data-line="${f.line || 1}">${escapeHtml(f.file)}${f.line ? ':' + f.line : ''}</button>` : ''}
+        </div>
+        <div style="font-size:12px;line-height:1.5;">${escapeHtml(f.detail)}</div>
+        ${f.suggestion ? `<pre class="logs-pre" style="max-height:140px;">${escapeHtml(f.suggestion)}</pre>` : ''}
+      </div>
+    `;
+
+    const renderResults = () => {
+      const resBox = document.getElementById('aiRevResults');
+      if (!resBox || !lastReviewResult) return;
+      const res = lastReviewResult;
+      const sc = res.scorecard || {
+        score: 100,
+        verdict: 'CLEAN',
+        severityCounts: { high: 0, medium: 0, low: 0, nit: 0 },
+        dimensions: { security: 100, bugs: 100, performance: 100, maintainability: 100 },
+        moduleGroups: []
+      };
+      const verdictCls = 'verdict-' + String(sc.verdict || 'CLEAN').toLowerCase();
+      const dimEntries = [
+        { key: 'security', label: T('安全性', 'Security'), val: sc.dimensions.security },
+        { key: 'bugs', label: T('缺陷风险', 'Correctness'), val: sc.dimensions.bugs },
+        { key: 'performance', label: T('性能效率', 'Performance'), val: sc.dimensions.performance },
+        { key: 'maintainability', label: T('可维护性', 'Maintainability'), val: sc.dimensions.maintainability }
+      ];
+
+      let bodySection = '';
+      if (viewMode === 'json') {
+        bodySection = `
+          <div class="feature-card" style="margin-top:10px;">
+            <div class="feature-card-top">
+              <strong>${escapeHtml(T('原始审查报告 JSON', 'Raw Review JSON'))}</strong>
+              <button type="button" class="mini-btn act-rev-copy-json">${ICONS.copy}<span>${escapeHtml(T('复制 JSON', 'Copy JSON'))}</span></button>
+            </div>
+            <pre class="logs-pre" style="max-height:360px;margin:6px 0 0;">${escapeHtml(JSON.stringify(res, null, 2))}</pre>
+          </div>
+        `;
+      } else if ((res.findings || []).length === 0) {
+        bodySection = `<div class="gm-empty-card" style="margin-top:10px;"><div class="gm-empty-card-icon">${ICONS.check}</div><div class="gm-empty-card-title">${escapeHtml(T('未发现高风险问题', 'No Actionable Issues Found'))}</div></div>`;
+      } else if (viewMode === 'modules' && Array.isArray(sc.moduleGroups) && sc.moduleGroups.length > 0) {
+        bodySection = `
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+            ${sc.moduleGroups.map((g, gi) => `
+              <details class="gm-module-group" ${gi < 3 ? 'open' : ''}>
+                <summary class="gm-module-group-head">
+                  <span style="display:inline-flex;align-items:center;gap:8px;">
+                    ${ICONS.folder}
+                    <strong>${escapeHtml(g.module)}</strong>
+                    <span class="sev-badge sev-${escapeHtml(g.maxSeverity)}">${escapeHtml(g.maxSeverity)}</span>
+                  </span>
+                  <span style="font-size:11.5px;color:var(--vscode-descriptionForeground);">${escapeHtml(T(`${g.count} 条发现`, `${g.count} finding(s)`))}</span>
+                </summary>
+                <div class="gm-module-group-body">
+                  ${g.findings.map(renderFindingCard).join('')}
+                </div>
+              </details>
+            `).join('')}
+          </div>
+        `;
+      } else {
+        bodySection = `<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">${res.findings.map(renderFindingCard).join('')}</div>`;
+      }
+
+      resBox.innerHTML = `
+        <div class="gm-scorecard ${verdictCls}">
+          <div class="gm-scorecard-main">
+            <div class="gm-score-ring ${verdictCls}">
+              <span class="gm-score-num">${sc.score}</span>
+              <span class="gm-score-sub">/100</span>
+            </div>
+            <div class="gm-scorecard-meta">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="gm-verdict-pill ${verdictCls}">${escapeHtml(sc.verdict)}</span>
+                <span class="sev-badge sev-high">high: ${sc.severityCounts.high}</span>
+                <span class="sev-badge sev-medium">medium: ${sc.severityCounts.medium}</span>
+                <span class="sev-badge sev-low">low: ${sc.severityCounts.low}</span>
+                <span class="sev-badge sev-nit">nit: ${sc.severityCounts.nit}</span>
+              </div>
+              <div style="font-size:12.5px;line-height:1.5;margin-top:6px;">${escapeHtml(res.summary || T('未发现明显问题。', 'No major issues detected.'))}</div>
+            </div>
+          </div>
+          <div class="gm-dim-grid">
+            ${dimEntries.map((d) => {
+              const barCls = d.val >= 85 ? 'ok' : d.val >= 65 ? 'warn' : 'bad';
+              return `
+                <div class="gm-dim-item">
+                  <div class="gm-dim-head"><span>${escapeHtml(d.label)}</span><strong>${d.val}</strong></div>
+                  <div class="gm-dim-track"><span class="gm-dim-fill ${barCls}" style="width:${d.val}%"></span></div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:12px;color:var(--vscode-descriptionForeground);">${escapeHtml(T(`共 ${(res.findings || []).length} 条审查意见`, `${(res.findings || []).length} review finding(s)`))}</span>
+          <div class="segmented-control">
+            <button type="button" class="rev-mode-btn ${viewMode === 'modules' ? 'active' : ''}" data-mode="modules">${escapeHtml(T('按模块分组', 'Module Groups'))}</button>
+            <button type="button" class="rev-mode-btn ${viewMode === 'list' ? 'active' : ''}" data-mode="list">${escapeHtml(T('平铺列表', 'Flat List'))}</button>
+            <button type="button" class="rev-mode-btn ${viewMode === 'json' ? 'active' : ''}" data-mode="json">Raw JSON</button>
+          </div>
+        </div>
+        ${bodySection}
+      `;
+
+      resBox.querySelectorAll('.rev-mode-btn').forEach((b) => {
+        b.addEventListener('click', () => {
+          viewMode = b.getAttribute('data-mode') || 'modules';
+          renderResults();
+        });
+      });
+      resBox.querySelector('.act-rev-copy-json')?.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(JSON.stringify(res, null, 2));
+          showToast(T('已复制审查报告 JSON', 'Copied review report JSON'), 'info');
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      });
+      resBox.querySelectorAll('.act-rev-open').forEach((b) => {
+        b.addEventListener('click', () => {
+          const fp = b.getAttribute('data-file');
+          const ln = Number(b.getAttribute('data-line')) || 1;
+          ui.close();
+          openFileTab({
+            repo,
+            filePath: fp,
+            commit: scopeSel.value === 'commit' ? hashInput.value.trim() : null,
+            title: fp.split('/').pop(),
+            lines: { start: ln, end: ln }
+          });
+        });
+      });
+    };
+
     const run = async () => {
       const btn = document.getElementById('btnRunAiReview');
+      const statusSlot = document.getElementById('aiRevStatusSlot');
       const resBox = document.getElementById('aiRevResults');
       btn.disabled = true;
-      resBox.innerHTML = `<div class="browser-empty-state"><span class="fb-spinner"></span>${escapeHtml(T('AI 正在深入审查代码差异…', 'AI is reviewing the code diff…'))}</div>`;
+      if (statusSlot) {
+        statusSlot.innerHTML = `<span class="gm-ai-status"><span class="gm-ai-dot"></span>${escapeHtml(T('AI 正在扫描 Diff…', 'AI scanning diff…'))}</span>`;
+      }
+      resBox.innerHTML = `<div class="browser-empty-state"><span class="fb-spinner"></span>${escapeHtml(T('AI 正在深入审查代码差异并计算风险评分卡…', 'AI is reviewing the diff and computing risk scorecard…'))}</div>`;
       try {
-        const res = await rpc('ai:reviewChanges', {
+        lastReviewResult = await rpc('ai:reviewChanges', {
           repo,
           scope: scopeSel.value,
           commitHash: hashInput.value.trim(),
           lang: state.lang
         });
-        resBox.innerHTML = `
-          <div class="feature-card"><strong>${escapeHtml(T('总体评估：', 'Summary: '))}</strong><span>${escapeHtml(res.summary || T('未发现明显问题。', 'No major issues detected.'))}</span></div>
-          ${(res.findings || []).length === 0
-            ? `<div class="scm-empty">${escapeHtml(T('✓ 未发现高风险问题。', '✓ No actionable issues found.'))}</div>`
-            : `<div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
-                ${res.findings.map((f) => `
-                  <div class="feature-card">
-                    <div class="feature-card-top">
-                      <div style="display:flex;align-items:center;gap:8px;">
-                        <span class="sev-badge sev-${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span>
-                        <strong>${escapeHtml(f.title)}</strong>
-                      </div>
-                      ${f.file ? `<button type="button" class="mini-btn act-rev-open" data-file="${escapeHtml(f.file)}" data-line="${f.line || 1}">${escapeHtml(f.file)}${f.line ? ':' + f.line : ''}</button>` : ''}
-                    </div>
-                    <div style="font-size:12px;line-height:1.5;">${escapeHtml(f.detail)}</div>
-                    ${f.suggestion ? `<pre class="logs-pre" style="max-height:140px;">${escapeHtml(f.suggestion)}</pre>` : ''}
-                  </div>
-                `).join('')}
-              </div>`
-          }
-        `;
-        resBox.querySelectorAll('.act-rev-open').forEach((b) => {
-          b.addEventListener('click', () => {
-            const fp = b.getAttribute('data-file');
-            const ln = Number(b.getAttribute('data-line')) || 1;
-            ui.close();
-            openFileTab({
-              repo,
-              filePath: fp,
-              commit: scopeSel.value === 'commit' ? hashInput.value.trim() : null,
-              title: fp.split('/').pop(),
-              lines: { start: ln, end: ln }
-            });
-          });
-        });
+        renderResults();
       } catch (err) {
         resBox.innerHTML = `<div class="feature-card error-text">${escapeHtml(err.message)}</div>`;
       } finally {
         btn.disabled = false;
+        if (statusSlot) statusSlot.innerHTML = '';
       }
     };
 
@@ -1521,6 +1753,11 @@
       { id: 'layout-swap', icon: ICONS.swapPanes, title: T('对调当前分栏位置（左⇄右 / 上⇄下）', 'Swap Split Panes (Left⇄Right / Top⇄Bottom)'), sub: '', run: () => App.swapWorkspaceSplitPanes?.() },
       { id: 'layout-tabs', icon: ICONS.layoutTabs, title: T('切换回单栏标签页模式', 'Switch to Single-Pane Tabs Mode'), sub: '', run: () => App.setWorkspaceLayout?.('tabs') },
       { id: 'scm', icon: ICONS.commit, title: T('暂存与提交更改 (Stage & Commit)', 'Stage & Commit Working Tree'), sub: T('按文件、代码块或代码行暂存 / 丢弃 / 提交', 'Stage files, hunks, or lines and commit'), kbd: '⇧⌘G', run: () => openScmModal() },
+      { id: 'amend-head', icon: ICONS.pencil || ICONS.commit, title: T('修改最新提交 (git commit --amend)', 'Amend Latest Commit (git commit --amend)'), sub: T('修改提交说明、合并暂存区改动、更改作者或重置提交时间', 'Edit message, fold staged changes, change author, or reset commit date'), run: () => openScmModal('', { amend: true }) },
+      { id: 'commit-composer', icon: ICONS.sparkle, title: T('AI 提交编排器 (Commit Composer)', 'AI Commit Composer (Split Changes into Atomic Commits)'), sub: T('将工作区多项改动智能拆分为多个逻辑清晰的原子提交并顺序执行', 'Group noisy working tree files into ordered atomic commits with AI or heuristics'), run: () => window.GitMapRemoteAndGitUI?.openCommitComposerModal() },
+      { id: 'patch-bundle', icon: ICONS.patch || ICONS.copy, title: T('便携式 Review Patch 补丁包（导出 / 导入预检）', 'Portable Review Patch Bundles (Export / Inspect & Apply)'), sub: T('无需推送分支即可分享完整上下文补丁包，支持预检与 --3way 应用', 'Share uncommitted or range diffs with metadata, check cleanly, and apply'), run: () => window.GitMapRemoteAndGitUI?.openPatchBundleModal() },
+      { id: 'launchpad', icon: ICONS.flame || ICONS.chart, title: T('多仓库指挥台 & 活动热力图 (Launchpad)', 'Multi-Repo Launchpad & Activity Heatmap'), sub: T('跨仓库行动清单（冲突/待提交/待推送/落后）+ 16 周交互式提交热力图', 'Actionable cross-repo buckets plus interactive 16-week commit heatmap'), kbd: '⇧⌘D', run: () => window.GitMapRemoteAndGitUI?.openMultiRepoDashboardModal() },
+      { id: 'compare-commits', icon: ICONS.branch || ICONS.layers, title: T('对比两个分支的指定提交 (Compare Commits)', 'Compare Specific Commits Across Branches'), sub: T('在两个分支/标签上分别挑选任意提交，对比精确文件差异与独有提交', 'Pick any commit on two branches or tags to compare file diffs and unique commits'), run: () => window.GitMapRemoteAndGitUI?.openCommitCompareModal() },
       { id: 'rebase', icon: ICONS.merge, title: T('可视化交互式变基 (Interactive Rebase)', 'Visual Interactive Rebase'), sub: T('拖拽排序提交、Pick / Reword / Squash / Fixup / Drop', 'Reorder, reword, squash, fixup, or drop commits'), run: () => openInteractiveRebaseModal() },
       { id: 'worktrees', icon: ICONS.layers, title: T('Git Worktree 多工作树管理', 'Manage Git Worktrees'), sub: T('并行检出多个分支供多任务 / 多 Agent 同时开发', 'Checkout multiple branches simultaneously in parallel folders'), run: () => openWorktreesModal() },
       { id: 'prs', icon: ICONS.pullRequest, title: T('Pull Requests / Merge Requests 协作', 'Pull Requests & Merge Requests'), sub: T('查看 PR 与 CI 状态、检出分支、AI 生成并发起 PR', 'View PRs & CI checks, checkout PR branch, or create PR with AI'), run: () => openPullRequestsModal() },
@@ -1573,6 +1810,10 @@
 
     pop.innerHTML = `
       <div class="tools-group-title">${escapeHtml(T('Git 进阶工作流', 'Git Workflows'))}</div>
+      ${item('amend-head', ICONS.pencil || ICONS.commit, T('修改最新提交 (--amend)', 'Amend Latest Commit (--amend)'))}
+      ${item('commit-composer', ICONS.sparkle, T('AI 提交编排器 (Composer)', 'AI Commit Composer'))}
+      ${item('patch-bundle', ICONS.patch || ICONS.copy, T('Review Patch 补丁包', 'Review Patch Bundles'))}
+      ${item('compare-commits', ICONS.branch || ICONS.layers, T('对比两个分支的指定提交', 'Compare Branch Commits'))}
       ${item('rebase', ICONS.merge, T('可视化交互式变基', 'Interactive Rebase'))}
       ${item('worktrees', ICONS.layers, T('Git Worktree 多工作树', 'Git Worktrees'))}
       ${item('prs', ICONS.pullRequest, T('PR / MR 状态与创建', 'Pull / Merge Requests'))}
@@ -1580,11 +1821,12 @@
       ${item('bisect', ICONS.compass, T('Bisect 二分排错向导', 'Bisect Wizard'))}
       <div class="tools-sep"></div>
       <div class="tools-group-title">${escapeHtml(T('AI 研发助手', 'AI Assistant'))}</div>
-      ${item('ai-review', ICONS.shield, T('AI 提交前代码审查', 'AI Code Review'))}
+      ${item('ai-review', ICONS.shield, T('AI 提交前代码审查（评分卡）', 'AI Code Review (Scorecard)'))}
       ${item('release-notes', ICONS.sparkle, T('AI 生成版本发布说明', 'AI Release Notes'))}
       ${item('nl-search', ICONS.search, T('AI 自然语言搜提交', 'NL Commit Search'))}
       <div class="tools-sep"></div>
       <div class="tools-group-title">${escapeHtml(T('远程与多仓库', 'Remote & Multi-Repo'))}</div>
+      ${item('launchpad', ICONS.flame || ICONS.chart, T('多仓库指挥台 & 热力图', 'Launchpad & Heatmap'), '⇧⌘D')}
       ${item('port-forward', ICONS.plug, T('SSH 本地端口转发 (-L)', 'SSH Port Forwarding'))}
       ${item('fetch-all', ICONS.refresh, T('批量 Fetch 全部仓库', 'Fetch All Repos'))}
       ${item('clone', ICONS.download, T('克隆 Git 仓库…', 'Clone Repository…'))}

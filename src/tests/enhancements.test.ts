@@ -4,8 +4,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { describe, it } from 'node:test';
-import { buildHeuristicCommitMessage } from '../server/aiAssistantService';
+import { buildHeuristicCommitMessage, buildHeuristicCommitPlan } from '../server/aiAssistantService';
 import { assertSafeRelSegmentPath, EnhancementsService } from '../server/enhancementsService';
+import { computeReviewScorecard } from '../server/gitWorkflowService';
 import {
   BackupPayload,
   compareSemver,
@@ -84,6 +85,44 @@ describe('GitMap Enhancements Suite', () => {
     assert.ok(styleMsg.startsWith('style: '));
     const conciseMsg = buildHeuristicCommitMessage(' src/index.ts | 10 ++++', 'en', 'concise');
     assert.ok(!conciseMsg.startsWith('chore: '));
+  });
+
+  it('groups mixed working-tree files into ordered atomic drafts in buildHeuristicCommitPlan', () => {
+    const files = [
+      { path: 'README.md', status: 'M' },
+      { path: 'src/server/api.ts', status: 'M' },
+      { path: 'src/server/auth.ts', status: 'A' },
+      { path: 'public/app.css', status: 'M' },
+      { path: 'src/tests/api.test.ts', status: 'A' },
+      { path: 'package.json', status: 'M' }
+    ];
+    const drafts = buildHeuristicCommitPlan(files, 'zh', 'conventional');
+    assert.strictEqual(drafts.length, 5, 'splits config, src/server, style, test, docs into 5 ordered drafts');
+    assert.ok(drafts[0].files.includes('package.json'), 'config/chore comes first');
+    assert.ok(drafts[drafts.length - 1].files.includes('README.md'), 'docs comes last');
+    const flattened = drafts.flatMap((d) => d.files).sort();
+    assert.deepStrictEqual(flattened, files.map((f) => f.path).sort(), 'every file assigned exactly once');
+  });
+
+  it('computes QuantOrb-style AI review scorecards, verdicts, dimensions, and module groups', () => {
+    const clean = computeReviewScorecard([]);
+    assert.strictEqual(clean.score, 100);
+    assert.strictEqual(clean.verdict, 'CLEAN');
+
+    const mixed = computeReviewScorecard([
+      { severity: 'high', file: 'src/server/auth.ts', line: 42, title: 'SQL injection vulnerability', detail: 'Unsanitized input in query' },
+      { severity: 'high', file: 'src/server/auth.ts', line: 88, title: 'Null pointer crash', detail: 'Unhandled null dereference edge case' },
+      { severity: 'medium', file: 'public/app.js', line: 120, title: 'O(n^2) memory leak in loop', detail: 'Slow performance on large repos' },
+      { severity: 'nit', file: 'README.md', line: 3, title: 'Typo in heading', detail: 'Minor wording' }
+    ]);
+    assert.strictEqual(mixed.verdict, 'DANGER');
+    assert.strictEqual(mixed.score, 36);
+    assert.strictEqual(mixed.severityCounts.high, 2);
+    assert.strictEqual(mixed.severityCounts.medium, 1);
+    assert.ok(mixed.dimensions.security < 80, 'security dimension penalized');
+    assert.ok(mixed.dimensions.performance < 90, 'performance dimension penalized');
+    assert.strictEqual(mixed.moduleGroups[0].module, 'src/server', 'highest severity module sorted first');
+    assert.strictEqual(mixed.moduleGroups[0].count, 2);
   });
 
   it('blocks path traversal in assertSafeRelSegmentPath', () => {
@@ -178,10 +217,13 @@ describe('GitMap Enhancements Suite', () => {
     assert.strictEqual(new Set(rsaFirst).size, rsaFirst.length, 'no duplicates');
     const two = orderHostKeyAlgorithms(['ecdsa-sha2-nistp256', 'ssh-rsa'])!;
     assert.strictEqual(two[0], 'ecdsa-sha2-nistp256');
+    // Security-ranked ordering: a host with both legacy ssh-rsa and modern ssh-ed25519 still prefers ed25519 over RSA
+    const bothOrder = orderHostKeyAlgorithms(['ssh-rsa', 'ssh-ed25519'])!;
+    assert.strictEqual(bothOrder[0], 'ssh-ed25519', 'known stronger ed25519 is not downgraded to ssh-rsa by known_hosts line order');
   });
 
-  it('opens a file itself in an editor, and its folder in a terminal', async () => {
-    const { resolveLaunchTarget } = await import('../server/launchers');
+  it('opens a file itself in an editor, encodes remote URIs, and avoids connecting disconnected SSH hosts', async () => {
+    const { resolveLaunchTarget, __test } = await import('../server/launchers');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitmap-launch-'));
     try {
       const file = path.join(dir, 'main.ts');
@@ -194,9 +236,48 @@ describe('GitMap Enhancements Suite', () => {
       const folder = await resolveLaunchTarget(dir, true);
       assert.strictEqual(folder.path, dir);
       assert.strictEqual(folder.isFile, false);
+
+      // RFC 3986 path segment encoding for VS Code remote URIs (spaces, #, ?, %, CJK)
+      assert.strictEqual(
+        __test.encodeRemoteUriPath('/srv/my project/笔记 #1?v=2%ok.md'),
+        '/srv/my%20project/%E7%AC%94%E8%AE%B0%20%231%3Fv%3D2%25ok.md'
+      );
+
+      // Custom command {sshCommand} should cd into the parent directory when target is a remote file
+      const fakeProfile: any = { id: 'box', name: 'box', host: '10.0.0.9', port: 22, user: 'dev', authType: 'auto', source: 'manual' };
+      const filled = __test.fillTemplate('{sshCommand}', { isRemote: true, path: '/srv/app/src/index.ts', isFile: true, profile: fakeProfile });
+      assert.ok(filled.includes('/srv/app/src') && !filled.includes('index.ts'), 'sshCommand uses file parent dir');
+
+      // Disconnected remote host resolves immediately without blocking on SSH connect, honoring isFileHint
+      const t0 = Date.now();
+      const remFile = await resolveLaunchTarget('ssh://never-connected-host/srv/app/index.ts', true, true);
+      assert.ok(Date.now() - t0 < 500, 'should not initiate SSH connection for disconnected host');
+      assert.strictEqual(remFile.isFile, true);
+      assert.strictEqual(remFile.path, '/srv/app/index.ts');
+      const remTerm = await resolveLaunchTarget('ssh://never-connected-host/srv/app/index.ts', false, true);
+      assert.strictEqual(remTerm.isFile, false);
+      assert.strictEqual(remTerm.path, '/srv/app');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('validates UTF-8 losslessly with truncation boundaries and UTF-16 BOM protection', async () => {
+    const { isLossyUtf8, detectUtf16Bom, isNonUtf8TextBuffer } = await import('../server/diffService');
+    const validUtf8 = Buffer.from('你好世界\nhello\n', 'utf8');
+    assert.strictEqual(isLossyUtf8(validUtf8), false);
+    // Literal U+FFFD in valid UTF-8 is NOT lossy
+    assert.strictEqual(isLossyUtf8(Buffer.from('replacement: \uFFFD ok', 'utf8')), false);
+    // Split a 3-byte Chinese UTF-8 char at a truncation boundary: should NOT false-positive when truncated=true
+    const splitSlice = validUtf8.subarray(0, 4); // "你" (3 bytes) + first byte of "好"
+    assert.strictEqual(isLossyUtf8(splitSlice, { truncated: true }), false, 'truncated multi-byte tail is not treated as invalid UTF-8');
+    assert.strictEqual(isLossyUtf8(splitSlice, { truncated: false }), true, 'untruncated trailing byte is invalid UTF-8');
+    // UTF-16 LE BOM detection & write protection
+    const utf16le = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('hi', 'utf16le')]);
+    assert.strictEqual(detectUtf16Bom(utf16le), 'utf16le');
+    assert.strictEqual(isNonUtf8TextBuffer(utf16le), true, 'UTF-16 BOM must be protected against UTF-8 overwrite');
+    // Plain binary with NUL bytes (no BOM) is binary, not non-UTF-8 text
+    assert.strictEqual(isNonUtf8TextBuffer(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01])), false);
   });
 
   it('verifies modular frontend assets are wired into public/index.html', () => {

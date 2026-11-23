@@ -880,7 +880,7 @@ export function resolveSpawnOutput(cmd: cp.ChildProcess, options?: SpawnOutputOp
 			});
 			cmd.on('exit', (code) => {
 				if (resolved) return;
-				resolve({ code: capped && code === null ? 0 : code, error: null });
+				resolve({ code: capped ? 0 : code, error: null });
 				resolved = true;
 			});
 		}),

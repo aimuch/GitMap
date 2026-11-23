@@ -1876,6 +1876,9 @@ export interface RequestEditCommitMessage extends RepoRequest {
 	readonly command: 'editCommitMessage';
 	readonly commitHash: string;
 	readonly message: string;
+	readonly includeStaged?: boolean;
+	readonly author?: string | null;
+	readonly resetAuthorDate?: boolean;
 }
 export interface ResponseEditCommitMessage extends ResponseWithErrorInfo {
 	readonly command: 'editCommitMessage';
@@ -1890,6 +1893,8 @@ export interface ResponseLoadCommitMessage extends ResponseWithErrorInfo {
 	readonly commitHash: string;
 	readonly message: string;
 	readonly pushedTo: string | null; // A remote branch that contains the commit (NULL if it hasn't been pushed)
+	readonly author?: string | null;
+	readonly stagedCount?: number;
 }
 
 export interface RequestUndoCommit extends RepoRequest {

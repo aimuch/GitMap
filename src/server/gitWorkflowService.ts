@@ -116,6 +116,156 @@ export interface AiReviewFinding {
   suggestion?: string;
 }
 
+export type ReviewVerdict = 'CLEAN' | 'OK' | 'RISKY' | 'DANGER';
+
+export interface ReviewDimensionScores {
+  security: number;
+  bugs: number;
+  performance: number;
+  maintainability: number;
+}
+
+export interface ReviewModuleGroup {
+  module: string;
+  count: number;
+  maxSeverity: AiReviewFinding['severity'];
+  findings: AiReviewFinding[];
+}
+
+export interface AiReviewScorecard {
+  score: number;
+  verdict: ReviewVerdict;
+  severityCounts: {
+    high: number;
+    medium: number;
+    low: number;
+    nit: number;
+  };
+  dimensions: ReviewDimensionScores;
+  moduleGroups: ReviewModuleGroup[];
+}
+
+export interface CommitPlanDraftInput {
+  message: string;
+  files: string[];
+}
+
+export interface ExecutedCommitRecord {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  files: string[];
+}
+
+export interface ImpactPreviewResult {
+  operation: 'rebase' | 'merge' | 'reset';
+  baseHash: string | null;
+  targetRef: string | null;
+  branch: string | null;
+  rewrittenCommits: number;
+  affectedFilesCount: number;
+  pushedToRemote: string | null;
+  remoteBranches: string[];
+  forcePushRequired: boolean;
+  conflictFiles: string[];
+  riskLevel: ReviewVerdict;
+  cliPreview: string;
+}
+
+const SEVERITY_RANK: Record<AiReviewFinding['severity'], number> = {
+  high: 4,
+  medium: 3,
+  low: 2,
+  nit: 1
+};
+
+const SEVERITY_PENALTY: Record<AiReviewFinding['severity'], number> = {
+  high: 25,
+  medium: 12,
+  low: 5,
+  nit: 2
+};
+
+export function computeReviewScorecard(findings: AiReviewFinding[]): AiReviewScorecard {
+  const severityCounts = { high: 0, medium: 0, low: 0, nit: 0 };
+  const dimensions: ReviewDimensionScores = {
+    security: 100,
+    bugs: 100,
+    performance: 100,
+    maintainability: 100
+  };
+  let totalPenalty = 0;
+
+  const moduleMap = new Map<string, AiReviewFinding[]>();
+
+  for (const f of findings) {
+    const sev = f.severity || 'medium';
+    severityCounts[sev]++;
+    const pen = SEVERITY_PENALTY[sev] || 10;
+    totalPenalty += pen;
+
+    const text = `${f.title || ''} ${f.detail || ''} ${f.suggestion || ''}`.toLowerCase();
+    const isSec = /secur|inject|xss|csrf|ssrf|sql|auth|secret|token|password|path traversal|symlink|escap|sanitiz|权限|注入|密钥|越权|漏洞|安全/.test(text);
+    const isPerf = /perf|slow|o\(n|memory|leak|oom|block|cache|batch|n\+1|buffer|性能|内存|慢|泄漏|阻塞|缓存/.test(text);
+    const isBug = /bug|crash|null|undefined|race|deadlock|concurr|exception|error|edge|off-by|overflow|logic|fail|崩溃|竞态|空指针|异常|边界|逻辑/.test(text);
+
+    if (isSec) dimensions.security = Math.max(0, dimensions.security - Math.round(pen * 1.4));
+    if (isPerf) dimensions.performance = Math.max(0, dimensions.performance - Math.round(pen * 1.2));
+    if (isBug || (!isSec && !isPerf && (sev === 'high' || sev === 'medium'))) {
+      dimensions.bugs = Math.max(0, dimensions.bugs - Math.round(pen * 1.25));
+    }
+    if (!isSec && !isPerf && !isBug) {
+      dimensions.maintainability = Math.max(0, dimensions.maintainability - pen);
+    } else {
+      dimensions.maintainability = Math.max(0, dimensions.maintainability - Math.round(pen * 0.4));
+    }
+
+    const normFile = String(f.file || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    const segs = normFile.split('/').filter(Boolean);
+    const modKey = segs.length >= 3
+      ? `${segs[0]}/${segs[1]}`
+      : segs.length === 2
+        ? segs[0]
+        : '(root)';
+    let arr = moduleMap.get(modKey);
+    if (!arr) {
+      arr = [];
+      moduleMap.set(modKey, arr);
+    }
+    arr.push(f);
+  }
+
+  const score = Math.max(0, Math.min(100, 100 - totalPenalty));
+  const verdict: ReviewVerdict =
+    severityCounts.high >= 2 || score < 50
+      ? 'DANGER'
+      : severityCounts.high >= 1 || score < 75
+        ? 'RISKY'
+        : severityCounts.medium >= 1 || score < 92
+          ? 'OK'
+          : 'CLEAN';
+
+  const moduleGroups: ReviewModuleGroup[] = Array.from(moduleMap.entries())
+    .map(([mod, list]) => {
+      list.sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]);
+      return {
+        module: mod,
+        count: list.length,
+        maxSeverity: list[0]?.severity || 'nit',
+        findings: list
+      };
+    })
+    .sort((a, b) => SEVERITY_RANK[b.maxSeverity] - SEVERITY_RANK[a.maxSeverity] || b.count - a.count || a.module.localeCompare(b.module));
+
+  return {
+    score,
+    verdict,
+    severityCounts,
+    dimensions,
+    moduleGroups
+  };
+}
+
 export interface ReflogEntry {
   hash: string;
   shortHash: string;
@@ -449,13 +599,27 @@ export class GitWorkflowService {
         if (res.code !== 0) throw new Error(res.stderr.trim() || 'Failed to delete untracked remote files.');
       } else {
         const rootResolved = path.resolve(repo);
+        const validatedTargets: Array<{ rel: string; target: string }> = [];
         for (const rel of untracked) {
           const target = path.resolve(rootResolved, rel);
           if (target === rootResolved || !target.startsWith(rootResolved + path.sep)) {
             throw new Error(`Unsafe discard target: ${rel}`);
           }
-          if (this.trashItem && fs.existsSync(target)) await this.trashItem(target);
-          else await fs.promises.rm(target, { recursive: true, force: true });
+          validatedTargets.push({ rel, target });
+        }
+        for (const { rel, target } of validatedTargets) {
+          const exists = await fs.promises.lstat(target).then(() => true, () => false);
+          if (!exists) continue;
+          if (this.trashItem) {
+            try {
+              await this.trashItem(target);
+            } catch (err: any) {
+              // Never silently fall back to permanent rm when the UI promised Trash
+              throw new Error(`Unable to move "${rel}" to the Trash (${err?.message || err}). It was not deleted.`);
+            }
+          } else {
+            await fs.promises.rm(target, { recursive: true, force: true });
+          }
         }
       }
     }
@@ -1028,7 +1192,7 @@ export class GitWorkflowService {
     scope: 'staged' | 'unstaged' | 'all' | 'commit';
     commitHash?: string;
     lang?: string;
-  }): Promise<{ summary: string; findings: AiReviewFinding[] }> {
+  }): Promise<{ summary: string; findings: AiReviewFinding[]; scorecard: AiReviewScorecard }> {
     let diffText = '';
     if (params.scope === 'commit' && params.commitHash && !params.commitHash.startsWith('-')) {
       diffText = (
@@ -1068,7 +1232,7 @@ export class GitWorkflowService {
     if (res.error) throw new Error(res.error);
     const parsed = extractJsonObject(res.text);
     if (!parsed || typeof parsed !== 'object') {
-      return { summary: res.text, findings: [] };
+      return { summary: res.text, findings: [], scorecard: computeReviewScorecard([]) };
     }
     const findings: AiReviewFinding[] = Array.isArray(parsed.findings)
       ? parsed.findings.map((f: any) => ({
@@ -1080,7 +1244,7 @@ export class GitWorkflowService {
           suggestion: f.suggestion ? String(f.suggestion) : undefined
         }))
       : [];
-    return { summary: String(parsed.summary || ''), findings };
+    return { summary: String(parsed.summary || ''), findings, scorecard: computeReviewScorecard(findings) };
   }
 
   /* 9. AI Release Notes & Natural-Language Commit Search */
@@ -1325,6 +1489,201 @@ export class GitWorkflowService {
   public async resetBisect(repo: string): Promise<void> {
     await this.dataSource.execGitRaw(repo, ['bisect', 'reset']);
     RepoFileWatcher.notifyPossibleRemoteChange(200);
+  }
+
+  /* 12. Commit Composer Execution, Soft Undo & History-Rewrite Impact Preview */
+
+  public async executeCommitPlan(
+    repo: string,
+    drafts: CommitPlanDraftInput[]
+  ): Promise<{ commits: ExecutedCommitRecord[]; backupRef: string | null }> {
+    if (!Array.isArray(drafts) || drafts.length === 0) {
+      throw new Error('Commit plan is empty.');
+    }
+    const status = await this.dataSource.getWorkingTreeStatus(repo);
+    if (status.conflicted.length > 0) {
+      throw new Error('Cannot execute commit plan while merge conflicts are unresolved.');
+    }
+
+    const sanitizedDrafts: Array<{ message: string; files: string[] }> = [];
+    for (const d of drafts) {
+      const msg = String(d?.message || '').trim();
+      const files = Array.isArray(d?.files)
+        ? Array.from(new Set(d.files.map((p) => String(p || '').trim()).filter(Boolean)))
+        : [];
+      if (files.length === 0) continue;
+      if (!msg) throw new Error('Every non-empty commit draft must have a commit message.');
+      for (const f of files) assertSafeRepoRelPath(f);
+      sanitizedDrafts.push({ message: msg, files });
+    }
+    if (sanitizedDrafts.length === 0) {
+      throw new Error('No files selected across commit drafts.');
+    }
+
+    // Create a safety backup ref before committing (if HEAD exists)
+    let hasHead = false;
+    let backupRef: string | null = null;
+    try {
+      const headHash = (await this.dataSource.execGitRaw(repo, ['rev-parse', '--verify', 'HEAD'])).stdout.toString('utf8').trim();
+      if (headHash) {
+        hasHead = true;
+        backupRef = `refs/gitmap-backup/compose-${Date.now()}`;
+        await this.dataSource.execGitRaw(repo, ['update-ref', backupRef, headHash]);
+      }
+    } catch { /* unborn branch */ }
+
+    // Clear the staging index cleanly without touching the working tree
+    if (hasHead) {
+      await this.dataSource.execGitRaw(repo, ['reset', '--mixed', 'HEAD']);
+    } else {
+      await this.dataSource.execGitRaw(repo, ['rm', '-r', '--cached', '--ignore-unmatch', '.'], { ignoreExitCode: true });
+    }
+
+    const commits: ExecutedCommitRecord[] = [];
+    for (const draft of sanitizedDrafts) {
+      await this.dataSource.execGitRaw(repo, ['add', '-A', '--', ...draft.files]);
+      const stagedCheck = (await this.dataSource.execGitRaw(repo, ['diff', '--cached', '--name-only'])).stdout.toString('utf8').trim();
+      if (!stagedCheck) continue;
+      await this.dataSource.execGitRaw(repo, ['commit', '-F', '-'], { input: draft.message + '\n' });
+      const headInfo = (await this.dataSource.execGitRaw(repo, ['log', '-1', '--format=%H%x1f%h%x1f%s'])).stdout.toString('utf8').trim();
+      const [hash, shortHash, subject] = headInfo.split('\x1f');
+      commits.push({
+        hash: hash || '',
+        shortHash: shortHash || (hash || '').slice(0, 8),
+        subject: subject || draft.message.split(/\r?\n/)[0],
+        files: draft.files
+      });
+    }
+
+    if (commits.length === 0) {
+      throw new Error('None of the selected files had committable changes.');
+    }
+    RepoFileWatcher.notifyPossibleRemoteChange(200);
+    return { commits, backupRef };
+  }
+
+  public async undoLastCommit(repo: string): Promise<{ previousHash: string; newHead: string; backupRef: string; subject: string }> {
+    const headHash = (await this.dataSource.execGitRaw(repo, ['rev-parse', '--verify', 'HEAD'])).stdout.toString('utf8').trim();
+    const subject = (await this.dataSource.execGitRaw(repo, ['log', '-1', '--format=%s', 'HEAD'])).stdout.toString('utf8').trim();
+    try {
+      await this.dataSource.execGitRaw(repo, ['rev-parse', '--verify', 'HEAD~1']);
+    } catch {
+      throw new Error('Cannot soft-reset the initial root commit.');
+    }
+    const backupRef = `refs/gitmap-backup/undo-${Date.now()}`;
+    await this.dataSource.execGitRaw(repo, ['update-ref', backupRef, headHash]);
+    await this.dataSource.execGitRaw(repo, ['reset', '--soft', 'HEAD~1']);
+    const newHead = (await this.dataSource.execGitRaw(repo, ['rev-parse', '--verify', 'HEAD'])).stdout.toString('utf8').trim();
+    RepoFileWatcher.notifyPossibleRemoteChange(200);
+    return { previousHash: headHash, newHead, backupRef, subject };
+  }
+
+  public async computeImpactPreview(
+    repo: string,
+    params: { operation: 'rebase' | 'merge' | 'reset'; baseHash?: string; targetRef?: string }
+  ): Promise<ImpactPreviewResult> {
+    const operation: 'rebase' | 'merge' | 'reset' =
+      params.operation === 'merge' ? 'merge' : params.operation === 'reset' ? 'reset' : 'rebase';
+    const rawBase = (params.baseHash || '').trim();
+    const rawTarget = (params.targetRef || '').trim();
+    if (rawBase.startsWith('-') || rawTarget.startsWith('-')) {
+      throw new Error('Invalid Git reference for impact preview.');
+    }
+
+    const branch = await this.dataSource
+      .execGitRaw(repo, ['symbolic-ref', '-q', '--short', 'HEAD'], { ignoreExitCode: true })
+      .then((r) => r.stdout.toString('utf8').trim() || null, () => null);
+
+    let rewrittenCommits = 0;
+    let affectedFilesCount = 0;
+    let remoteBranches: string[] = [];
+    let forcePushRequired = false;
+    let conflictFiles: string[] = [];
+    let resolvedBase: string | null = rawBase || null;
+    let resolvedTarget: string | null = rawTarget || null;
+    let cliPreview = '';
+
+    if (operation === 'rebase' || operation === 'reset') {
+      const refSpec = operation === 'rebase' ? rawBase : (rawTarget || rawBase);
+      if (!refSpec) throw new Error('A base or target reference is required.');
+      const resolved = (await this.dataSource.execGitRaw(repo, ['rev-parse', '--verify', `${refSpec}^{commit}`])).stdout.toString('utf8').trim();
+      resolvedBase = resolved;
+
+      const revListOut = (await this.dataSource.execGitRaw(repo, ['rev-list', '--reverse', `${resolved}..HEAD`])).stdout.toString('utf8').trim();
+      const rewrittenList = revListOut ? revListOut.split(/\r?\n/).filter(Boolean) : [];
+      rewrittenCommits = rewrittenList.length;
+
+      const filesOut = (await this.dataSource.execGitRaw(repo, ['diff', '--name-only', `${resolved}..HEAD`])).stdout.toString('utf8').trim();
+      affectedFilesCount = filesOut ? filesOut.split(/\r?\n/).filter(Boolean).length : 0;
+
+      if (rewrittenList.length > 0) {
+        // Check if the oldest rewritten commit is already present on any remote tracking branch
+        const oldest = rewrittenList[0];
+        const remOut = await this.dataSource
+          .execGitRaw(repo, ['branch', '-r', '--contains', oldest], { ignoreExitCode: true })
+          .then((r) => r.stdout.toString('utf8'), () => '');
+        remoteBranches = remOut
+          .split(/\r?\n/)
+          .map((l) => l.trim().replace(/^->\s*/, ''))
+          .filter((l) => l && !l.includes('->'));
+        forcePushRequired = remoteBranches.length > 0;
+      }
+      cliPreview = operation === 'rebase'
+        ? `git rebase -i ${resolved.slice(0, 8)}${forcePushRequired ? '  # followed by git push --force-with-lease' : ''}`
+        : `git reset --hard ${resolved.slice(0, 8)}${forcePushRequired ? '  # WARNING: rewrites pushed commits' : ''}`;
+    } else {
+      // merge dry-run preview
+      if (!rawTarget) throw new Error('Target ref is required for merge impact preview.');
+      resolvedTarget = (await this.dataSource.execGitRaw(repo, ['rev-parse', '--verify', `${rawTarget}^{commit}`])).stdout.toString('utf8').trim();
+      const revListOut = (await this.dataSource.execGitRaw(repo, ['rev-list', `HEAD..${resolvedTarget}`])).stdout.toString('utf8').trim();
+      rewrittenCommits = revListOut ? revListOut.split(/\r?\n/).filter(Boolean).length : 0;
+
+      const filesOut = (await this.dataSource.execGitRaw(repo, ['diff', '--name-only', `HEAD...${resolvedTarget}`], { ignoreExitCode: true }))
+        .stdout.toString('utf8').trim();
+      affectedFilesCount = filesOut ? filesOut.split(/\r?\n/).filter(Boolean).length : 0;
+
+      // Best-effort zero-worktree conflict dry-run via `git merge-tree --write-tree` (Git >= 2.38)
+      try {
+        const mt = await this.dataSource.execGitRaw(repo, ['merge-tree', '--write-tree', '--name-only', 'HEAD', resolvedTarget], { ignoreExitCode: true });
+        const out = mt.stdout.toString('utf8');
+        const lines = out.split(/\r?\n/);
+        // On conflict, Git outputs tree oid on line 0, conflicted paths on lines 1..k, blank line, then CONFLICT messages
+        if (lines.length > 1 && (/^CONFLICT /m.test(out) || (lines[1] && lines[1].trim() !== ''))) {
+          const conflicted: string[] = [];
+          for (let i = 1; i < lines.length; i++) {
+            const ln = lines[i].trim();
+            if (!ln) break;
+            if (!ln.startsWith('CONFLICT')) conflicted.push(ln);
+          }
+          conflictFiles = Array.from(new Set(conflicted));
+        }
+      } catch { /* older Git without --write-tree */ }
+      cliPreview = `git merge --no-ff ${rawTarget}`;
+    }
+
+    const riskLevel: ReviewVerdict =
+      conflictFiles.length > 0 || (forcePushRequired && rewrittenCommits >= 3)
+        ? 'DANGER'
+        : forcePushRequired || rewrittenCommits >= 8
+          ? 'RISKY'
+          : rewrittenCommits > 0
+            ? 'OK'
+            : 'CLEAN';
+
+    return {
+      operation,
+      baseHash: resolvedBase,
+      targetRef: resolvedTarget,
+      branch,
+      rewrittenCommits,
+      affectedFilesCount,
+      pushedToRemote: remoteBranches[0] || null,
+      remoteBranches,
+      forcePushRequired,
+      conflictFiles,
+      riskLevel,
+      cliPreview
+    };
   }
 }
 

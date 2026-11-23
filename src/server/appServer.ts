@@ -24,6 +24,7 @@ import { DataSource } from '../dataSource';
 import { DiffDocProvider } from '../diffDocProvider';
 import { ExtensionState } from '../extensionState';
 import { FileTimeMachine } from '../fileTimeMachine';
+import { GitFeatures } from '../gitFeatures';
 import { GitGraphView } from '../gitGraphView';
 import { Logger } from '../logger';
 import {
@@ -56,7 +57,14 @@ import { EventEmitter as GitMapEventEmitter } from '../utils/event';
 import { fsmRegistry } from '../utils/fsm';
 import { VisualFileHistory } from '../visualFileHistory';
 import { AiAssistantService } from './aiAssistantService';
-import { DiffService, isLossyUtf8 } from './diffService';
+import {
+  decodeFileBuffer,
+  detectUtf16Bom,
+  DiffService,
+  isLossyUtf8,
+  isNonUtf8TextBuffer,
+  resolveSafeViewEncoding
+} from './diffService';
 import { EnhancementsService } from './enhancementsService';
 import { buildPartialHunkPatch, GitWorkflowService } from './gitWorkflowService';
 import { HostingProviderKind, HostingService } from './hostingService';
@@ -160,6 +168,7 @@ export class GitMapServer {
   public avatarManager!: AvatarManager;
   public repoManager!: RepoManager;
   public diffService!: DiffService;
+  public gitFeatures!: GitFeatures;
   public workflowService!: GitWorkflowService;
   public enhancementsService!: EnhancementsService;
   public aiAssistantService!: AiAssistantService;
@@ -263,6 +272,7 @@ export class GitMapServer {
     this.avatarManager = new AvatarManager(this.dataSource, this.extensionState, this.logger);
     this.repoManager = new RepoManager(this.dataSource, this.extensionState, configChangeEmitter.subscribe, this.logger);
     this.diffService = new DiffService(this.dataSource);
+    this.gitFeatures = new GitFeatures(this.dataSource);
     this.workflowService = new GitWorkflowService(this.dataSource);
     this.workflowService.setTrash(this.desktopHooks.trashItem || null);
     this.enhancementsService = new EnhancementsService(this.dataSource);
@@ -1199,6 +1209,12 @@ export class GitMapServer {
         return { repo, ...(await this.dataSource.getWorkingTreeStatus(repo)) };
       }
 
+      case 'scm:treeStatus': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        return { repo, ...(await this.dataSource.getTreeGitStatus(repo)) };
+      }
+
       case 'scm:stage': {
         const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
         const paths: string[] = Array.isArray(params.paths) ? params.paths.map(String) : [];
@@ -1221,11 +1237,89 @@ export class GitMapServer {
         const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
         const message = String(params.message || '');
         const amend = !!params.amend;
-        const err = await this.dataSource.commitWorkingTree(repo, message, amend);
+        const onlyMessage = !!params.onlyMessage;
+        const author = typeof params.author === 'string' && params.author.trim() ? params.author.trim() : null;
+        const resetAuthorDate = !!params.resetAuthorDate;
+        const err = await this.dataSource.commitWorkingTree(repo, message, amend, { onlyMessage, author, resetAuthorDate });
         if (err) throw new Error(err);
         RepoFileWatcher.notifyPossibleRemoteChange(200);
         this.openViewTo({ repo });
         return { ok: true, repo, ...(await this.dataSource.getWorkingTreeStatus(repo)) };
+      }
+
+      case 'scm:executeCommitPlan': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const drafts = Array.isArray(params.drafts) ? params.drafts : [];
+        const res = await this.workflowService.executeCommitPlan(repo, drafts);
+        this.openViewTo({ repo });
+        return { ok: true, repo, ...res, status: await this.dataSource.getWorkingTreeStatus(repo) };
+      }
+
+      case 'scm:undoLastCommit': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const res = await this.workflowService.undoLastCommit(repo);
+        this.openViewTo({ repo });
+        return { ok: true, repo, ...res, status: await this.dataSource.getWorkingTreeStatus(repo) };
+      }
+
+      /* Cross-Branch Specific Commit Comparison */
+      case 'compare:refs': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        return { repo, ...(await this.dataSource.listCompareRefs(repo)) };
+      }
+
+      case 'compare:branchCommits': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const ref = String(params.ref || 'HEAD');
+        const limit = typeof params.limit === 'number' ? params.limit : 120;
+        const query = typeof params.query === 'string' ? params.query : '';
+        if (!repo) throw new Error('No active repository selected.');
+        const commits = await this.dataSource.getBranchCommitList(repo, ref, limit, query);
+        return { repo, ref, commits };
+      }
+
+      case 'compare:commits': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const leftRef = String(params.leftHash || params.left || '').trim();
+        const rightRef = String(params.rightHash || params.right || '').trim();
+        // Default for comparing two specific commits is direct tree diff (A..B); optional three-dot (fromMergeBase: true)
+        const fromMergeBase = params.fromMergeBase === true;
+        if (!repo) throw new Error('No active repository selected.');
+        if (!leftRef || !rightRef) throw new Error('Both left and right commits are required.');
+        const cmp = await this.gitFeatures.compareBranches(repo, leftRef, rightRef);
+        if (cmp.error || !cmp.comparison) {
+          throw new Error(cmp.error || 'Unable to compare the specified commits.');
+        }
+        const { leftHash, rightHash, mergeBase, leftOnly, rightOnly } = cmp.comparison;
+        const effectiveFrom = fromMergeBase && mergeBase ? mergeBase : rightHash;
+        const effectiveTo = leftHash;
+        const [diffRes, metaList, leftCommits, rightCommits] = await Promise.all([
+          this.dataSource.getCommitComparison(repo, effectiveFrom, effectiveTo),
+          this.dataSource.getCommitsSummary(repo, [leftHash, rightHash]),
+          this.dataSource.getCommitsSummary(repo, leftOnly.slice(0, 50)),
+          this.dataSource.getCommitsSummary(repo, rightOnly.slice(0, 50))
+        ]);
+        if (diffRes.error) throw new Error(diffRes.error);
+        const metaByHash = new Map(metaList.map((m) => [m.hash, m]));
+        return {
+          repo,
+          leftHash,
+          rightHash,
+          mergeBase,
+          fromMergeBase: fromMergeBase && !!mergeBase,
+          effectiveFrom,
+          effectiveTo,
+          leftMeta: metaByHash.get(leftHash) || { hash: leftHash, shortHash: leftHash.slice(0, 8), subject: '', author: '', date: 0 },
+          rightMeta: metaByHash.get(rightHash) || { hash: rightHash, shortHash: rightHash.slice(0, 8), subject: '', author: '', date: 0 },
+          leftOnlyCount: leftOnly.length,
+          rightOnlyCount: rightOnly.length,
+          leftOnlyCommits: leftCommits,
+          rightOnlyCommits: rightCommits,
+          fileChanges: diffRes.fileChanges
+        };
       }
 
       case 'scm:discard': {
@@ -1321,10 +1415,31 @@ export class GitMapServer {
         return { ok: true, ...res };
       }
 
+      case 'git:impactPreview': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const operation = params.operation === 'merge' ? 'merge' : params.operation === 'reset' ? 'reset' : 'rebase';
+        return this.workflowService.computeImpactPreview(repo, {
+          operation,
+          baseHash: params.baseHash ? String(params.baseHash) : undefined,
+          targetRef: params.targetRef ? String(params.targetRef) : undefined
+        });
+      }
+
       /* Git Worktree Management */
       case 'worktree:list': {
         const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
         return { worktrees: await this.workflowService.listWorktrees(repo) };
+      }
+
+      case 'worktree:openInGraph': {
+        const targetRepo = String(params.repoUri || params.path || '').trim();
+        if (!targetRepo) throw new Error('Worktree repository path is required.');
+        const res = await this.repoManager.registerRepo(targetRepo, true);
+        const finalRoot = res.root || targetRepo;
+        this.extensionState.setLastActiveRepo(finalRoot);
+        this.openViewTo({ repo: finalRoot });
+        return { ok: true, root: finalRoot, repos: this.repoManager.getRepos() };
       }
 
       case 'worktree:add': {
@@ -1356,6 +1471,23 @@ export class GitMapServer {
       case 'repos:fetchAll': {
         const keys = Object.keys(this.repoManager.getRepos());
         return this.workflowService.fetchAllRepos(keys);
+      }
+
+      case 'repos:activityHeatmap': {
+        const keys = Array.isArray(params.repos) && params.repos.length > 0
+          ? params.repos.map(String)
+          : Object.keys(this.repoManager.getRepos());
+        const weeks = Number(params.weeks) || 16;
+        return this.enhancementsService.getActivityHeatmap(keys, weeks);
+      }
+
+      case 'repos:launchpad': {
+        const keys = Array.isArray(params.repos) && params.repos.length > 0
+          ? params.repos.map(String)
+          : Object.keys(this.repoManager.getRepos());
+        const statuses = await this.workflowService.getQuickStatuses(keys);
+        const launchpad = await this.enhancementsService.getLaunchpadSummary(keys, statuses);
+        return { statuses, launchpad };
       }
 
       /* Git Branches, Tags & Checkout (for Command Palette & Release Notes) */
@@ -1634,16 +1766,28 @@ export class GitMapServer {
         const rawPaths: string[] = Array.isArray(params.paths) ? params.paths.map(String) : [];
         const homeResolved = path.resolve(os.homedir());
         const trash = this.desktopHooks.trashItem;
-        let deleted = 0;
+        // Pass 1: validate every target before mutating any of them (prevents partial batch deletes on invalid input)
+        const targets: Array<{ raw: string; norm: string }> = [];
         for (const p of rawPaths) {
           const norm = this.assertAllowedLocalPath(p);
           const parsedRoot = path.parse(norm).root;
           if (norm === parsedRoot || norm === homeResolved || norm.split(path.sep).filter(Boolean).length < 2) {
             throw new Error(`Refusing to delete protected directory "${p}".`);
           }
-          // Desktop app: to the system Trash (recoverable); browser mode has no Trash API, so it's permanent
-          if (trash) await trash(norm);
-          else await fs.promises.rm(norm, { recursive: true, force: false });
+          targets.push({ raw: p, norm });
+        }
+        // Pass 2: move to Trash (desktop app) or delete permanently (browser mode)
+        let deleted = 0;
+        for (const { raw, norm } of targets) {
+          if (trash) {
+            try {
+              await trash(norm);
+            } catch (err: any) {
+              throw new Error(`Unable to move "${path.basename(raw)}" to the Trash (${err?.message || err}).`);
+            }
+          } else {
+            await fs.promises.rm(norm, { recursive: true, force: false });
+          }
           deleted++;
         }
         RepoFileWatcher.notifyPossibleRemoteChange(250);
@@ -1825,6 +1969,7 @@ export class GitMapServer {
         let repo = String(params.repo || '');
         let filePath = String(params.filePath || '');
         const commit: string | null = params.commit ? String(params.commit) : null;
+        const requestedEncoding = typeof params.encoding === 'string' ? params.encoding : null;
 
         if (!repo && filePath && !isRemoteRepo(filePath)) {
           const found = await this.repoManager.getRepoAndPathOfFile(filePath.replace(/\\/g, '/'));
@@ -1835,7 +1980,7 @@ export class GitMapServer {
         }
 
         if (repo) {
-          const textRes = await this.diffService.readRevisionText(repo, commit, filePath);
+          const textRes = await this.diffService.readRevisionText(repo, commit, filePath, requestedEncoding);
           const blame = params.includeBlame
             ? await this.diffService.loadFileBlame(repo, filePath, commit)
             : null;
@@ -1847,6 +1992,7 @@ export class GitMapServer {
             isBinary: textRes.isBinary,
             truncated: textRes.truncated,
             notUtf8: !!textRes.notUtf8,
+            encoding: textRes.encoding || 'utf8',
             error: textRes.error,
             blame
           };
@@ -1872,18 +2018,23 @@ export class GitMapServer {
             await fh.close();
           }
         }
-        const isBinary = buf.subarray(0, 8000).includes(0);
+        const utf16Bom = detectUtf16Bom(buf);
+        const isBinary = utf16Bom === null && buf.subarray(0, 8000).includes(0);
         const truncated = buf.length > MAX_STANDALONE_BYTES;
+        const slice = truncated ? buf.subarray(0, MAX_STANDALONE_BYTES) : buf;
+        const notUtf8 = !isBinary && (utf16Bom !== null || isLossyUtf8(slice, { truncated }));
+        const activeEnc = resolveSafeViewEncoding(requestedEncoding) || utf16Bom || 'utf8';
         return {
           repo: '',
           filePath: shownPath,
           sourceUri: filePath,
           commit: null,
-          content: isBinary ? '' : buf.subarray(0, MAX_STANDALONE_BYTES).toString('utf8'),
+          content: isBinary ? '' : decodeFileBuffer(slice, activeEnc),
           isBinary,
           error: null,
           truncated,
-          notUtf8: !isBinary && !truncated && isLossyUtf8(buf),
+          notUtf8,
+          encoding: activeEnc,
           blame: null
         };
       }
@@ -1892,14 +2043,35 @@ export class GitMapServer {
         const repo = String(params.repo || '');
         const filePath = String(params.filePath || '');
         const content = String(params.content ?? '');
-        // Never overwrite a file that isn't UTF-8: the editor only had a lossy UTF-8 view of it
-        const existing = repo
-          ? await readRepoFileBuffer(repo, filePath, 32 * 1024 * 1024).catch(() => null)
-          : isRemoteRepo(filePath)
-            ? await sshManager.readRemoteFile(parseRemoteRepo(filePath)!.hostId, parseRemoteRepo(filePath)!.remotePath).catch(() => null)
-            : await fs.promises.readFile(this.assertAllowedLocalPath(filePath)).catch(() => null);
-        if (existing && !existing.subarray(0, 8192).includes(0) && isLossyUtf8(existing)) {
-          throw new Error('This file isn\'t UTF-8 encoded (e.g. GBK); saving from GitMap would corrupt it. Edit it in an editor that keeps its encoding.');
+        // Never overwrite a file that isn't UTF-8 (e.g. GBK / Latin-1 / UTF-16): bounded prefix read prevents OOM/slow SFTP
+        const MAX_WRITE_CHECK_BYTES = 2 * 1024 * 1024;
+        let existing: Buffer | null = null;
+        if (repo) {
+          existing = await readRepoFileBuffer(repo, filePath, MAX_WRITE_CHECK_BYTES + 1).catch(() => null);
+        } else if (isRemoteRepo(filePath)) {
+          const parsed = parseRemoteRepo(filePath)!;
+          existing = await sshManager.readRemoteFile(parsed.hostId, parsed.remotePath, MAX_WRITE_CHECK_BYTES + 1).catch(() => null);
+        } else if (filePath) {
+          existing = await (async () => {
+            const resolved = this.assertAllowedLocalPath(filePath);
+            const fh = await fs.promises.open(resolved, 'r');
+            try {
+              const st = await fh.stat();
+              const len = Math.min(MAX_WRITE_CHECK_BYTES + 1, Math.max(0, st.size));
+              const chunk = Buffer.allocUnsafe(len);
+              const { bytesRead } = len > 0 ? await fh.read(chunk, 0, len, 0) : { bytesRead: 0 };
+              return chunk.subarray(0, bytesRead);
+            } finally {
+              await fh.close();
+            }
+          })().catch(() => null);
+        }
+        if (existing) {
+          const checkTruncated = existing.length > MAX_WRITE_CHECK_BYTES;
+          const checkSlice = checkTruncated ? existing.subarray(0, MAX_WRITE_CHECK_BYTES) : existing;
+          if (isNonUtf8TextBuffer(checkSlice, checkTruncated)) {
+            throw new Error('This file isn\'t UTF-8 encoded (e.g. GBK or UTF-16); saving from GitMap would corrupt it. Edit it in an editor that keeps its encoding.');
+          }
         }
         if (repo) {
           await this.workflowService.writeRepoWorkingFile(repo, filePath, content);
@@ -2009,14 +2181,16 @@ export class GitMapServer {
 
       case 'term:openSystem': {
         const location = String(params.repo || this.extensionState.getLastActiveRepo() || os.homedir());
-        const app = await openInTerminal(location, this.getLauncherSettings());
+        const isFileHint = typeof params.isFile === 'boolean' ? params.isFile : undefined;
+        const app = await openInTerminal(location, this.getLauncherSettings(), isFileHint);
         return { ok: true, app };
       }
 
       case 'editor:open': {
         const location = String(params.repo || this.extensionState.getLastActiveRepo() || '');
         if (!location) throw new Error('No repository or folder to open.');
-        const app = await openInEditor(location, this.getLauncherSettings());
+        const isFileHint = typeof params.isFile === 'boolean' ? params.isFile : undefined;
+        const app = await openInEditor(location, this.getLauncherSettings(), isFileHint);
         return { ok: true, app };
       }
 
@@ -2202,12 +2376,77 @@ export class GitMapServer {
         return this.enhancementsService.syncFolderFile(source, target, relPath);
       }
 
-      /* AI Commit Message */
+      /* AI Commit Message, Commit Composer & Quick Model Switch */
       case 'ai:commitMessage': {
         const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
         const language = params.language === 'en' ? 'en' : 'zh';
         const style = params.style === 'concise' || params.style === 'detailed' ? params.style : 'conventional';
         return this.aiAssistantService.generateCommitMessage(repo, { language, style });
+      }
+
+      case 'ai:composeCommits': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const language = params.language === 'en' ? 'en' : 'zh';
+        const style = params.style === 'concise' || params.style === 'detailed' ? params.style : 'conventional';
+        return this.aiAssistantService.composeCommits(repo, { language, style });
+      }
+
+      case 'ai:quickSwitch': {
+        const updates: Record<string, unknown> = {};
+        if (typeof params.provider === 'string' && params.provider.trim()) {
+          updates['git-map.ai.provider'] = params.provider.trim();
+        }
+        if (typeof params.model === 'string') {
+          updates['git-map.ai.model'] = params.model.trim();
+        }
+        if (typeof params.baseUrl === 'string') {
+          updates['git-map.ai.baseUrl'] = params.baseUrl.trim();
+        }
+        if (Object.keys(updates).length > 0) {
+          await updateStandaloneSettingsBatch(updates);
+        }
+        const snapshot = await loadAiSettingsSnapshot();
+        const keys: { [provider: string]: boolean } = {};
+        for (const preset of snapshot.presets) {
+          if (preset.requiresApiKey) keys[preset.id] = (await getApiKey(preset.id as AiProvider)) !== null;
+        }
+        return {
+          ...snapshot,
+          presets: snapshot.presets.filter((p) => p.id !== AiProvider.VsCode),
+          keys,
+          defaultTimeoutSeconds: DEFAULT_AI_TIMEOUT_SECONDS
+        };
+      }
+
+      /* Portable Context Patch Bundles */
+      case 'patch:exportBundle': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const scope = params.scope === 'staged' ? 'staged' : params.scope === 'range' ? 'range' : 'working';
+        const bundle = await this.enhancementsService.exportPatchBundle(repo, {
+          scope,
+          fromRef: params.fromRef ? String(params.fromRef) : undefined,
+          toRef: params.toRef ? String(params.toRef) : undefined,
+          note: params.note ? String(params.note) : undefined
+        });
+        return { bundle };
+      }
+
+      case 'patch:inspect': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        return this.enhancementsService.inspectPatchBundle(repo, String(params.raw || ''));
+      }
+
+      case 'patch:apply': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const res = await this.enhancementsService.applyPatchBundle(repo, String(params.raw || ''), {
+          threeWay: !!params.threeWay
+        });
+        this.openViewTo({ repo });
+        return { ...res, status: await this.dataSource.getWorkingTreeStatus(repo) };
       }
 
       /* Settings Export / Import (Sanitized or AES-256-GCM Encrypted) */

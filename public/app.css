@@ -4949,17 +4949,471 @@ body.resizing-y #workspaceSplitResizer {
 /* Repository explorer: Git status (colours follow the theme's git decoration colours) */
 .fb-git-badge {
   flex: none;
-  margin-left: 8px;
+  margin-left: auto;
+  padding-left: 6px;
   font-family: var(--vscode-editor-font-family);
   font-size: 10.5px;
   font-weight: 700;
   line-height: 1;
 }
-.fb-row.gs-M .fb-name, .fb-row.gs-M .fb-git-badge,
-.fb-row.gs-R .fb-name, .fb-row.gs-R .fb-git-badge { color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); }
-.fb-row.gs-A .fb-name, .fb-row.gs-A .fb-git-badge,
-.fb-row.gs-U .fb-name, .fb-row.gs-U .fb-git-badge { color: var(--vscode-gitDecoration-addedResourceForeground, #73c991); }
-.fb-row.gs-D .fb-name, .fb-row.gs-D .fb-git-badge,
-.fb-row.gs-C .fb-name, .fb-row.gs-C .fb-git-badge { color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39); }
-.fb-row.is-dir .fb-git-badge { font-size: 9px; }
-.fb-row.is-dir .fb-name { color: inherit; }
+.fb-row:not(.is-dir).gs-M .fb-name, .fb-row.gs-M .fb-git-badge {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
+}
+.fb-row:not(.is-dir).gs-R .fb-name, .fb-row.gs-R .fb-git-badge {
+  color: var(--vscode-gitDecoration-renamedResourceForeground, #73c991);
+}
+.fb-row:not(.is-dir).gs-A .fb-name, .fb-row.gs-A .fb-git-badge,
+.fb-row:not(.is-dir).gs-U .fb-name, .fb-row.gs-U .fb-git-badge {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
+}
+.fb-row:not(.is-dir).gs-D .fb-name, .fb-row.gs-D .fb-git-badge,
+.fb-row:not(.is-dir).gs-C .fb-name, .fb-row.gs-C .fb-git-badge {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+}
+.fb-row.is-dir .fb-git-badge {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border-radius: 50%;
+  background: currentColor;
+}
+/* Maintain WCAG legibility on selected rows in both dark and light themes */
+.fb-row.selected .fb-name,
+.fb-row.selected .fb-git-badge {
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+/* Non-UTF-8 read-only viewer pill & encoding selector */
+.viewer-encoding-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 35%, transparent);
+  white-space: nowrap;
+}
+.viewer-encoding-select {
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  border: 1px solid var(--vscode-dropdown-border);
+  cursor: pointer;
+}
+
+/* ===================================================================
+   Sonner-Style Stacking Undo Toasts, shadcn/ui Primitives & Diff Rail
+   =================================================================== */
+.toast {
+  position: relative;
+  overflow: hidden;
+  padding: 10px 12px 11px 14px;
+  border-radius: 9px;
+  animation: gmToastIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.toast.toast-leaving {
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+@keyframes gmToastIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.toast-detail {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toast-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.toast-action-btn {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 52%, var(--vscode-panel-border));
+  background: color-mix(in srgb, var(--vscode-focusBorder) 16%, var(--vscode-editorWidget-background));
+  color: var(--vscode-foreground);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.toast-action-btn:hover:not(:disabled) {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border-color: transparent;
+}
+.toast-action-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.toast-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--vscode-focusBorder) 65%, transparent);
+  transform-origin: left center;
+}
+.toast.error .toast-progress {
+  background: var(--vscode-errorForeground);
+}
+.toast.warning .toast-progress {
+  background: var(--vscode-editorWarning-foreground);
+}
+
+/* shadcn/ui ButtonGroup Split Button */
+.gm-btn-group {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+.gm-btn-group > .gm-btn-group-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.22);
+}
+.gm-btn-group > .gm-btn-group-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding: 0 7px;
+  min-width: 26px;
+  justify-content: center;
+}
+.gm-btn-group > .gm-btn-group-caret .ui-icon {
+  width: 13px;
+  height: 13px;
+}
+.gm-split-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  min-width: 250px;
+  padding: 5px;
+  border-radius: 9px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gm-split-menu.drop-down {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+.gm-split-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.gm-split-menu-item:hover:not(:disabled) {
+  background: var(--vscode-list-hoverBackground);
+}
+.gm-split-menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.gm-split-menu-item .gm-split-item-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.gm-split-menu-item .ui-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.85;
+}
+.gm-split-menu-sep {
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--vscode-panel-border);
+}
+
+/* shadcn/ui Kbd & Empty Card */
+.gm-kbd-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.gm-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-panel-border);
+  border-bottom-width: 2px;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 85%, var(--vscode-foreground) 4%);
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10.5px;
+  line-height: 1;
+}
+.gm-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 28px 20px;
+  border: 1px dashed var(--vscode-panel-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--vscode-sideBar-background) 55%, transparent);
+  color: var(--vscode-descriptionForeground);
+}
+.gm-empty-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--vscode-focusBorder) 14%, transparent);
+  color: var(--vscode-focusBorder);
+}
+.gm-empty-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+.gm-empty-card-desc {
+  font-size: 12px;
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+/* rare-ui Inline AI Status & QuantOrb Quick AI Model Switcher Pill */
+.gm-ai-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--vscode-focusBorder);
+  background: color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 32%, transparent);
+}
+.gm-ai-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: gmAiPulse 1.15s ease-in-out infinite;
+}
+@keyframes gmAiPulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+.gm-model-pill-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.gm-model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-panel-border);
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 85%, transparent);
+  color: var(--vscode-foreground);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  max-width: 240px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.gm-model-pill:hover {
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-hoverBackground);
+}
+.gm-model-pill .ui-icon {
+  width: 12px;
+  height: 12px;
+  color: var(--vscode-focusBorder);
+}
+.gm-model-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gm-model-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+}
+.gm-model-pill-dot.unready {
+  background: #f59e0b;
+}
+.gm-model-popover {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  width: 290px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gm-model-popover.align-right {
+  left: auto;
+  right: 0;
+}
+.gm-model-popover label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.gm-model-popover select,
+.gm-model-popover input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-size: 12px;
+}
+
+/* rare-ui 2-Step Arm/Confirm Danger Button */
+.gm-danger-arm {
+  position: relative;
+  overflow: hidden;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.gm-danger-arm.armed {
+  background: #dc2626 !important;
+  border-color: #ef4444 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.28);
+}
+
+/* Diff Viewer Right-Side Hunk Rail TOC */
+.diff-body-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.diff-body-wrap > .diff-scroll-area {
+  flex: 1;
+  min-width: 0;
+}
+.diff-hunk-rail {
+  position: relative;
+  width: 14px;
+  flex: 0 0 14px;
+  background: color-mix(in srgb, var(--vscode-sideBar-background) 78%, transparent);
+  border-left: 1px solid var(--vscode-panel-border);
+  user-select: none;
+  cursor: pointer;
+}
+.diff-hunk-rail.empty {
+  display: none;
+}
+.diff-hunk-rail-viewport {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  background: color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+  border-radius: 2px;
+  pointer-events: none;
+  min-height: 14px;
+}
+.diff-hunk-tick {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  min-height: 4px;
+  border-radius: 2px;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background: var(--vscode-focusBorder, #3b82f6);
+  opacity: 0.78;
+  transition: transform 0.1s ease, opacity 0.1s ease;
+}
+.diff-hunk-tick.kind-add {
+  background: #22c55e;
+}
+.diff-hunk-tick.kind-del {
+  background: #ef4444;
+}
+.diff-hunk-tick.kind-change {
+  background: #f59e0b;
+}
+.diff-hunk-tick:hover,
+.diff-hunk-tick.active {
+  opacity: 1;
+  transform: scaleX(1.22);
+  z-index: 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast,
+  .toast.toast-leaving,
+  .gm-ai-dot,
+  .diff-hunk-tick {
+    animation: none !important;
+    transition: none !important;
+  }
+}

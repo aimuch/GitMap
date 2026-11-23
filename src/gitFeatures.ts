@@ -147,6 +147,32 @@ export class GitFeatures {
 	/* Rewriting the Latest Commits */
 
 	/**
+	 * Amend the commit that HEAD refers to (`git commit --amend`): supports editing message, optionally folding in
+	 * staged changes (omit `--only`), overriding author (`Name <email>`), and refreshing the author date (`--date=now`).
+	 */
+	public async amendCommit(repo: string, options: {
+		message: string;
+		sign: boolean;
+		includeStaged?: boolean;
+		author?: string | null;
+		resetAuthorDate?: boolean;
+	}): Promise<GitFeatureError> {
+		if (options.message.trim() === '') return 'The message can\'t be empty.';
+		const args = ['commit', '--amend'];
+		if (!options.includeStaged) args.push('--only');
+		args.push('--allow-empty', '--cleanup=strip', '-F', '-');
+		if (options.author && options.author.trim()) {
+			const cleanAuthor = options.author.trim().replace(/[\r\n\0]/g, '');
+			if (cleanAuthor.startsWith('-')) return 'Invalid author format.';
+			args.push('--author=' + cleanAuthor);
+		}
+		if (options.resetAuthorDate) args.push('--date=now');
+		if (options.sign) args.push('-S');
+		const result = await runGit(this.git, repo, args, Buffer.from(options.message, 'utf8'), null, { GIT_EDITOR: ':' });
+		return result.code === 0 ? null : errorOf(result);
+	}
+
+	/**
 	 * Change the message of the commit that HEAD refers to (only the message changes: changes that are staged stay staged).
 	 * @param repo The path of the repository.
 	 * @param message The new message.
@@ -154,10 +180,22 @@ export class GitFeatures {
 	 * @returns The error, or NULL.
 	 */
 	public async amendMessage(repo: string, message: string, sign: boolean): Promise<GitFeatureError> {
-		if (message.trim() === '') return 'The message can\'t be empty.';
-		const args = ['commit', '--amend', '--only', '--allow-empty', '--cleanup=strip', '-F', '-'].concat(sign ? ['-S'] : []);
-		const result = await runGit(this.git, repo, args, Buffer.from(message, 'utf8'), null, { GIT_EDITOR: ':' });
-		return result.code === 0 ? null : errorOf(result);
+		return this.amendCommit(repo, { message, sign, includeStaged: false });
+	}
+
+	/** Get `"Author Name <email>"` for a commit hash. */
+	public async getCommitAuthor(repo: string, hash: string): Promise<string | null> {
+		if (!HASH_REGEXP.test(hash)) return null;
+		const result = await this.run(repo, ['-c', 'log.showSignature=false', 'log', '-1', '--format=%an <%ae>', hash, '--']);
+		const text = result.stdout.toString('utf8').trim();
+		return result.code === 0 && text ? text : null;
+	}
+
+	/** Number of files currently staged in the index (`git diff --cached --name-only`). */
+	public async getStagedFileCount(repo: string): Promise<number> {
+		const result = await this.run(repo, ['diff', '--cached', '--name-only']);
+		if (result.code !== 0) return 0;
+		return splitLines(result.stdout).length;
 	}
 
 	/**

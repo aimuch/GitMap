@@ -1,5 +1,7 @@
+import * as bufferMod from 'buffer';
 import { diffLines, diffWordsWithSpace } from 'diff';
-import { decode } from 'iconv-lite';
+import { decode, encodingExists } from 'iconv-lite';
+import { getConfig } from '../config';
 import { DataSource } from '../dataSource';
 import { readRepoFileBuffer } from '../remote/repoTransport';
 import { GitFileBlame, GitFileStatus } from '../types';
@@ -119,10 +121,91 @@ function fastLargeFileDiff(oldLines: string[], newLines: string[]): { rows: Diff
   return { rows, additions: addCount, deletions: delCount };
 }
 
-/** The bytes aren't valid UTF-8 (decoding replaced something), so the text can't be written back unchanged. */
-export function isLossyUtf8(bytes: Buffer, decoded?: string): boolean {
-  const text = decoded !== undefined ? decoded : bytes.toString('utf8');
-  return text.includes('\uFFFD') && !Buffer.from(text, 'utf8').equals(bytes);
+const nativeIsUtf8: ((input: Uint8Array) => boolean) | null =
+  typeof (bufferMod as any).isUtf8 === 'function' ? (bufferMod as any).isUtf8 : null;
+const fatalUtf8Decoder = typeof TextDecoder === 'function' ? new TextDecoder('utf-8', { fatal: true }) : null;
+
+export const ALLOWED_VIEW_ENCODINGS = new Set([
+  'utf8',
+  'gb18030',
+  'gbk',
+  'big5',
+  'shift_jis',
+  'euc-kr',
+  'windows-1252',
+  'iso-8859-1',
+  'utf16le',
+  'utf16be'
+]);
+
+/** Detect a UTF-16 LE / BE Byte Order Mark so UTF-16 text files aren't mistaken for binary or overwritten as UTF-8. */
+export function detectUtf16Bom(bytes: Buffer): 'utf16le' | 'utf16be' | null {
+  if (bytes.length < 2) return null;
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+    // Exclude UTF-32 LE BOM (FF FE 00 00)
+    if (bytes.length >= 4 && bytes[2] === 0x00 && bytes[3] === 0x00) return null;
+    return 'utf16le';
+  }
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return 'utf16be';
+  return null;
+}
+
+/** Trim up to 3 trailing bytes of an incomplete multi-byte UTF-8 sequence when a buffer was sliced at a fixed cap. */
+export function trimIncompleteUtf8Tail(bytes: Buffer): Buffer {
+  const len = bytes.length;
+  if (len === 0) return bytes;
+  let i = len - 1;
+  const minIdx = Math.max(0, len - 4);
+  while (i >= minIdx && (bytes[i] & 0xc0) === 0x80) i--;
+  if (i < minIdx) return bytes;
+  const lead = bytes[i];
+  let expectedLen = 1;
+  if ((lead & 0x80) === 0) expectedLen = 1;
+  else if ((lead & 0xe0) === 0xc0) expectedLen = 2;
+  else if ((lead & 0xf0) === 0xe0) expectedLen = 3;
+  else if ((lead & 0xf8) === 0xf0) expectedLen = 4;
+  else return bytes;
+  return len - i < expectedLen ? bytes.subarray(0, i) : bytes;
+}
+
+/**
+ * The bytes aren't valid UTF-8 (decoding would lose bytes), so the text can't be written back as UTF-8 unchanged.
+ * Uses Node's zero-allocation SIMD `buffer.isUtf8` (with fatal TextDecoder fallback).
+ */
+export function isLossyUtf8(bytes: Buffer, opts?: { truncated?: boolean } | string): boolean {
+  if (bytes.length === 0) return false;
+  const target = typeof opts === 'object' && opts?.truncated ? trimIncompleteUtf8Tail(bytes) : bytes;
+  if (nativeIsUtf8) return !nativeIsUtf8(target);
+  if (fatalUtf8Decoder) {
+    try {
+      fatalUtf8Decoder.decode(target);
+      return false;
+    } catch {
+      return true;
+    }
+  }
+  const text = typeof opts === 'string' ? opts : target.toString('utf8');
+  return text.includes('\uFFFD') && !Buffer.from(text, 'utf8').equals(target);
+}
+
+/** Whether a file buffer is non-UTF-8 text (invalid UTF-8 bytes or UTF-16 BOM) that must not be overwritten as UTF-8. */
+export function isNonUtf8TextBuffer(bytes: Buffer, truncated: boolean = false): boolean {
+  if (detectUtf16Bom(bytes) !== null) return true;
+  if (bytes.subarray(0, 8192).includes(0)) return false;
+  return isLossyUtf8(bytes, { truncated });
+}
+
+export function resolveSafeViewEncoding(requested?: string | null): string | null {
+  if (!requested) return null;
+  const norm = String(requested).trim().toLowerCase();
+  if (ALLOWED_VIEW_ENCODINGS.has(norm) && encodingExists(norm)) return norm;
+  return null;
+}
+
+export function decodeFileBuffer(bytes: Buffer, encoding?: string | null): string {
+  const safe = resolveSafeViewEncoding(encoding);
+  if (!safe || safe === 'utf8') return bytes.toString('utf8');
+  return decode(bytes, safe);
 }
 
 export class DiffService {
@@ -131,42 +214,55 @@ export class DiffService {
   public async readRevisionText(
     repo: string,
     commit: string | null,
-    filePath: string
-  ): Promise<{ content: string; isBinary: boolean; truncated: boolean; error: string | null; notUtf8?: boolean }> {
+    filePath: string,
+    requestedEncoding?: string | null
+  ): Promise<{ content: string; isBinary: boolean; truncated: boolean; error: string | null; notUtf8?: boolean; encoding?: string }> {
+    const explicitEnc = resolveSafeViewEncoding(requestedEncoding);
+    const repoEncRaw = getConfig(repo).fileEncoding;
+    const repoEnc = repoEncRaw && repoEncRaw.toLowerCase() !== 'utf8' && encodingExists(repoEncRaw) ? repoEncRaw : 'utf8';
+
     if (!commit || commit === UNCOMMITTED) {
       const buf = await readRepoFileBuffer(repo, filePath, MAX_DIFF_BYTES + 1);
       if (buf === null) {
         return { content: '', isBinary: false, truncated: false, error: null };
       }
-      if (buf.subarray(0, 8192).includes(0)) {
+      const utf16Bom = detectUtf16Bom(buf);
+      if (utf16Bom === null && buf.subarray(0, 8192).includes(0)) {
         return { content: '', isBinary: true, truncated: false, error: null };
       }
       const truncated = buf.length > MAX_DIFF_BYTES;
       const slice = buf.subarray(0, MAX_DIFF_BYTES);
-      const content = slice.toString('utf8');
+      const notUtf8 = utf16Bom !== null || isLossyUtf8(slice, { truncated });
+      const activeEnc = explicitEnc || utf16Bom || repoEnc;
+      const content = activeEnc === 'utf8' ? slice.toString('utf8') : decode(slice, activeEnc);
       return {
         content,
         isBinary: false,
         truncated,
         error: null,
-        // GBK / Latin-1 … shown as UTF-8 has replacement characters: saving it back would destroy the original bytes
-        notUtf8: !truncated && isLossyUtf8(slice, content)
+        // GBK / Latin-1 / UTF-16: saving back as UTF-8 would destroy the original bytes
+        notUtf8,
+        encoding: activeEnc
       };
     }
 
     try {
       const { buffer, encoding } = await this.dataSource.getCommitFileBuffer(repo, commit, filePath, MAX_DIFF_BYTES + 1);
-      if (buffer.subarray(0, 8192).includes(0)) {
+      const utf16Bom = detectUtf16Bom(buffer);
+      if (utf16Bom === null && buffer.subarray(0, 8192).includes(0)) {
         return { content: '', isBinary: true, truncated: false, error: null };
       }
       const truncated = buffer.length > MAX_DIFF_BYTES;
       const sliced = truncated ? buffer.subarray(0, MAX_DIFF_BYTES) : buffer;
-      const content = encoding === 'utf8' ? sliced.toString('utf8') : decode(sliced, encoding);
+      const activeEnc = explicitEnc || utf16Bom || encoding;
+      const content = activeEnc === 'utf8' ? sliced.toString('utf8') : decode(sliced, activeEnc);
       return {
         content,
         isBinary: false,
         truncated,
-        error: null
+        error: null,
+        notUtf8: utf16Bom !== null || isLossyUtf8(sliced, { truncated }),
+        encoding: activeEnc
       };
     } catch (err) {
       const msg = String(err);

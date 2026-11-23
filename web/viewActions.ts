@@ -253,9 +253,9 @@ class ViewActions {
 		], [
 			{
 				id: 'editMessage',
-				title: t('Edit Commit Message') + ELLIPSIS,
+				title: (isHead ? t('Amend Commit') : t('Edit Commit Message')) + ELLIPSIS,
 				icon: MENU_ICONS.edit,
-				visible: visibility.editMessage && commit.parents.length < 2 && (isHead || rebasable),
+				visible: visibility.editMessage && (isHead || (commit.parents.length < 2 && rebasable)),
 				onClick: () => {
 					this.editMessageTarget = target;
 					sendMessage({ command: 'loadCommitMessage', repo: this.view.currentRepo, commitHash: hash });
@@ -345,6 +345,22 @@ class ViewActions {
 				icon: MENU_ICONS.bisectSkip,
 				visible: visibility.bisect && bisect !== null && bisect.firstBad === null,
 				onClick: () => runAction({ command: 'bisect', repo: this.view.currentRepo, action: 'skip', commitHash: hash, goodRef: null }, t('Bisecting'))
+			}
+		], [
+			{
+				id: 'compareWithBranchCommit',
+				title: t('Compare with Branch / Commit') + ELLIPSIS,
+				icon: MENU_ICONS.compare,
+				visible: true,
+				onClick: () => {
+					const leftRef = commit.heads[0] || (commit.remotes[0] ? commit.remotes[0].remote + '/' + commit.remotes[0].name : null);
+					window.parent.postMessage({
+						type: 'gitmap-shell-action',
+						action: 'open-commit-compare',
+						leftHash: hash,
+						leftRef: leftRef
+					}, window.location.origin || '*');
+				}
 			}
 		], [
 			{
@@ -1091,9 +1107,62 @@ class ViewActions {
 			return;
 		}
 		const isHead = msg.commitHash === this.view.getCommitHead();
-		dialog.showForm(t('Edit the message of commit <b><i>{0}</i></b>:', abbrevCommit(msg.commitHash)) +
-			(isHead ? '' : '<br/><i>' + t('The later commits are rebased onto the changed commit (they get new hashes).') + '</i>') +
-			(msg.pushedTo !== null ? '<div class="dialogCallout warning">' + SVG_ICONS.alert + '<span>' + t('This commit is already on <b>{0}</b>. Changing it gives it a new hash, so the branch must be force-pushed.', escapeHtml(msg.pushedTo)) + '</span></div>' : ''), [
+		const stagedCount = typeof msg.stagedCount === 'number' ? msg.stagedCount : 0;
+		const origAuthor = typeof msg.author === 'string' ? msg.author : '';
+		const headerHtml = (isHead
+			? t('Amend commit <b><i>{0}</i></b> (<code>git commit --amend</code>):', abbrevCommit(msg.commitHash))
+			: t('Edit the message of commit <b><i>{0}</i></b>:', abbrevCommit(msg.commitHash)) + '<br/><i>' + t('The later commits are rebased onto the changed commit (they get new hashes).') + '</i>') +
+			(msg.pushedTo !== null ? '<div class="dialogCallout warning">' + SVG_ICONS.alert + '<span>' + t('This commit is already on <b>{0}</b>. Changing it gives it a new hash, so the branch must be force-pushed.', escapeHtml(msg.pushedTo)) + '</span></div>' : '');
+
+		if (isHead) {
+			const inputs: DialogInput[] = [
+				{ type: DialogInputType.TextArea, name: t('Message'), default: msg.message, placeholder: null }
+			];
+			if (stagedCount > 0) {
+				inputs.push({
+					type: DialogInputType.Checkbox,
+					name: t('Include {0} staged file(s) in this commit (--amend)', stagedCount),
+					value: true,
+					info: t('Checked: fold staged changes into this commit. Unchecked: edit metadata/message only (--only).')
+				});
+			}
+			inputs.push({
+				type: DialogInputType.Text,
+				name: t('Author (Name <email>)'),
+				default: origAuthor,
+				placeholder: 'Name <email@example.com>',
+				info: t('Leave unchanged to keep the original commit author.')
+			});
+			inputs.push({
+				type: DialogInputType.Checkbox,
+				name: t('Reset commit date to now (--date=now)'),
+				value: false
+			});
+
+			dialog.showForm(headerHtml, inputs, t('Amend Commit'), (values) => {
+				const message = (<string>values[0]).trim();
+				if (message === '') {
+					dialog.showError(t('Unable to Edit Commit Message'), t('The message can\'t be empty.'), null, null);
+					return;
+				}
+				let idx = 1;
+				const includeStaged = stagedCount > 0 ? <boolean>values[idx++] : false;
+				const nextAuthor = (<string>values[idx++]).trim();
+				const resetAuthorDate = <boolean>values[idx++];
+				runAction({
+					command: 'editCommitMessage',
+					repo: this.view.currentRepo,
+					commitHash: msg.commitHash,
+					message: message,
+					includeStaged: includeStaged,
+					author: nextAuthor && nextAuthor !== origAuthor ? nextAuthor : null,
+					resetAuthorDate: resetAuthorDate
+				}, t('Amending Commit'));
+			}, target);
+			return;
+		}
+
+		dialog.showForm(headerHtml, [
 			{ type: DialogInputType.TextArea, name: t('Message'), default: msg.message, placeholder: null }
 		], t('Save Message'), (values) => {
 			const message = (<string>values[0]).trim();

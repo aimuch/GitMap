@@ -12,7 +12,42 @@ function generateFileTreeHtml(folder: FileTreeFolder, gitFiles: ReadonlyArray<GG
 		? { folder: folder, name: folder.name, pathSeg: folder.name }
 		: getCurrentFolderInfo(folder, folder.name, folder.name);
 
-	const children = sortFolderKeys(curFolderInfo.folder).map((key) => {
+	let keys = sortFolderKeys(curFolderInfo.folder);
+	if (isCdvSinkViewedEnabled()) {
+		const isFolderAllViewed = (f: FileTreeFolder): boolean => {
+			const ks = Object.keys(f.contents);
+			if (ks.length === 0) return false;
+			for (let i = 0; i < ks.length; i++) {
+				const child = f.contents[ks[i]];
+				if (child.type === 'folder') {
+					if (!isFolderAllViewed(child)) return false;
+				} else if (child.type === 'file') {
+					if (!isCdvFileViewed(gitFiles[child.index].newFilePath)) return false;
+				} else {
+					return false;
+				}
+			}
+			return true;
+		};
+		const isKeyViewed = (k: string): boolean => {
+			const c = curFolderInfo.folder.contents[k];
+			if (c.type === 'file') return isCdvFileViewed(gitFiles[c.index].newFilePath);
+			if (c.type === 'folder') return isFolderAllViewed(c);
+			return false;
+		};
+		keys = keys.slice().sort((a, b) => {
+			const ca = curFolderInfo.folder.contents[a];
+			const cb = curFolderInfo.folder.contents[b];
+			const typeDiff = (ca.type !== 'file' ? 0 : 1) - (cb.type !== 'file' ? 0 : 1);
+			if (typeDiff !== 0) return typeDiff;
+			const va = isKeyViewed(a) ? 1 : 0;
+			const vb = isKeyViewed(b) ? 1 : 0;
+			if (va !== vb) return va - vb;
+			return ca.name.localeCompare(cb.name);
+		});
+	}
+
+	const children = keys.map((key) => {
 		const cur = curFolderInfo.folder.contents[key];
 		return cur.type === 'folder'
 			? generateFileTreeHtml(cur, gitFiles, lastViewedFile, fileContextMenuOpen, isUncommitted, false)
@@ -33,10 +68,141 @@ function getCurrentFolderInfo(folder: FileTreeFolder, name: string, pathSeg: str
 }
 
 /**
- * Files of the expanded commit whose diff was opened (cleared when another commit is expanded): shown dimmed as "viewed",
- * so a commit can be gone through file by file. The last one opened is highlighted (lastViewedFile).
+ * Files of the expanded commit whose diff was opened, scoped per (repo, commitHash, compareWithHash) in a bounded
+ * session LRU (persisted to sessionStorage) so viewed progress survives reload / collapsing / re-expanding.
  */
-const cdvViewedFiles = new Set<string>();
+const CDV_VIEWED_MAX_COMMITS = 32;
+const CDV_VIEWED_STORAGE_KEY = 'gitmap.cdvViewed.v1';
+const CDV_SINK_VIEWED_KEY = 'gitmap.cdvSinkViewed.v1';
+const cdvViewedByCommit = new Map<string, Set<string>>();
+let cdvActiveViewedSet: Set<string> = new Set();
+let cdvViewedHydrated = false;
+let cdvSinkViewedCached: boolean | null = null;
+
+function hydrateCdvViewedFromSession() {
+	if (cdvViewedHydrated) return;
+	cdvViewedHydrated = true;
+	try {
+		const raw = window.sessionStorage ? window.sessionStorage.getItem(CDV_VIEWED_STORAGE_KEY) : null;
+		if (!raw) return;
+		const parsed = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return;
+		for (let i = 0; i < parsed.length; i++) {
+			const entry = parsed[i];
+			if (Array.isArray(entry) && typeof entry[0] === 'string' && Array.isArray(entry[1])) {
+				cdvViewedByCommit.set(entry[0], new Set(entry[1].filter((x: unknown) => typeof x === 'string')));
+			}
+		}
+		while (cdvViewedByCommit.size > CDV_VIEWED_MAX_COMMITS) {
+			const oldest = cdvViewedByCommit.keys().next().value;
+			if (typeof oldest === 'string') cdvViewedByCommit.delete(oldest);
+			else break;
+		}
+	} catch (_) { /* storage unavailable */ }
+}
+
+function persistCdvViewedToSession() {
+	try {
+		if (!window.sessionStorage) return;
+		const payload: Array<[string, string[]]> = [];
+		cdvViewedByCommit.forEach((set, key) => {
+			if (set.size > 0) payload.push([key, Array.from(set)]);
+		});
+		window.sessionStorage.setItem(CDV_VIEWED_STORAGE_KEY, JSON.stringify(payload.slice(-CDV_VIEWED_MAX_COMMITS)));
+	} catch (_) { /* quota / sandbox */ }
+}
+
+function isCdvSinkViewedEnabled(): boolean {
+	if (cdvSinkViewedCached !== null) return cdvSinkViewedCached;
+	try {
+		cdvSinkViewedCached = window.localStorage ? window.localStorage.getItem(CDV_SINK_VIEWED_KEY) === '1' : false;
+	} catch (_) {
+		cdvSinkViewedCached = false;
+	}
+	return cdvSinkViewedCached;
+}
+
+function setCdvSinkViewedEnabled(enabled: boolean) {
+	cdvSinkViewedCached = !!enabled;
+	try {
+		if (window.localStorage) window.localStorage.setItem(CDV_SINK_VIEWED_KEY, enabled ? '1' : '0');
+	} catch (_) { /* ignore */ }
+}
+
+function setCdvViewedCommitKey(key: string | null) {
+	hydrateCdvViewedFromSession();
+	if (!key) {
+		cdvActiveViewedSet = new Set();
+		return;
+	}
+	let set = cdvViewedByCommit.get(key);
+	if (!set) {
+		set = new Set<string>();
+		cdvViewedByCommit.set(key, set);
+		while (cdvViewedByCommit.size > CDV_VIEWED_MAX_COMMITS) {
+			const oldest = cdvViewedByCommit.keys().next().value;
+			if (typeof oldest === 'string') cdvViewedByCommit.delete(oldest);
+			else break;
+		}
+	} else {
+		// Refresh LRU recency
+		cdvViewedByCommit.delete(key);
+		cdvViewedByCommit.set(key, set);
+	}
+	cdvActiveViewedSet = set;
+}
+
+function markCdvFileViewed(filePath: string) {
+	cdvActiveViewedSet.add(filePath);
+	persistCdvViewedToSession();
+}
+
+function unmarkCdvFileViewed(filePath: string) {
+	cdvActiveViewedSet.delete(filePath);
+	persistCdvViewedToSession();
+}
+
+function toggleCdvFileViewed(filePath: string): boolean {
+	if (cdvActiveViewedSet.has(filePath)) {
+		cdvActiveViewedSet.delete(filePath);
+		persistCdvViewedToSession();
+		return false;
+	}
+	cdvActiveViewedSet.add(filePath);
+	persistCdvViewedToSession();
+	return true;
+}
+
+function isCdvFileViewed(filePath: string) {
+	return cdvActiveViewedSet.has(filePath);
+}
+
+function getCdvViewedProgress(gitFiles: ReadonlyArray<GG.GitFileChange>): { viewed: number; total: number; percent: number } {
+	const total = gitFiles.length;
+	let viewed = 0;
+	for (let i = 0; i < total; i++) {
+		if (cdvActiveViewedSet.has(gitFiles[i].newFilePath)) viewed++;
+	}
+	const percent = total > 0 ? Math.round((viewed / total) * 100) : 0;
+	return { viewed, total, percent };
+}
+
+function generateCdvReviewBarHtml(gitFiles: ReadonlyArray<GG.GitFileChange>): string {
+	if (gitFiles.length === 0) return '';
+	const prog = getCdvViewedProgress(gitFiles);
+	const sinkOn = isCdvSinkViewedEnabled();
+	const allDone = prog.total > 0 && prog.viewed >= prog.total;
+	return '<div id="cdvReviewBar" class="cdvReviewBar' + (allDone ? ' allReviewed' : '') + '">' +
+		'<div class="cdvReviewProgressWrap">' +
+			'<span id="cdvReviewProgressText" class="cdvReviewProgressText">' + t('Reviewed {0} / {1}', prog.viewed, prog.total) + '</span>' +
+			'<span class="cdvReviewProgressTrack"><span id="cdvReviewProgressFill" class="cdvReviewProgressFill" style="width:' + prog.percent + '%"></span></span>' +
+		'</div>' +
+		'<div class="cdvReviewBarActions">' +
+			'<button type="button" id="cdvNextUnviewedBtn" class="cdvReviewBtn" title="' + escapeHtml(t('Open next unviewed file (Alt+N)')) + '">' + t('Next Unviewed') + '<span class="cdvReviewKbd">Alt+N</span></button>' +
+			'<button type="button" id="cdvSinkViewedBtn" class="cdvReviewBtn' + (sinkOn ? ' active' : '') + '" aria-pressed="' + (sinkOn ? 'true' : 'false') + '" title="' + escapeHtml(t('Move viewed files to the bottom of the list')) + '">' + t('Sink Viewed') + '</button>' +
+		'</div>' +
+	'</div>';
+}
 
 /**
  * The maximum number of lines changed in a file of the file view being generated, used to scale the bars of the lines changed in each file.
@@ -93,6 +259,19 @@ function generateFileListHtml(folder: FileTreeFolder, gitFiles: ReadonlyArray<GG
 		return items;
 	};
 	let sortedLeaves = sortLeaves(folder, '');
+	if (isCdvSinkViewedEnabled()) {
+		const unviewed: typeof sortedLeaves = [];
+		const viewed: typeof sortedLeaves = [];
+		for (let i = 0; i < sortedLeaves.length; i++) {
+			const item = sortedLeaves[i];
+			if (item.leaf.type === 'file' && isCdvFileViewed(gitFiles[item.leaf.index].newFilePath)) {
+				viewed.push(item);
+			} else {
+				unviewed.push(item);
+			}
+		}
+		sortedLeaves = unviewed.concat(viewed);
+	}
 	let html = '';
 	for (let i = 0; i < sortedLeaves.length; i++) {
 		html += generateFileTreeLeafHtml(sortedLeaves[i].relPath, sortedLeaves[i].leaf, gitFiles, lastViewedFile, fileContextMenuOpen, isUncommitted);
@@ -125,7 +304,9 @@ function generateFileTreeLeafHtml(name: string, leaf: FileTreeLeaf, gitFiles: Re
 		const nameHtml = dirEnd > -1
 			? '<span class="gitFileName ' + fileTreeFile.type + '">' + escapeHtml(name.substring(dirEnd + 1)) + '</span>' + renamedFromHtml + '<span class="gitFileDir">' + escapeHtml(name.substring(0, dirEnd)) + '</span>'
 			: '<span class="gitFileName ' + fileTreeFile.type + '">' + escapedName + '</span>' + renamedFromHtml;
-		return '<li data-pathseg="' + encodedName + '"><span class="fileTreeFileRecord' + (leaf.index === fileContextMenuOpen ? ' ' + CLASS_CONTEXT_MENU_ACTIVE : '') + (fileTreeFile.newFilePath === lastViewedFile ? ' lastViewedFile' : '') + (cdvViewedFiles.has(fileTreeFile.newFilePath) ? ' viewedFile' : '') + '" data-index="' + leaf.index + '"><span class="fileTreeFile' + (diffPossible ? ' gitDiffPossible' : '') + (leaf.reviewed ? '' : ' ' + CLASS_PENDING_REVIEW) + '" title="' + (diffPossible ? t('Click to View Diff') : t('Unable to View Diff{0}', (fileTreeFile.type !== GG.GitFileStatus.Deleted ? t(' (this is a binary file)') : ''))) + ' • ' + changeTypeMessage + '"><span class="fileTreeFileBadge ' + fileTreeFile.type + '">' + fileTreeFile.type + '</span>' + fileIcons.getFileIcon(fileTreeFile.newFilePath) + '<span class="fileTreeFileText">' + nameHtml + '</span></span>' +
+		const viewed = isCdvFileViewed(fileTreeFile.newFilePath);
+		const sinkActive = isCdvSinkViewedEnabled();
+		return '<li data-pathseg="' + encodedName + '"><span class="fileTreeFileRecord' + (leaf.index === fileContextMenuOpen ? ' ' + CLASS_CONTEXT_MENU_ACTIVE : '') + (fileTreeFile.newFilePath === lastViewedFile ? ' lastViewedFile' : '') + (viewed ? ' viewedFile' : '') + (viewed && sinkActive ? ' sinkViewed' : '') + '" data-index="' + leaf.index + '"><button type="button" class="cdvViewedCheck' + (viewed ? ' checked' : '') + '" aria-pressed="' + (viewed ? 'true' : 'false') + '" title="' + escapeHtml(viewed ? t('Mark as Unviewed') : t('Mark as Viewed')) + '"><span class="cdvViewedCheckBox"></span></button><span class="fileTreeFile' + (diffPossible ? ' gitDiffPossible' : '') + (leaf.reviewed ? '' : ' ' + CLASS_PENDING_REVIEW) + '" title="' + (diffPossible ? t('Click to View Diff') : t('Unable to View Diff{0}', (fileTreeFile.type !== GG.GitFileStatus.Deleted ? t(' (this is a binary file)') : ''))) + ' • ' + changeTypeMessage + '"><span class="fileTreeFileBadge ' + fileTreeFile.type + '">' + fileTreeFile.type + '</span>' + fileIcons.getFileIcon(fileTreeFile.newFilePath) + '<span class="fileTreeFileText">' + nameHtml + '</span></span>' +
 			(initialState.config.enhancedAccessibility ? '<span class="fileTreeFileType" title="' + changeTypeMessage + '">' + fileTreeFile.type + '</span>' : '') +
 			(textFile ? '<span class="fileTreeFileAddDel">' + generateChangeBarHtml(fileTreeFile.additions!, fileTreeFile.deletions!, Math.round(8 + 52 * (fileTreeFile.additions! + fileTreeFile.deletions!) / fileViewMaxLinesChanged)) + '<span class="fileTreeFileAdd" title="' + (fileTreeFile.additions !== 1 ? t('{0} additions', fileTreeFile.additions) : t('{0} addition', fileTreeFile.additions)) + '">+' + fileTreeFile.additions + '</span><span class="fileTreeFileDel" title="' + (fileTreeFile.deletions !== 1 ? t('{0} deletions', fileTreeFile.deletions) : t('{0} deletion', fileTreeFile.deletions)) + '">\u2212' + fileTreeFile.deletions + '</span></span>' : '') +
 			(fileTreeFile.newFilePath === lastViewedFile ? '<span id="cdvLastFileViewed" title="' + t('Last File Viewed') + '">' + SVG_ICONS.eyeOpen + '</span>' : '') +
@@ -220,7 +401,8 @@ function updateFileTreeHtml(elem: HTMLElement, folder: FileTreeFolder) {
 			alterClass(<HTMLSpanElement>li.children[0], CLASS_PENDING_REVIEW, !child.reviewed);
 			updateFileTreeHtml(li, child);
 		} else if (child.type === 'file') {
-			alterClass(<HTMLSpanElement>li.children[0].children[0], CLASS_PENDING_REVIEW, !child.reviewed);
+			const fileSpan = <HTMLSpanElement | null>li.children[0].querySelector('.fileTreeFile');
+			if (fileSpan !== null) alterClass(fileSpan, CLASS_PENDING_REVIEW, !child.reviewed);
 		}
 	}
 }
@@ -241,7 +423,8 @@ function updateFileTreeHtmlFileReviewed(elem: HTMLElement, folder: FileTreeFolde
 					path = path.substring(pathSeg.length + 1);
 					update(li, child);
 				} else if (child.type === 'file') {
-					alterClass(<HTMLSpanElement>li.children[0].children[0], CLASS_PENDING_REVIEW, !child.reviewed);
+					const fileSpan = <HTMLSpanElement | null>li.children[0].querySelector('.fileTreeFile');
+					if (fileSpan !== null) alterClass(fileSpan, CLASS_PENDING_REVIEW, !child.reviewed);
 				}
 				break;
 			}

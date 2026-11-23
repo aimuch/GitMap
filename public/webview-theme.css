@@ -241,18 +241,8 @@ body {
 }
 
 /* ── Responsive narrow-pane / split-view adaptation ──
-   The Description column matters most: as the pane narrows, the other columns go one at a time
-   (Commit → Date → Author → Changes) instead of squeezing Description to nothing. A header is always hidden
-   together with its cells (web/main.ts markup: th.dateCol / td.dateCol, th[data-col="4"] / td.hashCol …),
-   otherwise every column to the right shows the wrong data under the wrong header.
-   Right-click the table header to choose the columns yourself. */
-@media (max-width: 900px) {
-  #commitTable td.hashCol,
-  #commitTable th[data-col="4"] {
-    display: none !important;
-  }
-}
-
+   Commit table column compaction is driven from a single source of truth in GitGraphView (web/main.ts + ResizeObserver)
+   so #columnSettingsBtn, resize handles, colspan, and user column overrides always stay in sync. */
 @media (max-width: 760px) {
   #controls {
     flex-wrap: wrap !important;
@@ -262,26 +252,9 @@ body {
   #controls .controlLabel {
     display: none !important;
   }
-  #commitTable td.dateCol,
-  #commitTable th.dateCol {
-    display: none !important;
-  }
-}
-
-@media (max-width: 640px) {
-  #commitTable td.authorCol,
-  #commitTable th.authorCol {
-    display: none !important;
-  }
 }
 
 @media (max-width: 520px) {
-  #commitTable td.changesCol,
-  #commitTable th.changesCol,
-  #commitTable td.fileChangesCol,
-  #commitTable th.fileChangesCol {
-    display: none !important;
-  }
   #fetchBtn span,
   #pullBtn span,
   #pushBtn span,

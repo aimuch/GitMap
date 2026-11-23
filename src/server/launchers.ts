@@ -482,6 +482,12 @@ const TERMINAL_APPS: AppDefinition[] = [
 
 /* --------------------------------------------------------------- editors */
 
+/** Encode each POSIX path segment for RFC 3986 URIs (spaces, '#', '?', '%', non-ASCII). */
+function encodeRemoteUriPath(remotePath: string): string {
+  const norm = remotePath.startsWith('/') ? remotePath : '/' + remotePath;
+  return norm.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+}
+
 /** VS Code & its forks share the same CLI, including `--remote ssh-remote+<host> <path>`. */
 function vscodeLike(id: string, name: string, macApp: string, cliName: string): AppDefinition {
   return {
@@ -495,7 +501,9 @@ function vscodeLike(id: string, name: string, macApp: string, cliName: string): 
       const location = requireLocation(ctx, name);
       const cli = location.endsWith('.app') ? path.join(location, 'Contents', 'Resources', 'app', 'bin', cliName) : location;
       const authority = ctx.target.isRemote ? vscodeSshAuthority(ctx.target.profile!) : '';
-      const remoteUri = `vscode-remote://ssh-remote+${encodeURIComponent(authority)}${ctx.target.path}`;
+      const remoteUri = ctx.target.isRemote
+        ? `vscode-remote://ssh-remote+${encodeURIComponent(authority)}${encodeRemoteUriPath(ctx.target.path)}`
+        : '';
       // A remote file needs --file-uri (a bare path after --remote is opened as a folder)
       const args = ctx.target.isRemote
         ? (ctx.target.isFile ? ['--file-uri', remoteUri] : ['--remote', `ssh-remote+${authority}`, ctx.target.path])
@@ -624,39 +632,53 @@ function defaultEditorId(): string | null {
 }
 
 /**
- * Resolve a repository key / path into a launch target.
- * @param location A local path, or an ssh:// URI (`ssh://host/path`).
+ * Where to open a location.
+ * - keepFile: an editor opens a file itself ("Open in Editor" on a file); terminals need a folder, so they get the file's folder.
+ * - isFileHint: optional boolean when the caller already knows whether the path is a file (skips remote SFTP stat).
  */
-/**
- * Where to open a location. keepFile: an editor opens a file itself ("Open in Editor" on a file); terminals need
- * a folder, so they get the file's folder.
- */
-export async function resolveLaunchTarget(location: string, keepFile: boolean = false): Promise<LaunchTarget> {
+export async function resolveLaunchTarget(location: string, keepFile: boolean = false, isFileHint?: boolean): Promise<LaunchTarget> {
   const remote = parseRemoteRepo(location);
   if (remote !== null) {
     const profile = sshManager.resolveProfile(remote.hostId);
     let isFile = false;
-    try {
-      const sftp = await sshManager.getSftp(remote.hostId);
-      isFile = await new Promise<boolean>((resolve) => sftp.stat(remote.remotePath, (err, st) => resolve(!err && !!st && st.isFile())));
-    } catch (_) {
-      /* not connected: treat it as a folder, as before */
+    if (typeof isFileHint === 'boolean') {
+      isFile = isFileHint;
+    } else if (sshManager.isConnected(remote.hostId)) {
+      // Only stat when ALREADY connected: never block or prompt for passwords on a disconnected host just to open a launcher
+      try {
+        const sftp = await sshManager.getSftp(remote.hostId);
+        isFile = await new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => resolve(false), 2000);
+          sftp.stat(remote.remotePath, (err, st) => {
+            clearTimeout(timer);
+            resolve(!err && !!st && st.isFile());
+          });
+        });
+      } catch (_) {
+        /* stat unavailable: treat it as a folder */
+      }
     }
-    if (isFile && !keepFile) return { isRemote: true, path: path.posix.dirname(remote.remotePath), profile };
+    if (isFile && !keepFile) return { isRemote: true, path: path.posix.dirname(remote.remotePath), isFile: false, profile };
     return { isRemote: true, path: remote.remotePath, isFile, profile };
   }
   const local = location.startsWith('~') ? path.join(os.homedir(), location.slice(1)) : location;
-  if (!fs.existsSync(local)) throw new Error(`"${local}" doesn't exist.`);
-  const isFile = !fs.statSync(local).isDirectory();
-  if (isFile && !keepFile) return { isRemote: false, path: path.dirname(local), profile: null };
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(local);
+  } catch {
+    throw new Error(`"${local}" doesn't exist.`);
+  }
+  const isFile = !stat.isDirectory();
+  if (isFile && !keepFile) return { isRemote: false, path: path.dirname(local), isFile: false, profile: null };
   return { isRemote: false, path: local, isFile, profile: null };
 }
 
 function fillTemplate(template: string, target: LaunchTarget): string {
+  const remoteDir = target.isFile ? path.posix.dirname(target.path) : target.path;
   const values: { [key: string]: string } = {
     path: target.path,
     host: target.profile ? sshTarget(target.profile) : '',
-    sshCommand: target.profile ? buildSshCommandLine(target.profile, target.path) : '',
+    sshCommand: target.profile ? buildSshCommandLine(target.profile, remoteDir) : '',
     sshUri: target.profile ? sshUri(target.profile, target.path) : ''
   };
   const quote = PLATFORM === 'win32' ? (v: string) => '"' + v.replace(/"/g, '""') + '"' : quotePosixArg;
@@ -696,8 +718,8 @@ export interface LauncherSettings {
   editorCustomCommand?: string;
 }
 
-export async function openInTerminal(location: string, settings: LauncherSettings): Promise<string> {
-  const target = await resolveLaunchTarget(location);
+export async function openInTerminal(location: string, settings: LauncherSettings, isFileHint?: boolean): Promise<string> {
+  const target = await resolveLaunchTarget(location, false, isFileHint);
   const appId = settings.terminalApp && settings.terminalApp !== 'system' ? settings.terminalApp : defaultTerminalId();
   if (appId === 'custom') {
     await runCustom(settings.terminalCustomCommand || '', target, 'terminal');
@@ -707,8 +729,8 @@ export async function openInTerminal(location: string, settings: LauncherSetting
   return TERMINAL_APPS.find((d) => d.id === appId)?.name || appId;
 }
 
-export async function openInEditor(location: string, settings: LauncherSettings): Promise<string> {
-  const target = await resolveLaunchTarget(location, true);
+export async function openInEditor(location: string, settings: LauncherSettings, isFileHint?: boolean): Promise<string> {
+  const target = await resolveLaunchTarget(location, true, isFileHint);
   const appId = settings.editorApp && settings.editorApp !== 'auto' ? settings.editorApp : defaultEditorId();
   if (appId === null) throw new Error('No supported code editor was found. Choose one, or set a custom command, in Settings.');
   if (appId === 'custom') {
@@ -720,4 +742,4 @@ export async function openInEditor(location: string, settings: LauncherSettings)
 }
 
 /** Exposed for tests. */
-export const __test = { fillTemplate, sshArgs, remoteShellCommand };
+export const __test = { fillTemplate, sshArgs, remoteShellCommand, encodeRemoteUriPath };
