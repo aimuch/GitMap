@@ -1897,6 +1897,25 @@ export interface ResponseLoadCommitMessage extends ResponseWithErrorInfo {
 	readonly stagedCount?: number;
 }
 
+export interface RequestLoadImpactPreview extends RepoRequest {
+	readonly command: 'loadImpactPreview';
+	readonly requestId: number;
+	readonly operation: 'merge' | 'reset' | 'rebase';
+	readonly targetRef: string;
+}
+export interface ResponseLoadImpactPreview extends ResponseWithErrorInfo {
+	readonly command: 'loadImpactPreview';
+	readonly requestId: number;
+	readonly operation: 'merge' | 'reset' | 'rebase';
+	readonly rewrittenCommits: number;
+	readonly affectedFilesCount: number;
+	readonly pushedToRemote: string | null;
+	readonly remoteBranches: ReadonlyArray<string>;
+	readonly forcePushRequired: boolean;
+	readonly conflictFiles: ReadonlyArray<string>;
+	readonly riskLevel: 'CLEAN' | 'OK' | 'RISKY' | 'DANGER';
+}
+
 export interface RequestUndoCommit extends RepoRequest {
 	readonly command: 'undoCommit';
 	readonly mode: 'soft' | 'mixed';
@@ -2190,7 +2209,8 @@ export type RequestMessage =
 	| RequestExplainCommit
 	| RequestCancelGenerateCommitMessage
 	| RequestGenerateCommitMessage
-	| RequestUseGeneratedCommitMessage;
+	| RequestUseGeneratedCommitMessage
+	| RequestLoadImpactPreview;
 
 export type ResponseMessage =
 	ResponseAddRemote
@@ -2290,7 +2310,8 @@ export type ResponseMessage =
 	| ResponseUpdateCdvConfig
 	| ResponseExplainCommit
 	| ResponseGenerateCommitMessage
-	| ResponseUseGeneratedCommitMessage;
+	| ResponseUseGeneratedCommitMessage
+	| ResponseLoadImpactPreview;
 
 export interface ResponseUpdateCdvConfig extends BaseMessage {
 	readonly command: 'updateCdvConfig';

@@ -1490,6 +1490,18 @@ export class GitMapServer {
         return { statuses, launchpad };
       }
 
+      case 'repos:launchpadPrs': {
+        const keys = Array.isArray(params.repos) && params.repos.length > 0
+          ? params.repos.map(String)
+          : Object.keys(this.repoManager.getRepos());
+        const providerOverride = params.provider ? (String(params.provider) as HostingProviderKind) : undefined;
+        return this.hostingService.listPullRequestsAcrossRepos(keys, {
+          onlyWithToken: params.onlyWithToken === true,
+          maxRepos: Number(params.maxRepos) || 20,
+          providerOverride
+        });
+      }
+
       /* Git Branches, Tags & Checkout (for Command Palette & Release Notes) */
       case 'git:refs': {
         const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');

@@ -182,6 +182,7 @@
     body.innerHTML = `
       <div id="gmDashHeatmapSlot"></div>
       <div id="gmDashBucketsSlot"></div>
+      <div id="gmDashPrSlot"></div>
       <div class="gm-enh-toolbar">
         <input type="text" id="gmDashQuery" class="gm-enh-input" placeholder="${esc(T('跨仓库搜索提交说明… (按回车搜索)', 'Search commit messages across all repos…'))}" />
         <input type="text" id="gmDashAuthor" class="gm-enh-input" style="max-width:180px" placeholder="${esc(T('作者筛选 (可选)', 'Author (optional)'))}" />
@@ -193,15 +194,133 @@
 
     const heatmapSlot = body.querySelector('#gmDashHeatmapSlot');
     const bucketsSlot = body.querySelector('#gmDashBucketsSlot');
+    const prSlot = body.querySelector('#gmDashPrSlot');
     const contentEl = body.querySelector('#gmDashContent');
     const qInput = body.querySelector('#gmDashQuery');
     const authInput = body.querySelector('#gmDashAuthor');
     let statusesList = [];
     let launchpadData = null;
     let heatmapData = null;
+    let prData = null;
+    let prLoading = false;
+    let prBucketFilter = 'all';
+    let prExpanded = false;
     let activeBucket = 'all'; // 'all' | 'conflicts' | 'dirty' | 'readyToPush' | 'behindRemote'
     let heatmapCollapsed = false;
     let selectedHeatmapDate = null;
+
+    function renderPrPanel() {
+      if (!prSlot) return;
+      if (prLoading) {
+        prSlot.innerHTML = `<div class="gm-heatmap-card"><div class="gm-heatmap-head"><span class="gm-ai-status"><span class="gm-ai-dot"></span>${esc(T('正在聚合跨仓库 PR 与 CI 状态…', 'Aggregating remote PRs & CI checks across repositories…'))}</span></div></div>`;
+        return;
+      }
+      const counts = prData ? prData.counts : { total: 0, failingCi: 0, pendingCi: 0, readyToMerge: 0, drafts: 0 };
+      const allItems = (prData && prData.items) || [];
+      const shownItems = prBucketFilter === 'all' ? allItems : allItems.filter((x) => x.bucket === prBucketFilter);
+      const skippedHint = prData && prData.skippedNoToken > 0
+        ? T(`已跳过 ${prData.skippedNoToken} 个未配置 Token 仓库（避免限流）`, `${prData.skippedNoToken} repo(s) without token skipped`)
+        : '';
+
+      prSlot.innerHTML = `
+        <div class="gm-heatmap-card">
+          <div class="gm-heatmap-head">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
+              <strong>${esc(T('跨仓库 PR / MR & CI 状态', 'Cross-Repo PR / MR & CI Checks'))}</strong>
+              ${prData ? `
+                <span class="gm-badge ${counts.failingCi > 0 ? 'err' : 'ok'}">${esc(T(`失败 CI ${counts.failingCi}`, `Failing CI ${counts.failingCi}`))}</span>
+                <span class="gm-badge ok">${esc(T(`待合并 ${counts.readyToMerge}`, `Ready ${counts.readyToMerge}`))}</span>
+                <span class="gm-badge warn">${esc(T(`进行中 ${counts.pendingCi}`, `Pending ${counts.pendingCi}`))}</span>
+                <span class="gm-badge">${esc(T(`草稿 ${counts.drafts}`, `Draft ${counts.drafts}`))}</span>
+              ` : ''}
+              ${skippedHint ? `<span style="font-size:11px;color:var(--vscode-descriptionForeground);">${esc(skippedHint)}</span>` : ''}
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <button type="button" id="gmLpLoadTokenPrs" class="mini-btn" title="${esc(T('仅扫描已配置 API Token 的仓库（安全不限流）', 'Scan repos with saved API token only'))}">${esc(T('刷新已授权仓库 PR', 'Refresh Authed PRs'))}</button>
+              <button type="button" id="gmLpLoadAllPrs" class="mini-btn" title="${esc(T('包含公开免 Token 仓库一起扫描', 'Also scan public repos without saved token'))}">${esc(T('扫描全部仓库 PR', 'Scan All Repos'))}</button>
+              ${allItems.length > 0 ? `<button type="button" id="gmLpTogglePrList" class="mini-btn">${esc(prExpanded ? T('收起 PR 列表', 'Hide PRs') : T(`展开 ${allItems.length} 条 PR`, `Show ${allItems.length} PR(s)`))}</button>` : ''}
+            </div>
+          </div>
+          ${prExpanded && allItems.length > 0 ? `
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;">
+              ${[
+                { id: 'all', label: T(`全部 (${counts.total})`, `All (${counts.total})`) },
+                { id: 'failingCi', label: T(`CI 失败 (${counts.failingCi})`, `Failing CI (${counts.failingCi})`) },
+                { id: 'readyToMerge', label: T(`可合并 (${counts.readyToMerge})`, `Ready (${counts.readyToMerge})`) },
+                { id: 'pendingCi', label: T(`CI 进行中 (${counts.pendingCi})`, `Pending (${counts.pendingCi})`) },
+                { id: 'drafts', label: T(`草稿 (${counts.drafts})`, `Draft (${counts.drafts})`) }
+              ].map((f) => `<button type="button" class="mini-btn ${prBucketFilter === f.id ? 'primary' : ''} act-lp-pr-filter" data-pbf="${f.id}" style="height:22px;font-size:11px;">${esc(f.label)}</button>`).join('')}
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:210px;overflow:auto;">
+              ${shownItems.length === 0 ? `<div style="font-size:12px;color:var(--vscode-descriptionForeground);padding:6px;">${esc(T('该分类下暂无 PR。', 'No PRs in this bucket.'))}</div>` : shownItems.map((pr) => {
+                const ciCls = pr.ciStatus === 'failure' ? 'err' : pr.ciStatus === 'success' ? 'ok' : pr.ciStatus === 'pending' ? 'warn' : '';
+                return `<div class="gm-enh-card" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                  <div style="min-width:0;flex:1;">
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                      <span class="gm-badge info">${esc(pr.repoName)}</span>
+                      <code>#${pr.number}</code>
+                      <strong style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(pr.title)}</strong>
+                      <span class="gm-badge ${ciCls}">CI: ${esc(pr.ciStatus)}</span>
+                      ${pr.draft ? `<span class="gm-badge">Draft</span>` : ''}
+                    </div>
+                    <div style="font-size:11px;color:var(--vscode-descriptionForeground);margin-top:2px;">${esc(pr.sourceBranch)} → ${esc(pr.targetBranch)} · ${esc(pr.author)}</div>
+                  </div>
+                  <div style="display:inline-flex;gap:5px;flex-shrink:0;">
+                    <button type="button" class="mini-btn act-lp-pr-co" data-repo="${esc(pr.repo)}" data-num="${pr.number}" data-prov="${esc(pr.provider)}">${esc(T('检出', 'Checkout'))}</button>
+                    ${pr.webUrl ? `<a class="mini-btn" style="text-decoration:none;" href="${esc(pr.webUrl)}" target="_blank" rel="noopener noreferrer">${esc(T('打开', 'Open'))}</a>` : ''}
+                  </div>
+                </div>`;
+              }).join('')}
+            </div>
+          ` : ''}
+        </div>
+      `;
+
+      prSlot.querySelector('#gmLpLoadTokenPrs')?.addEventListener('click', () => loadPrs(true, true));
+      prSlot.querySelector('#gmLpLoadAllPrs')?.addEventListener('click', () => loadPrs(false, true));
+      prSlot.querySelector('#gmLpTogglePrList')?.addEventListener('click', () => {
+        prExpanded = !prExpanded;
+        renderPrPanel();
+      });
+      prSlot.querySelectorAll('.act-lp-pr-filter').forEach((b) => {
+        b.addEventListener('click', () => {
+          prBucketFilter = b.getAttribute('data-pbf') || 'all';
+          renderPrPanel();
+        });
+      });
+      prSlot.querySelectorAll('.act-lp-pr-co').forEach((b) => {
+        b.addEventListener('click', async () => {
+          const r = b.getAttribute('data-repo');
+          const num = Number(b.getAttribute('data-num'));
+          const prov = b.getAttribute('data-prov') || undefined;
+          b.disabled = true;
+          try {
+            await app.rpc('hosting:checkoutPr', { repo: r, number: num, provider: prov });
+            app.showToast(T(`已检出 PR #${num}`, `Checked out PR #${num}`), 'info');
+            await jumpToRepo(r);
+          } catch (err) {
+            app.showToast(err.message, 'error');
+            b.disabled = false;
+          }
+        });
+      });
+    }
+
+    async function loadPrs(onlyWithToken, autoExpand) {
+      prLoading = true;
+      renderPrPanel();
+      try {
+        prData = await app.rpc('repos:launchpadPrs', { repos: repoKeys, onlyWithToken });
+        if (autoExpand || (prData && prData.counts && prData.counts.total > 0)) {
+          prExpanded = true;
+        }
+      } catch (err) {
+        app?.showToast(err.message, 'error');
+      } finally {
+        prLoading = false;
+        renderPrPanel();
+      }
+    }
 
     const jumpToRepo = async (r, afterAction) => {
       document.getElementById('featureModal')?.classList.add('hidden');
@@ -376,6 +495,7 @@
     async function loadStatuses() {
       contentEl.innerHTML = `<div style="padding:14px;color:var(--vscode-descriptionForeground)">${esc(T('正在汇总所有仓库行动队列…', 'Loading Launchpad status across repositories…'))}</div>`;
       renderHeatmap();
+      renderPrPanel();
       try {
         const [lpRes, hmRes] = await Promise.all([
           app.rpc('repos:launchpad', { repos: repoKeys }),
@@ -388,6 +508,8 @@
         renderHeatmap();
         renderBuckets();
         renderOverview();
+        // Auto-aggregate remote PR/CI only for repositories with saved API tokens (zero rate-limit risk)
+        void loadPrs(true, false);
       } catch (err) {
         contentEl.innerHTML = `<div style="padding:14px;color:#ef4444">${esc(err.message)}</div>`;
       }

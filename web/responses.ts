@@ -54,6 +54,9 @@ function observeResponseMessages(gitGraph: GitGraphView, imageResizer: ImageResi
 			case 'loadCommitMessage':
 				gitGraph.actions.processLoadCommitMessageResponse(msg);
 				break;
+			case 'loadImpactPreview':
+				gitGraph.actions.processLoadImpactPreviewResponse(msg);
+				break;
 			case 'editCommitMessage':
 				refreshOrDisplayError(msg.error, t('Unable to Edit Commit Message'));
 				break;

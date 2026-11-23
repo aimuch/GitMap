@@ -1,7 +1,10 @@
 import { completeAiPrompt } from '../aiProviders';
 import { DataSource } from '../dataSource';
 import * as vscode from '../platform/vscode';
+import { parseRemoteRepo } from '../remote/repoTransport';
+import { sshManager } from '../remote/sshManager';
 import { RepoFileWatcher } from '../repoFileWatcher';
+import { getRepoName } from '../utils';
 
 export type HostingProviderKind = 'github' | 'gitlab' | 'gitea' | 'unknown';
 
@@ -30,6 +33,29 @@ export interface PullRequestItem {
   webUrl: string;
   updatedAt: string;
   ciStatus: 'success' | 'failure' | 'pending' | 'unknown';
+}
+
+export interface LaunchpadPullRequestItem extends PullRequestItem {
+  repo: string;
+  repoName: string;
+  provider: HostingProviderKind;
+  host: string;
+  bucket: 'failingCi' | 'pendingCi' | 'readyToMerge' | 'drafts';
+}
+
+export interface LaunchpadPrAggregationResult {
+  items: LaunchpadPullRequestItem[];
+  counts: {
+    total: number;
+    failingCi: number;
+    pendingCi: number;
+    readyToMerge: number;
+    drafts: number;
+  };
+  scannedRepos: number;
+  skippedNoRemote: number;
+  skippedNoToken: number;
+  errors: Array<{ repo: string; error: string }>;
 }
 
 export function parseRemoteHostingUrl(rawUrl: string, remoteName: string = 'origin', customApiOverride?: { host: string; provider: HostingProviderKind; apiBase?: string }): ParsedHostingRemote | null {
@@ -489,5 +515,84 @@ export class HostingService {
     if (!resp.ok) throw new Error(`Gitea PR create failed (${resp.status}): ${(await resp.text()).slice(0, 240)}`);
     const data: any = await resp.json();
     return { createdViaApi: true, webUrl: String(data.html_url || browserUrl) };
+  }
+
+  public async listPullRequestsAcrossRepos(
+    repos: string[],
+    options: { onlyWithToken?: boolean; maxRepos?: number; providerOverride?: HostingProviderKind } = {}
+  ): Promise<LaunchpadPrAggregationResult> {
+    const onlyWithToken = options.onlyWithToken === true;
+    const maxRepos = Math.max(1, Math.min(30, options.maxRepos || 20));
+    const eligible = repos.slice(0, maxRepos).filter((r) => {
+      const rem = parseRemoteRepo(r);
+      return !rem || sshManager.isConnected(rem.hostId);
+    });
+
+    const items: LaunchpadPullRequestItem[] = [];
+    const errors: Array<{ repo: string; error: string }> = [];
+    let scannedRepos = 0;
+    let skippedNoRemote = 0;
+    let skippedNoToken = 0;
+
+    const queue = [...eligible];
+    const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const repo = queue.shift()!;
+        try {
+          const info = await this.detectRepoHosting(repo, options.providerOverride);
+          if (!info.remote || info.remote.provider === 'unknown') {
+            skippedNoRemote++;
+            continue;
+          }
+          if (onlyWithToken && !info.hasToken) {
+            skippedNoToken++;
+            continue;
+          }
+          scannedRepos++;
+          const token = await this.getHostToken(info.remote.host);
+          const list = await this.fetchPullRequestsFromApi(info.remote, token);
+          const repoName = getRepoName(repo);
+          for (const pr of list) {
+            const bucket: LaunchpadPullRequestItem['bucket'] =
+              pr.ciStatus === 'failure'
+                ? 'failingCi'
+                : pr.ciStatus === 'pending'
+                  ? 'pendingCi'
+                  : pr.draft
+                    ? 'drafts'
+                    : 'readyToMerge';
+            items.push({
+              ...pr,
+              repo,
+              repoName,
+              provider: info.remote.provider,
+              host: info.remote.host,
+              bucket
+            });
+          }
+        } catch (err) {
+          errors.push({ repo, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+    });
+    await Promise.all(workers);
+
+    const priority: Record<LaunchpadPullRequestItem['bucket'], number> = {
+      failingCi: 0,
+      readyToMerge: 1,
+      pendingCi: 2,
+      drafts: 3
+    };
+    items.sort((a, b) => priority[a.bucket] - priority[b.bucket] || String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+
+    const counts = {
+      total: items.length,
+      failingCi: items.filter((x) => x.bucket === 'failingCi').length,
+      pendingCi: items.filter((x) => x.bucket === 'pendingCi').length,
+      readyToMerge: items.filter((x) => x.bucket === 'readyToMerge').length,
+      drafts: items.filter((x) => x.bucket === 'drafts').length
+    };
+
+    return { items, counts, scannedRepos, skippedNoRemote, skippedNoToken, errors };
   }
 }

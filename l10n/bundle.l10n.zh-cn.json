@@ -1395,5 +1395,13 @@
 	"Sink Viewed": "已阅沉底",
 	"Move viewed files to the bottom of the list": "将已审阅文件自动沉底排列",
 	"Mark as Viewed": "标记为已阅",
-	"Mark as Unviewed": "取消已阅标记"
+	"Mark as Unviewed": "取消已阅标记",
+	"Analyzing impact preview…": "正在预检影响范围与潜在冲突…",
+	"{0} incoming commit(s)": "引入 {0} 个提交",
+	"{0} commit(s) affected": "影响 {0} 个提交",
+	"{0} file(s) touched": "涉及 {0} 个文件",
+	"Dry-run detected {0} potential merge conflict(s):": "预检发现 {0} 个潜在合并冲突文件：",
+	"Affects commits already pushed to {0}. A force-push (--force-with-lease) will be required.": "涉及已推送至 {0} 的提交，操作后需要执行 --force-with-lease 强推。",
+	"Dry-run merge check passed with no predicted conflicts.": "无工作区预检通过，预计可直接干净合并。",
+	"Only affects unpushed local commits.": "仅影响尚未推送的本地提交。"
 }

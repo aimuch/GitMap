@@ -2691,11 +2691,48 @@
     }
   }
 
+  const DIFF_COMMENTS_STORAGE_KEY = 'gitmap.diffComments.v1';
+  const DIFF_COMMENTS_MAX_KEYS = 60;
+  function getDiffCommentKey(diffData) {
+    return `${diffData.repo || ''}::${diffData.fromHash || ''}::${diffData.toHash || ''}::${diffData.newFilePath || diffData.oldFilePath || ''}`;
+  }
+  function loadAllDiffCommentsStore() {
+    try {
+      const raw = localStorage.getItem(DIFF_COMMENTS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+  function loadDiffComments(key) {
+    const store = loadAllDiffCommentsStore();
+    return Array.isArray(store[key]) ? store[key] : [];
+  }
+  function saveDiffComments(key, list) {
+    try {
+      const store = loadAllDiffCommentsStore();
+      delete store[key];
+      if (Array.isArray(list) && list.length > 0) {
+        store[key] = list;
+      }
+      const keys = Object.keys(store);
+      while (keys.length > DIFF_COMMENTS_MAX_KEYS) {
+        delete store[keys.shift()];
+      }
+      localStorage.setItem(DIFF_COMMENTS_STORAGE_KEY, JSON.stringify(store));
+    } catch (_) { /* ignore storage quota */ }
+  }
+
   function renderSingleDiffIntoContainer(container, diffData, initialFold, highlightRange) {
     let viewMode = 'split';
     let foldUnchanged = initialFold !== false;
     let wrapLines = localStorage.getItem('gitmap.viewer.wrapLines') !== '0';
     const expandedBlocks = new Set();
+    const commentKey = getDiffCommentKey(diffData);
+    let comments = loadDiffComments(commentKey);
+    let openComposerAnchor = null; // { side: 'new'|'old', line: number, editId?: string }
+    const zh = state.lang === 'zh';
 
     container.innerHTML = `
       <div class="viewer-toolbar">
@@ -2706,6 +2743,7 @@
           ${diffData.truncated ? `<span class="diff-stat-del">${escapeHtml(tr('truncatedDiffNotice'))}</span>` : ''}
         </div>
         <div class="viewer-toolbar-right">
+          <button type="button" class="mini-btn act-export-comments hidden" title="${escapeHtml(zh ? '复制当前文件的行内审阅批注 (Markdown)' : 'Copy inline review comments as Markdown')}"></button>
           <div class="segmented-control">
             <button type="button" class="mode-split active">${escapeHtml(tr('sideBySide'))}</button>
             <button type="button" class="mode-inline">${escapeHtml(tr('inlineDiff'))}</button>
@@ -2730,11 +2768,24 @@
     const scrollArea = container.querySelector('.diff-scroll-area');
     const hunkRail = container.querySelector('.diff-hunk-rail');
     const hunkCounterEl = container.querySelector('.hunk-counter');
+    const exportCommentsBtn = container.querySelector('.act-export-comments');
     let hunkRowElements = [];
     let hunkRowMeta = [];
+    let commentRowElements = [];
     let currentHunkIdx = -1;
     let railViewportEl = null;
     let railSyncRaf = 0;
+
+    function updateCommentsToolbar() {
+      if (!exportCommentsBtn) return;
+      const openCnt = comments.filter((c) => !c.resolved).length;
+      if (comments.length === 0) {
+        exportCommentsBtn.classList.add('hidden');
+        return;
+      }
+      exportCommentsBtn.classList.remove('hidden');
+      exportCommentsBtn.innerHTML = `${ICONS.pencil}<span>${escapeHtml(zh ? `批注 ${openCnt}/${comments.length} · 复制 MD` : `Comments ${openCnt}/${comments.length} · Copy MD`)}</span>`;
+    }
 
     function updateRailViewport() {
       if (!railViewportEl || !hunkRail || hunkRail.classList.contains('empty')) return;
@@ -2748,7 +2799,7 @@
 
     function renderHunkRail() {
       if (!hunkRail) return;
-      if (hunkRowElements.length === 0) {
+      if (hunkRowElements.length === 0 && commentRowElements.length === 0) {
         hunkRail.innerHTML = '';
         hunkRail.classList.add('empty');
         railViewportEl = null;
@@ -2777,6 +2828,20 @@
           currentHunkIdx = idx;
           updateHunkCounter();
           rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        hunkRail.appendChild(tick);
+      });
+      commentRowElements.forEach((cInfo) => {
+        const topPct = Math.max(0.5, Math.min(97.5, (cInfo.el.offsetTop / totalHeight) * 100));
+        const tick = document.createElement('button');
+        tick.type = 'button';
+        tick.className = 'diff-hunk-tick kind-comment';
+        tick.style.top = topPct + '%';
+        tick.style.height = '7px';
+        tick.title = (zh ? '审阅批注' : 'Review Comment') + ` · L${cInfo.line}`;
+        tick.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          cInfo.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         });
         hunkRail.appendChild(tick);
       });
@@ -2832,9 +2897,21 @@
     function computeDisplayChunks(rows) {
       if (!foldUnchanged) return [{ type: 'rows', rows }];
       const CONTEXT = 3;
+      const commentedNew = new Set(comments.filter((c) => c.side === 'new').map((c) => c.line));
+      const commentedOld = new Set(comments.filter((c) => c.side === 'old').map((c) => c.line));
+      if (openComposerAnchor) {
+        if (openComposerAnchor.side === 'new') commentedNew.add(openComposerAnchor.line);
+        else commentedOld.add(openComposerAnchor.line);
+      }
       const changedIndices = [];
       rows.forEach((r, idx) => {
-        if (r.kind !== 'context') changedIndices.push(idx);
+        if (
+          r.kind !== 'context' ||
+          (r.newLineNumber != null && commentedNew.has(r.newLineNumber)) ||
+          (r.oldLineNumber != null && commentedOld.has(r.oldLineNumber))
+        ) {
+          changedIndices.push(idx);
+        }
       });
       if (changedIndices.length === 0) {
         if (rows.length <= 12 || expandedBlocks.has('all')) return [{ type: 'rows', rows }];
@@ -2896,8 +2973,147 @@
       const tbody = document.createElement('tbody');
       hunkRowElements = [];
       hunkRowMeta = [];
+      commentRowElements = [];
       let prevWasChange = false;
       let targetHighlightRow = null;
+      const colSpanAll = viewMode === 'split' ? 4 : 3;
+
+      const appendCommentsForAnchor = (side, line) => {
+        if (line == null) return;
+        const matched = comments.filter((c) => c.side === side && c.line === line);
+        const composingHere = openComposerAnchor && openComposerAnchor.side === side && openComposerAnchor.line === line;
+        if (matched.length === 0 && !composingHere) return;
+
+        const cTr = document.createElement('tr');
+        cTr.className = 'diff-comment-row';
+        const td = document.createElement('td');
+        td.colSpan = colSpanAll;
+        td.className = 'diff-comment-cell';
+
+        const tagLabel = (tag) =>
+          tag === 'issue' ? (zh ? '问题' : 'Issue') : tag === 'suggestion' ? (zh ? '建议' : 'Suggestion') : (zh ? '备注' : 'Note');
+
+        const cardsHtml = matched.map((c) => {
+          if (composingHere && openComposerAnchor.editId === c.id) return '';
+          return `
+            <div class="diff-comment-card tag-${escapeHtml(c.tag || 'note')}${c.resolved ? ' resolved' : ''}" data-cid="${escapeHtml(c.id)}">
+              <div class="diff-comment-head">
+                <span class="diff-comment-tag tag-${escapeHtml(c.tag || 'note')}">${escapeHtml(tagLabel(c.tag))}</span>
+                <span class="diff-comment-loc">${side === 'old' ? 'Old' : 'New'} L${line}</span>
+                ${c.resolved ? `<span class="diff-comment-resolved-pill">${escapeHtml(zh ? '已解决' : 'Resolved')}</span>` : ''}
+                <span class="diff-comment-time">${escapeHtml(new Date(c.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span>
+                <span style="margin-left:auto;display:inline-flex;gap:4px;">
+                  <button type="button" class="mini-btn act-dc-resolve" data-cid="${escapeHtml(c.id)}">${escapeHtml(c.resolved ? (zh ? '重开' : 'Reopen') : (zh ? '已解决' : 'Resolve'))}</button>
+                  <button type="button" class="mini-btn act-dc-edit" data-cid="${escapeHtml(c.id)}">${escapeHtml(zh ? '编辑' : 'Edit')}</button>
+                  <button type="button" class="mini-btn danger act-dc-del" data-cid="${escapeHtml(c.id)}">${escapeHtml(zh ? '删除' : 'Delete')}</button>
+                </span>
+              </div>
+              <div class="diff-comment-text">${escapeHtml(c.text)}</div>
+            </div>
+          `;
+        }).join('');
+
+        let composerHtml = '';
+        if (composingHere) {
+          const editing = openComposerAnchor.editId ? comments.find((c) => c.id === openComposerAnchor.editId) : null;
+          const curTag = (editing && editing.tag) || 'note';
+          composerHtml = `
+            <div class="diff-comment-composer">
+              <div class="diff-comment-composer-head">
+                <strong>${escapeHtml(editing ? (zh ? '编辑审阅批注' : 'Edit Comment') : (zh ? `添加行内批注 · ${side === 'old' ? '旧' : '新'}第 ${line} 行` : `Add Inline Comment · ${side === 'old' ? 'Old' : 'New'} L${line}`))}</strong>
+                <select class="dc-tag-sel">
+                  <option value="note" ${curTag === 'note' ? 'selected' : ''}>${escapeHtml(zh ? '备注 (Note)' : 'Note')}</option>
+                  <option value="suggestion" ${curTag === 'suggestion' ? 'selected' : ''}>${escapeHtml(zh ? '建议 (Suggestion)' : 'Suggestion')}</option>
+                  <option value="issue" ${curTag === 'issue' ? 'selected' : ''}>${escapeHtml(zh ? '问题 (Issue)' : 'Issue')}</option>
+                </select>
+              </div>
+              <textarea class="dc-textarea" placeholder="${escapeHtml(zh ? '输入审阅意见… (Cmd/Ctrl+Enter 保存，Esc 取消)' : 'Write a review comment… (Cmd/Ctrl+Enter to save, Esc to cancel)')}">${escapeHtml(editing ? editing.text : '')}</textarea>
+              <div class="diff-comment-composer-actions">
+                <button type="button" class="mini-btn act-dc-cancel">${escapeHtml(zh ? '取消' : 'Cancel')}</button>
+                <button type="button" class="mini-btn primary act-dc-save">${escapeHtml(zh ? '保存批注' : 'Save Comment')}</button>
+              </div>
+            </div>
+          `;
+        }
+
+        td.innerHTML = `<div class="diff-comment-stack">${cardsHtml}${composerHtml}</div>`;
+        cTr.appendChild(td);
+        tbody.appendChild(cTr);
+        commentRowElements.push({ el: cTr, line, side });
+
+        td.querySelectorAll('.act-dc-resolve').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const cid = btn.getAttribute('data-cid');
+            comments = comments.map((c) => (c.id === cid ? { ...c, resolved: !c.resolved } : c));
+            saveDiffComments(commentKey, comments);
+            renderTable(false);
+          });
+        });
+        td.querySelectorAll('.act-dc-edit').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            openComposerAnchor = { side, line, editId: btn.getAttribute('data-cid') };
+            renderTable(false);
+          });
+        });
+        td.querySelectorAll('.act-dc-del').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const cid = btn.getAttribute('data-cid');
+            comments = comments.filter((c) => c.id !== cid);
+            saveDiffComments(commentKey, comments);
+            renderTable(false);
+          });
+        });
+        const cancelBtn = td.querySelector('.act-dc-cancel');
+        const saveBtn = td.querySelector('.act-dc-save');
+        const ta = td.querySelector('.dc-textarea');
+        const tagSel = td.querySelector('.dc-tag-sel');
+        const saveComposer = () => {
+          const text = ta ? ta.value.trim() : '';
+          if (!text) return;
+          const tag = tagSel ? tagSel.value : 'note';
+          if (openComposerAnchor && openComposerAnchor.editId) {
+            comments = comments.map((c) => (c.id === openComposerAnchor.editId ? { ...c, text, tag } : c));
+          } else {
+            comments.push({
+              id: 'dc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+              side,
+              line,
+              tag,
+              text,
+              resolved: false,
+              createdAt: Date.now()
+            });
+          }
+          openComposerAnchor = null;
+          saveDiffComments(commentKey, comments);
+          renderTable(false);
+        };
+        if (cancelBtn) {
+          cancelBtn.addEventListener('click', () => {
+            openComposerAnchor = null;
+            renderTable(false);
+          });
+        }
+        if (saveBtn) saveBtn.addEventListener('click', saveComposer);
+        if (ta) {
+          setTimeout(() => ta.focus(), 10);
+          ta.addEventListener('keydown', (ev) => {
+            if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') {
+              ev.preventDefault();
+              saveComposer();
+            } else if (ev.key === 'Escape') {
+              ev.preventDefault();
+              openComposerAnchor = null;
+              renderTable(false);
+            }
+          });
+        }
+      };
+
+      const commentTriggerHtml = (side, line) =>
+        line != null
+          ? `<button type="button" class="diff-comment-add-btn" data-cside="${side}" data-cline="${line}" title="${escapeHtml(zh ? `在第 ${line} 行添加审阅批注` : `Add inline comment at L${line}`)}" aria-label="Add comment">+</button>`
+          : '';
 
       chunks.forEach((chunk) => {
         if (chunk.type === 'fold') {
@@ -2923,9 +3139,9 @@
             const leftCls = r.kind === 'deleted' || r.kind === 'change' ? 'diff-cell-del' : r.oldLineNumber == null ? 'diff-cell-empty' : '';
             const rightCls = r.kind === 'added' || r.kind === 'change' ? 'diff-cell-add' : r.newLineNumber == null ? 'diff-cell-empty' : '';
             trEl.innerHTML = `
-              <td class="diff-gutter ${leftCls}">${r.oldLineNumber ?? ''}</td>
+              <td class="diff-gutter ${leftCls}">${commentTriggerHtml('old', r.oldLineNumber)}${r.oldLineNumber ?? ''}</td>
               <td class="diff-code diff-side-left ${leftCls}">${formatSide(true, r.oldLineNumber, r.oldText, r.oldSegments, 'word-del')}</td>
-              <td class="diff-gutter ${rightCls}">${r.newLineNumber ?? ''}</td>
+              <td class="diff-gutter ${rightCls}">${commentTriggerHtml('new', r.newLineNumber)}${r.newLineNumber ?? ''}</td>
               <td class="diff-code diff-side-right ${rightCls}">${formatSide(false, r.newLineNumber, r.newText, r.newSegments, 'word-add')}</td>
             `;
             if (isChange && !prevWasChange) {
@@ -2935,12 +3151,14 @@
             if (matchesRange && !targetHighlightRow) targetHighlightRow = trEl;
             prevWasChange = isChange;
             tbody.appendChild(trEl);
+            appendCommentsForAnchor('old', r.oldLineNumber);
+            appendCommentsForAnchor('new', r.newLineNumber);
           } else {
             // Inline mode
             if (r.kind === 'change') {
               const trDel = document.createElement('tr');
               trDel.innerHTML = `
-                <td class="diff-gutter diff-cell-del">${r.oldLineNumber ?? ''}</td>
+                <td class="diff-gutter diff-cell-del">${commentTriggerHtml('old', r.oldLineNumber)}${r.oldLineNumber ?? ''}</td>
                 <td class="diff-gutter diff-cell-del"></td>
                 <td class="diff-code diff-cell-del"><span class="diff-sign">-</span>${formatSide(true, r.oldLineNumber, r.oldText, r.oldSegments, 'word-del')}</td>
               `;
@@ -2948,7 +3166,7 @@
               if (matchesRange) trAdd.className = 'file-line-row selected-line';
               trAdd.innerHTML = `
                 <td class="diff-gutter diff-cell-add"></td>
-                <td class="diff-gutter diff-cell-add">${r.newLineNumber ?? ''}</td>
+                <td class="diff-gutter diff-cell-add">${commentTriggerHtml('new', r.newLineNumber)}${r.newLineNumber ?? ''}</td>
                 <td class="diff-code diff-cell-add"><span class="diff-sign">+</span>${formatSide(false, r.newLineNumber, r.newText, r.newSegments, 'word-add')}</td>
               `;
               if (!prevWasChange) {
@@ -2958,7 +3176,9 @@
               if (matchesRange && !targetHighlightRow) targetHighlightRow = trAdd;
               prevWasChange = true;
               tbody.appendChild(trDel);
+              appendCommentsForAnchor('old', r.oldLineNumber);
               tbody.appendChild(trAdd);
+              appendCommentsForAnchor('new', r.newLineNumber);
             } else {
               const trEl = document.createElement('tr');
               if (matchesRange) trEl.className = 'file-line-row selected-line';
@@ -2968,8 +3188,8 @@
                 ? formatSide(true, r.oldLineNumber, r.oldText ?? '', null, '')
                 : formatSide(false, r.newLineNumber, r.newText ?? '', null, '');
               trEl.innerHTML = `
-                <td class="diff-gutter ${cls}">${r.oldLineNumber ?? ''}</td>
-                <td class="diff-gutter ${cls}">${r.newLineNumber ?? ''}</td>
+                <td class="diff-gutter ${cls}">${r.kind === 'deleted' ? commentTriggerHtml('old', r.oldLineNumber) : ''}${r.oldLineNumber ?? ''}</td>
+                <td class="diff-gutter ${cls}">${r.kind !== 'deleted' ? commentTriggerHtml('new', r.newLineNumber) : ''}${r.newLineNumber ?? ''}</td>
                 <td class="diff-code ${cls}"><span class="diff-sign">${sign}</span>${codeHtml}</td>
               `;
               if (isChange && !prevWasChange) {
@@ -2979,6 +3199,8 @@
               if (matchesRange && !targetHighlightRow) targetHighlightRow = trEl;
               prevWasChange = isChange;
               tbody.appendChild(trEl);
+              if (r.kind === 'deleted') appendCommentsForAnchor('old', r.oldLineNumber);
+              else appendCommentsForAnchor('new', r.newLineNumber);
             }
           }
         });
@@ -2987,12 +3209,41 @@
       table.appendChild(tbody);
       scrollArea.innerHTML = '';
       scrollArea.appendChild(table);
+      tbody.addEventListener('click', (ev) => {
+        const addBtn = ev.target && ev.target.closest ? ev.target.closest('.diff-comment-add-btn') : null;
+        if (!addBtn) return;
+        ev.stopPropagation();
+        const side = addBtn.getAttribute('data-cside') === 'old' ? 'old' : 'new';
+        const line = Number(addBtn.getAttribute('data-cline'));
+        if (!Number.isFinite(line)) return;
+        openComposerAnchor = { side, line };
+        renderTable(false);
+      });
       currentHunkIdx = -1;
       updateHunkCounter();
+      updateCommentsToolbar();
       requestAnimationFrame(() => renderHunkRail());
       if (initialScroll && targetHighlightRow) {
         setTimeout(() => targetHighlightRow.scrollIntoView({ block: 'center' }), 20);
       }
+    }
+
+    if (exportCommentsBtn) {
+      exportCommentsBtn.addEventListener('click', async () => {
+        if (comments.length === 0) return;
+        const fp = diffData.newFilePath || diffData.oldFilePath || '';
+        const md = [
+          `### Review Comments · \`${fp}\``,
+          '',
+          ...comments.map((c) => `- ${c.resolved ? '[x]' : '[ ]'} **[${(c.tag || 'note').toUpperCase()}]** \`${fp}:${c.line}\` (${c.side}): ${c.text}`)
+        ].join('\n');
+        try {
+          await navigator.clipboard.writeText(md);
+          showToast(zh ? `已复制 ${comments.length} 条行内审阅批注 (Markdown)` : `Copied ${comments.length} inline comment(s) as Markdown`, 'info');
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      });
     }
 
     container.querySelector('.mode-split').addEventListener('click', (e) => {

@@ -12,6 +12,7 @@ import { ExtensionState } from './extensionState';
 import { buildFileIconTheme, findFileIconTheme, getFileIconThemeExtensionPaths, getLanguageFiles } from './fileIconTheme';
 import { GitFeatures } from './gitFeatures';
 import { Logger } from './logger';
+import { GitWorkflowService } from './server/gitWorkflowService';
 import { hostBridge } from './platform/hostBridge';
 import { isRemoteRepo, joinRepoPath } from './remote/repoTransport';
 import { RepoFileWatcher } from './repoFileWatcher';
@@ -999,6 +1000,44 @@ export class GitGraphView extends Disposable {
 					stagedCount: stagedCount,
 					error: message !== null ? null : t('Unable to read the message of the commit.')
 				});
+				break;
+			}
+			case 'loadImpactPreview': {
+				try {
+					const wf = new GitWorkflowService(this.dataSource);
+					const res = await wf.computeImpactPreview(msg.repo, {
+						operation: msg.operation,
+						baseHash: msg.operation === 'rebase' ? msg.targetRef : undefined,
+						targetRef: msg.targetRef
+					});
+					this.sendMessage({
+						command: 'loadImpactPreview',
+						requestId: msg.requestId,
+						operation: res.operation,
+						rewrittenCommits: res.rewrittenCommits,
+						affectedFilesCount: res.affectedFilesCount,
+						pushedToRemote: res.pushedToRemote,
+						remoteBranches: res.remoteBranches,
+						forcePushRequired: res.forcePushRequired,
+						conflictFiles: res.conflictFiles,
+						riskLevel: res.riskLevel,
+						error: null
+					});
+				} catch (err) {
+					this.sendMessage({
+						command: 'loadImpactPreview',
+						requestId: msg.requestId,
+						operation: msg.operation,
+						rewrittenCommits: 0,
+						affectedFilesCount: 0,
+						pushedToRemote: null,
+						remoteBranches: [],
+						forcePushRequired: false,
+						conflictFiles: [],
+						riskLevel: 'OK',
+						error: err instanceof Error ? err.message : String(err)
+					});
+				}
 				break;
 			}
 			case 'editCommitMessage':

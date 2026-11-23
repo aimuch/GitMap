@@ -6,6 +6,7 @@ class ViewActions {
 	private readonly view: GitGraphView;
 	private editMessageTarget: (DialogTarget & CommitTarget) | null = null; // The target of the Edit Commit Message dialog (while its message is loaded)
 	private stashTarget: DialogTarget | null = null; // The target of the Stash dialog (while the files are loaded)
+	private impactPreviewReqSeq: number = 0;
 
 	/**
 	 * Construct a new ViewActions instance.
@@ -308,7 +309,8 @@ class ViewActions {
 				icon: MENU_ICONS.reset,
 				visible: visibility.reset,
 				onClick: () => {
-					dialog.asDangerous().showSelect(t('Are you sure you want to reset {0} to commit <b><i>{1}</i></b>?', (this.view.gitBranchHead !== null ? t('<b><i>{0}</i></b> (the current branch)', escapeHtml(this.view.gitBranchHead)) : t('the current branch')), abbrevCommit(hash)), this.view.config.dialogDefaults.resetCommit.mode, [
+					const impactHtml = this.requestDialogImpactPreview('reset', hash);
+					dialog.asDangerous().showSelect(t('Are you sure you want to reset {0} to commit <b><i>{1}</i></b>?', (this.view.gitBranchHead !== null ? t('<b><i>{0}</i></b> (the current branch)', escapeHtml(this.view.gitBranchHead)) : t('the current branch')), abbrevCommit(hash)) + impactHtml, this.view.config.dialogDefaults.resetCommit.mode, [
 						{ name: t('Soft - Keep all changes, but reset head'), value: GG.GitResetMode.Soft },
 						{ name: t('Mixed - Keep working tree, but reset index'), value: GG.GitResetMode.Mixed },
 						{ name: t('Hard - Discard all changes'), value: GG.GitResetMode.Hard }
@@ -1234,8 +1236,61 @@ class ViewActions {
 		runAction({ command: 'fetch', repo: this.view.currentRepo, name: null, prune: this.view.config.fetchAndPrune, pruneTags: this.view.config.fetchAndPruneTags }, t('Fetching from Remote(s)'));
 	}
 
+	private requestDialogImpactPreview(operation: 'merge' | 'reset' | 'rebase', targetRef: string): string {
+		const reqId = ++this.impactPreviewReqSeq;
+		sendMessage({
+			command: 'loadImpactPreview',
+			repo: this.view.currentRepo,
+			requestId: reqId,
+			operation: operation,
+			targetRef: targetRef
+		});
+		return '<div id="dialogImpactPreview" class="dialogImpactPreview loading" data-req-id="' + reqId + '">' +
+			'<span class="dialogImpactLoading">' + t('Analyzing impact preview…') + '</span>' +
+			'</div>';
+	}
+
+	public processLoadImpactPreviewResponse(msg: GG.ResponseLoadImpactPreview) {
+		const el = document.getElementById('dialogImpactPreview');
+		if (el === null || el.dataset.reqId !== String(msg.requestId)) return;
+		el.classList.remove('loading');
+		if (msg.error !== null) {
+			el.classList.add('hidden');
+			return;
+		}
+		const riskCls = 'risk-' + msg.riskLevel.toLowerCase();
+		el.classList.add(riskCls);
+		const commitLabel = msg.operation === 'merge'
+			? t('{0} incoming commit(s)', msg.rewrittenCommits)
+			: t('{0} commit(s) affected', msg.rewrittenCommits);
+		const filesLabel = t('{0} file(s) touched', msg.affectedFilesCount);
+
+		let detailHtml = '';
+		if (msg.conflictFiles.length > 0) {
+			const shown = msg.conflictFiles.slice(0, 6).map((f) => '<code>' + escapeHtml(f) + '</code>').join(' ');
+			const extra = msg.conflictFiles.length > 6 ? ' +' + (msg.conflictFiles.length - 6) : '';
+			detailHtml = '<div class="dialogImpactDetail danger">' + SVG_ICONS.alert + '<span>' + t('Dry-run detected {0} potential merge conflict(s):', msg.conflictFiles.length) + ' ' + shown + extra + '</span></div>';
+		} else if (msg.forcePushRequired) {
+			const branches = msg.remoteBranches.slice(0, 3).map((b) => '<b>' + escapeHtml(b) + '</b>').join(', ');
+			detailHtml = '<div class="dialogImpactDetail warning">' + SVG_ICONS.alert + '<span>' + t('Affects commits already pushed to {0}. A force-push (--force-with-lease) will be required.', branches) + '</span></div>';
+		} else if (msg.operation === 'merge') {
+			detailHtml = '<div class="dialogImpactDetail safe"><span>' + t('Dry-run merge check passed with no predicted conflicts.') + '</span></div>';
+		} else {
+			detailHtml = '<div class="dialogImpactDetail safe"><span>' + t('Only affects unpushed local commits.') + '</span></div>';
+		}
+
+		el.innerHTML =
+			'<div class="dialogImpactHead">' +
+				'<span class="dialogImpactBadge ' + riskCls + '">' + escapeHtml(msg.riskLevel) + '</span>' +
+				'<span class="dialogImpactStat">' + commitLabel + '</span>' +
+				'<span class="dialogImpactStat">' + filesLabel + '</span>' +
+			'</div>' +
+			detailHtml;
+	}
+
 	private mergeAction(obj: string, name: string, actionOn: GG.MergeActionOn, target: DialogTarget & (CommitTarget | RefTarget)) {
-		dialog.showForm(t('Are you sure you want to merge {0} <b><i>{1}</i></b> into {2}?', t(actionOn).toLowerCase(), escapeHtml(name), (this.view.gitBranchHead !== null ? t('<b><i>{0}</i></b> (the current branch)', escapeHtml(this.view.gitBranchHead)) : t('the current branch'))), [
+		const impactHtml = this.requestDialogImpactPreview('merge', obj);
+		dialog.showForm(t('Are you sure you want to merge {0} <b><i>{1}</i></b> into {2}?', t(actionOn).toLowerCase(), escapeHtml(name), (this.view.gitBranchHead !== null ? t('<b><i>{0}</i></b> (the current branch)', escapeHtml(this.view.gitBranchHead)) : t('the current branch'))) + impactHtml, [
 			{ type: DialogInputType.Checkbox, name: t('Create a new commit even if fast-forward is possible'), value: this.view.config.dialogDefaults.merge.noFastForward },
 			{ type: DialogInputType.Checkbox, name: t('Squash Commits'), value: this.view.config.dialogDefaults.merge.squash, info: t('Create a single commit on the current branch whose effect is the same as merging this {0}.', t(actionOn).toLowerCase()) },
 			{ type: DialogInputType.Checkbox, name: t('No Commit'), value: this.view.config.dialogDefaults.merge.noCommit, info: t('The changes of the merge will be staged but not committed, so that you can review and/or modify the merge result before committing.') }
@@ -1245,7 +1300,8 @@ class ViewActions {
 	}
 
 	private rebaseAction(obj: string, name: string, actionOn: GG.RebaseActionOn, target: DialogTarget & (CommitTarget | RefTarget)) {
-		dialog.showForm(t('Are you sure you want to rebase {0} on {1} <b><i>{2}</i></b>?', (this.view.gitBranchHead !== null ? t('<b><i>{0}</i></b> (the current branch)', escapeHtml(this.view.gitBranchHead)) : t('the current branch')), actionOn.toLowerCase(), escapeHtml(name)), [
+		const impactHtml = this.requestDialogImpactPreview('rebase', obj);
+		dialog.showForm(t('Are you sure you want to rebase {0} on {1} <b><i>{2}</i></b>?', (this.view.gitBranchHead !== null ? t('<b><i>{0}</i></b> (the current branch)', escapeHtml(this.view.gitBranchHead)) : t('the current branch')), actionOn.toLowerCase(), escapeHtml(name)) + impactHtml, [
 			{ type: DialogInputType.Checkbox, name: t('Interactive Rebase'), value: this.view.config.dialogDefaults.rebase.interactive, info: t('Choose how each commit is rebased (reorder, reword, squash or drop commits) in the Rebase Editor.') },
 			{ type: DialogInputType.Checkbox, name: t('Ignore Date'), value: this.view.config.dialogDefaults.rebase.ignoreDate, info: t('Only applicable to a non-interactive rebase.') }
 		], t('Yes, rebase'), (values) => {

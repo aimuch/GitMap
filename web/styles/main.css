@@ -4221,3 +4221,86 @@ button.operationBarBtn svg{
 		transition:none;
 	}
 }
+
+/* Merge / Reset / Rebase Live Impact Preview Card inside Webview Dialogs */
+.dialogImpactPreview{
+	margin:10px 0 4px;
+	padding:8px 10px;
+	border-radius:7px;
+	border:1px solid color-mix(in srgb, var(--vscode-panel-border, rgba(128,128,128,0.3)) 95%, transparent);
+	background:color-mix(in srgb, var(--vscode-sideBar-background, rgba(128,128,128,0.08)) 78%, transparent);
+	text-align:left;
+	font-size:12px;
+	display:flex;
+	flex-direction:column;
+	gap:6px;
+}
+.dialogImpactPreview.hidden{
+	display:none;
+}
+.dialogImpactPreview.risk-danger{
+	border-color:rgba(239,68,68,0.55);
+	background:rgba(239,68,68,0.08);
+}
+.dialogImpactPreview.risk-risky{
+	border-color:rgba(245,158,11,0.5);
+	background:rgba(245,158,11,0.08);
+}
+.dialogImpactPreview.risk-clean{
+	border-color:rgba(34,197,94,0.45);
+	background:rgba(34,197,94,0.06);
+}
+.dialogImpactLoading{
+	font-size:11.5px;
+	color:var(--vscode-descriptionForeground);
+}
+.dialogImpactHead{
+	display:flex;
+	align-items:center;
+	gap:7px;
+	flex-wrap:wrap;
+}
+.dialogImpactBadge{
+	display:inline-flex;
+	align-items:center;
+	height:19px;
+	padding:0 7px;
+	border-radius:999px;
+	font-size:10.5px;
+	font-weight:800;
+	letter-spacing:0.04em;
+}
+.dialogImpactBadge.risk-clean{background:rgba(34,197,94,0.18);color:#22c55e;border:1px solid rgba(34,197,94,0.45);}
+.dialogImpactBadge.risk-ok{background:rgba(59,130,246,0.18);color:#3b82f6;border:1px solid rgba(59,130,246,0.45);}
+.dialogImpactBadge.risk-risky{background:rgba(245,158,11,0.18);color:#f59e0b;border:1px solid rgba(245,158,11,0.45);}
+.dialogImpactBadge.risk-danger{background:rgba(239,68,68,0.18);color:#ef4444;border:1px solid rgba(239,68,68,0.45);}
+.dialogImpactStat{
+	font-size:11px;
+	padding:1px 6px;
+	border-radius:999px;
+	background:rgba(128,128,128,0.15);
+	color:var(--vscode-descriptionForeground);
+}
+.dialogImpactDetail{
+	display:flex;
+	align-items:flex-start;
+	gap:6px;
+	font-size:11.5px;
+	line-height:1.45;
+}
+.dialogImpactDetail svg{
+	width:14px;
+	height:14px;
+	flex-shrink:0;
+	margin-top:2px;
+}
+.dialogImpactDetail.danger{color:#ef4444;}
+.dialogImpactDetail.warning{color:#f59e0b;}
+.dialogImpactDetail.safe{color:#22c55e;}
+.dialogImpactDetail code{
+	font-family:var(--vscode-editor-font-family, monospace);
+	font-size:11px;
+	padding:0 4px;
+	border-radius:3px;
+	background:rgba(128,128,128,0.18);
+}

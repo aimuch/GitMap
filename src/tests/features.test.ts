@@ -767,6 +767,22 @@ describe('GitMap 11 Advanced Features End-to-End Suite', () => {
     assert.ok(created.webUrl.endsWith('/acme/widget/pull/99'));
     assert.equal(createdPrPayloads.length, 1);
     assert.equal(createdPrPayloads[0].auth, 'Bearer ghp_mockSecretToken');
+
+    // Launchpad cross-repo PR/CI aggregation (authed repo + no-remote repo)
+    const noRemoteDir = path.join(tmpRoot, 'repo-pr-noremote');
+    fs.mkdirSync(noRemoteDir, { recursive: true });
+    execGitSync(noRemoteDir, ['init', '-b', 'main']);
+    const lpPrs = await rpc.call('repos:launchpadPrs', {
+      repos: [repo, noRemoteDir],
+      onlyWithToken: true,
+      provider: 'github'
+    });
+    assert.equal(lpPrs.scannedRepos, 1);
+    assert.equal(lpPrs.skippedNoRemote, 1);
+    assert.equal(lpPrs.counts.total, 1);
+    assert.equal(lpPrs.counts.readyToMerge, 1);
+    assert.equal(lpPrs.items[0].number, 42);
+    assert.equal(lpPrs.items[0].ciStatus, 'success');
   });
 
   it('Feature 8 & 9: performs AI code review, generates AI release notes, and runs natural-language commit search', async () => {
@@ -1230,6 +1246,13 @@ describe('GitMap 11 Advanced Features End-to-End Suite', () => {
     assert.equal(mergePreview.rewrittenCommits, 1);
     assert.ok(mergePreview.conflictFiles.includes('file.txt'), 'dry-run merge-tree detects file.txt conflict');
     assert.equal(mergePreview.riskLevel, 'DANGER');
+
+    // Reset preview past pushed commit c2 (target = c1) detects force-push risk
+    const resetPreview = await rpc.call('git:impactPreview', { repo: repoDir, operation: 'reset', targetRef: c1 });
+    assert.equal(resetPreview.operation, 'reset');
+    assert.equal(resetPreview.rewrittenCommits, 2);
+    assert.equal(resetPreview.forcePushRequired, true);
+    assert.equal(resetPreview.riskLevel, 'RISKY');
   });
 
   it('Launchpad, Activity Heatmap, Portable Review Patch Bundles & AI Quick Switch work end-to-end', async () => {
@@ -1295,5 +1318,10 @@ describe('GitMap 11 Advanced Features End-to-End Suite', () => {
     assert.equal(switched.provider, 'Qwen');
     assert.equal(switched.model, 'qwen-max');
     await rpc.call('ai:quickSwitch', { provider: beforeAi.provider, model: beforeAi.model || '' });
+
+    // 4. Worktree openInGraph scope switch
+    const wtOpen = await rpc.call('worktree:openInGraph', { repoUri: repoDir });
+    assert.equal(wtOpen.ok, true);
+    assert.ok(wtOpen.root);
   });
 });

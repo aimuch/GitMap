@@ -91,6 +91,115 @@
   let statusRefreshInFlight = false;
   let statusRefreshQueued = false;
   let repoContextSeq = 0;
+  const worktreeScopeCache = new Map(); // repo -> { ts, worktrees }
+
+  function invalidateWorktreeScopeCache() {
+    worktreeScopeCache.clear();
+  }
+
+  async function refreshWorktreeScopeSwitcher(repo, force) {
+    const anchor = document.getElementById('worktreeScopeAnchor');
+    const pill = document.getElementById('btnWorktreeScope');
+    const pop = document.getElementById('worktreeScopePopover');
+    if (!anchor || !pill || !pop) return;
+    if (!repo) {
+      anchor.classList.add('hidden');
+      pop.classList.add('hidden');
+      return;
+    }
+    let worktrees = null;
+    const cached = worktreeScopeCache.get(repo);
+    if (!force && cached && Date.now() - cached.ts < 8000) {
+      worktrees = cached.worktrees;
+    } else {
+      try {
+        const res = await rpc('worktree:list', { repo });
+        if (state.activeRepo !== repo) return;
+        worktrees = Array.isArray(res.worktrees) ? res.worktrees : [];
+        worktreeScopeCache.set(repo, { ts: Date.now(), worktrees });
+      } catch (_) {
+        anchor.classList.add('hidden');
+        return;
+      }
+    }
+
+    if (!worktrees || worktrees.length <= 1) {
+      anchor.classList.add('hidden');
+      pop.classList.add('hidden');
+      return;
+    }
+
+    const activeWt = worktrees.find((w) => w.repoUri === repo) || worktrees[0];
+    const label = activeWt.branch || (activeWt.head ? activeWt.head.slice(0, 7) : 'worktree');
+    anchor.classList.remove('hidden');
+    pill.innerHTML = `${ICONS.layers}<span class="wt-scope-label">${escapeHtml(label)}</span><span class="wt-scope-count">${worktrees.length}</span>${ICONS.chevronDown}`;
+    pill.title = T(`当前 Worktree 作用域：${activeWt.path}（共 ${worktrees.length} 个工作树，点击快速切换）`, `Worktree scope: ${activeWt.path} (${worktrees.length} total — click to switch)`);
+
+    pop.innerHTML = `
+      <div class="tools-group-title">${escapeHtml(T('Worktree 图谱作用域切换', 'Worktree Graph Scope'))}</div>
+      ${worktrees.map((w) => {
+        const isAct = w.repoUri === repo;
+        const name = w.branch || `detached @ ${(w.head || '').slice(0, 7)}`;
+        return `<button type="button" class="wt-scope-item${isAct ? ' active' : ''}" data-wt-uri="${escapeHtml(w.repoUri)}" role="menuitem">
+          <span class="wt-scope-item-main">
+            <span style="display:flex;align-items:center;gap:6px;font-weight:600;">
+              ${ICONS.branch}<span>${escapeHtml(name)}</span>
+              ${w.isMain ? `<span class="ssh-chip">main</span>` : ''}
+            </span>
+            <span class="wt-scope-item-path" title="${escapeHtml(w.path)}">${escapeHtml(w.path)}</span>
+          </span>
+          ${isAct ? `<span class="icon-slot" style="color:var(--vscode-focusBorder)">${ICONS.check}</span>` : ''}
+        </button>`;
+      }).join('')}
+      <div class="gm-split-menu-sep"></div>
+      <button type="button" class="wt-scope-item act-wt-manage" role="menuitem">
+        <span style="display:inline-flex;align-items:center;gap:6px;">${ICONS.plus}<span>${escapeHtml(T('管理 / 新建并行 Worktree…', 'Manage / Create Worktrees…'))}</span></span>
+      </button>
+    `;
+
+    pop.querySelectorAll('.wt-scope-item[data-wt-uri]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const targetUri = btn.getAttribute('data-wt-uri');
+        pop.classList.add('hidden');
+        pill.setAttribute('aria-expanded', 'false');
+        if (!targetUri || targetUri === state.activeRepo) return;
+        try {
+          const res = await rpc('worktree:openInGraph', { repoUri: targetUri });
+          state.repos = res.repos || state.repos;
+          state.activeRepo = res.root || targetUri;
+          renderSidebar();
+          renderActiveRepoBadge();
+          activateTab('graph');
+          refreshAllStatusesAndContext();
+          showToast(T(`已切换图谱作用域至 Worktree：${parseRepoDisplay(state.activeRepo).name}`, `Graph scoped to worktree: ${parseRepoDisplay(state.activeRepo).name}`), 'info');
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      });
+    });
+    pop.querySelector('.act-wt-manage')?.addEventListener('click', () => {
+      pop.classList.add('hidden');
+      pill.setAttribute('aria-expanded', 'false');
+      openWorktreesModal();
+    });
+  }
+
+  const wtPillEl = document.getElementById('btnWorktreeScope');
+  const wtPopEl = document.getElementById('worktreeScopePopover');
+  if (wtPillEl && wtPopEl) {
+    wtPillEl.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const opening = wtPopEl.classList.contains('hidden');
+      wtPopEl.classList.toggle('hidden', !opening);
+      wtPillEl.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    });
+    document.addEventListener('mousedown', (ev) => {
+      if (!wtPopEl.classList.contains('hidden') && !ev.target.closest('#worktreeScopeAnchor')) {
+        wtPopEl.classList.add('hidden');
+        wtPillEl.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
 
   async function refreshRepoContext() {
     const seq = ++repoContextSeq;
@@ -100,8 +209,10 @@
     if (!repo) {
       banner.classList.add('hidden');
       scmBadge.classList.add('hidden');
+      refreshWorktreeScopeSwitcher(null, false);
       return;
     }
+    void refreshWorktreeScopeSwitcher(repo, false);
 
     const qs = state.repoQuickStatuses[repo];
     const dirtyTotal = qs ? (qs.stagedCount || 0) + (qs.unstagedCount || 0) + (qs.conflictCount || 0) : 0;
@@ -889,7 +1000,9 @@
             try {
               const res = await rpc('worktree:remove', { repo, path: wtPath, force: true });
               state.repos = res.repos || state.repos;
+              invalidateWorktreeScopeCache();
               renderSidebar();
+              void refreshWorktreeScopeSwitcher(state.activeRepo, true);
               showToast(T(`已移除工作树：${wtPath}`, `Removed worktree: ${wtPath}`), 'info');
               await render();
             } catch (err) {
@@ -916,7 +1029,9 @@
               createBranch: document.getElementById('wtCreateBranch').checked
             });
             state.repos = res.repos || state.repos;
+            invalidateWorktreeScopeCache();
             renderSidebar();
+            void refreshWorktreeScopeSwitcher(state.activeRepo, true);
             showToast(T('工作树已创建并加入侧边栏', 'Worktree created and added to sidebar'), 'info');
             await render();
           } catch (err) {
