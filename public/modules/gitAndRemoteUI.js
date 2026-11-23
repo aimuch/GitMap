@@ -1791,6 +1791,391 @@
     render();
   }
 
+  /* ── 9. Deleted Files & Folders Archaeology Modal (git log --diff-filter=D) ── */
+  async function openDeletedFilesModal(initialPathFilter) {
+    const app = getApp();
+    const repo = activeRepo();
+    if (!app || !repo) {
+      app?.showToast(T('请先选择一个活跃仓库', 'Select an active repository first'), 'warning');
+      return;
+    }
+
+    const shared = window.GitMapFeatures && window.GitMapFeatures.openFeatureModal;
+    const ui = shared
+      ? shared({
+          title: T('已删除文件 / 文件夹历史溯源', 'Deleted Files & Folders Archaeology'),
+          subtitle: T('按关键词、路径或目录检索何时被哪次提交删除，支持查看删除前内容、打开文件时光机及一键还原文件/目录', 'Find when files or folders were deleted across history, inspect pre-deletion snapshots, launch Time Machine, or restore'),
+          badge: app.parseRepoDisplay(repo).name,
+          icon: app.ICONS.history || app.ICONS.search,
+          width: 'min(1080px, 95vw)',
+          bodyHtml: ''
+        })
+      : {
+          bodyEl: openModalShell(T('已删除文件 / 文件夹历史溯源', 'Deleted Files & Folders Archaeology'), app.parseRepoDisplay(repo).name, true),
+          close: () => document.getElementById('featureModal')?.classList.add('hidden')
+        };
+    if (!ui || !ui.bodyEl) return;
+
+    const cleanInitialPath = String(initialPathFilter || '').replace(/^\/+|\/+$/g, '');
+    const fmtDate = (unixSec) => {
+      if (!unixSec) return '';
+      const d = new Date(unixSec * 1000);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+
+    ui.bodyEl.innerHTML = `
+      <div class="gm-enh-toolbar" style="margin-bottom:8px;">
+        <input type="text" id="gmDelQuery" class="gm-enh-input" placeholder="${esc(T('关键词筛选（文件名、路径片段或提交说明）…', 'Filter by filename, path snippet, or commit message…'))}" />
+        <input type="text" id="gmDelPathFilter" class="gm-enh-input" style="max-width:240px;" value="${esc(cleanInitialPath)}" placeholder="${esc(T('限定目录或精确路径（如 src/old）…', 'Scope to path/folder (e.g. src/old)…'))}" />
+        <select id="gmDelRef" class="gm-enh-input" style="flex:0 0 auto;width:156px;min-width:130px;">
+          <option value="HEAD">${esc(T('当前分支历史 (HEAD)', 'Current Branch (HEAD)'))}</option>
+          <option value="--all">${esc(T('全部分支历史 (--all)', 'All Branches (--all)'))}</option>
+        </select>
+        <label class="inline-check" title="${esc(T('启用 -M 重命名检测，避免把改名移动的文件误报为“已删除”', 'Enable -M rename detection so renamed files are not falsely reported as deleted'))}">
+          <input type="checkbox" id="gmDelDetectRenames" checked />
+          <span>${esc(T('忽略重命名 (-M)', 'Ignore Renames (-M)'))}</span>
+        </label>
+        <button type="button" id="gmDelSearchBtn" class="primary-btn">${app.ICONS.search || ''}<span>${esc(T('溯源检索', 'Search'))}</span></button>
+      </div>
+      <div class="gm-cc-tabs-bar" style="margin-bottom:8px;">
+        <div class="gm-cc-tabs">
+          <button type="button" class="gm-cc-tab active" data-del-tab="files">${esc(T('按已删文件', 'Deleted Files'))} <span id="gmDelFilesCnt"></span></button>
+          <button type="button" class="gm-cc-tab" data-del-tab="folders">${esc(T('按被删目录汇总', 'Deleted Folders'))} <span id="gmDelFoldersCnt"></span></button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span id="gmDelSummary" style="font-size:11.5px;color:var(--vscode-descriptionForeground);"></span>
+          <button type="button" id="gmDelPickaxeBtn" class="mini-btn" title="${esc(T('若文件本身未被删，而是某段代码/函数被删除，用 git log -S 按代码内容溯源', 'File not deleted? Search deleted functions/snippets by code content (git log -S)'))}">${app.ICONS.sparkle || app.ICONS.search || ''}<span>${esc(T('按代码内容(-S)搜被删片段', 'Search Deleted Code (-S)'))}</span></button>
+        </div>
+      </div>
+      <div id="gmDelResults" class="gm-enh-list" style="max-height:58vh;"></div>
+    `;
+
+    const queryInp = ui.bodyEl.querySelector('#gmDelQuery');
+    const pathInp = ui.bodyEl.querySelector('#gmDelPathFilter');
+    const refSel = ui.bodyEl.querySelector('#gmDelRef');
+    const renameChk = ui.bodyEl.querySelector('#gmDelDetectRenames');
+    const searchBtn = ui.bodyEl.querySelector('#gmDelSearchBtn');
+    const pickaxeBtn = ui.bodyEl.querySelector('#gmDelPickaxeBtn');
+    const filesCntEl = ui.bodyEl.querySelector('#gmDelFilesCnt');
+    const foldersCntEl = ui.bodyEl.querySelector('#gmDelFoldersCnt');
+    const sumEl = ui.bodyEl.querySelector('#gmDelSummary');
+    const resultsEl = ui.bodyEl.querySelector('#gmDelResults');
+
+    let activeMode = 'files';
+    let lastData = null;
+    let reqSeq = 0;
+
+    const openPickaxeBridge = () => {
+      const q = (queryInp.value.trim() || pathInp.value.trim());
+      ui.close();
+      if (window.GitMapFeatures && typeof window.GitMapFeatures.openNlSearchModal === 'function') {
+        window.GitMapFeatures.openNlSearchModal(q);
+      }
+    };
+    pickaxeBtn?.addEventListener('click', openPickaxeBridge);
+
+    const locateInGraph = (hash) => {
+      ui.close();
+      app.activateTab('graph');
+      setTimeout(() => {
+        app.sendWs({ type: 'graph:message', payload: { command: 'scrollToCommit', hash } });
+      }, 60);
+    };
+
+    const renderLoadMoreHtml = () => {
+      if (!lastData || !lastData.hasMore) return '';
+      return `
+        <div class="gm-del-loadmore-bar" style="display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 4px;">
+          <button type="button" id="gmDelLoadMoreBtn" class="mini-btn primary">
+            ${app.ICONS.history || ''}<span>${esc(T(`继续加载更早历史（已扫 ${lastData.scannedCommits} 次删除提交）`, `Load Older History (${lastData.scannedCommits} commits scanned)`))}</span>
+          </button>
+        </div>
+      `;
+    };
+
+    const bindLoadMore = () => {
+      const btn = resultsEl.querySelector('#gmDelLoadMoreBtn');
+      if (!btn) return;
+      btn.addEventListener('click', () => runSearch(true));
+    };
+
+    function renderResults() {
+      if (!lastData) return;
+      const files = lastData.files || [];
+      const folders = lastData.folders || [];
+      filesCntEl.textContent = `(${files.length})`;
+      foldersCntEl.textContent = `(${folders.length})`;
+      const truncNote = lastData.truncated ? T(' · 已达单次展示上限', ' · display cap reached') : '';
+      const moreNote = lastData.hasMore ? T(' · 还有更早提交', ' · more history available') : '';
+      sumEl.textContent = T(
+        `已扫描 ${lastData.scannedCommits} 个含删除记录的提交 · 命中 ${files.length} 个文件，${folders.length} 个目录分组${truncNote}${moreNote}`,
+        `Scanned ${lastData.scannedCommits} deletion commit(s) · ${files.length} file(s), ${folders.length} folder group(s)${truncNote}${moreNote}`
+      );
+
+      if (activeMode === 'files') {
+        if (files.length === 0) {
+          resultsEl.innerHTML = `<div class="gm-empty-card">
+            <div class="gm-empty-card-title">${esc(T('未找到符合条件的已删除文件', 'No deleted files matched'))}</div>
+            <div class="gm-empty-card-desc">${esc(T('尝试清空关键词、切换为「全部分支历史 (--all)」、加载更早提交，或按代码内容 (-S) 搜索被删除的函数/片段。', 'Try clearing the filter, switching to All Branches (--all), loading older commits, or searching deleted code snippets (-S).'))}</div>
+            <div style="display:flex;gap:8px;justify-content:center;margin-top:8px;flex-wrap:wrap;">
+              ${lastData.hasMore ? `<button type="button" id="gmDelLoadMoreBtn" class="mini-btn primary">${esc(T('继续向更早历史扫描', 'Scan Older History'))}</button>` : ''}
+              <button type="button" class="mini-btn act-empty-pickaxe">${app.ICONS.sparkle || ''}<span>${esc(T('按代码内容 (-S) 查找被删片段', 'Search Deleted Code (-S)'))}</span></button>
+            </div>
+          </div>`;
+          resultsEl.querySelector('.act-empty-pickaxe')?.addEventListener('click', openPickaxeBridge);
+          bindLoadMore();
+          return;
+        }
+        resultsEl.innerHTML = files.map((f, idx) => {
+          const folderPrefix = f.folder && f.folder !== '.' && f.folder !== '(root)' ? `${f.folder}/` : '';
+          const canPreDelete = !!f.parentHash;
+          return `
+            <div class="gm-enh-card gm-del-card" data-fidx="${idx}">
+              <div class="gm-del-card-top">
+                <div class="gm-del-path-wrap" title="${esc(f.path)}">
+                  <span class="scm-status-badge st-D">D</span>
+                  <span class="gm-del-path"><span class="gm-del-folder">${esc(folderPrefix)}</span><strong>${esc(f.name)}</strong></span>
+                </div>
+                <div class="gm-del-commit-meta" title="${esc(f.commitHash + '\n' + f.subject)}">
+                  <code class="gm-cc-sha">${esc(f.shortHash)}</code>
+                  <span class="gm-del-subj">${esc(f.subject || T('(无提交说明)', '(no subject)'))}</span>
+                  <span class="gm-del-who">${esc(f.author)} · ${esc(fmtDate(f.date))}</span>
+                </div>
+              </div>
+              <div class="gm-del-actions">
+                <button type="button" class="mini-btn act-del-view" ${canPreDelete ? '' : 'disabled'} title="${esc(canPreDelete ? T(`查看删除前 (${f.parentHash.slice(0, 7)}) 的文件内容`, `View file content before deletion (${f.parentHash.slice(0, 7)})`) : T('初始提交无父快照', 'No parent commit'))}">${app.ICONS.fileCode || ''}<span>${esc(T('删除前内容', 'Pre-Delete Content'))}</span></button>
+                <button type="button" class="mini-btn act-del-tm" title="${esc(T('打开此文件的完整变更时间机器', 'Open File Time Machine for this deleted file'))}">${app.ICONS.history || ''}<span>${esc(T('时光机', 'Time Machine'))}</span></button>
+                <button type="button" class="mini-btn act-del-tree" ${canPreDelete ? '' : 'disabled'} title="${esc(T('浏览删除前一次提交时的完整仓库目录树', 'Browse full repo snapshot right before deletion'))}">${app.ICONS.folderOpen || ''}<span>${esc(T('删除前快照', 'Snapshot Tree'))}</span></button>
+                <button type="button" class="mini-btn danger act-del-restore" ${canPreDelete ? '' : 'disabled'} title="${esc(T('将此文件从删除前快照还原到当前工作区', 'Restore this file from pre-deletion commit to working tree'))}">${app.ICONS.undo || app.ICONS.download || ''}<span>${esc(T('恢复文件', 'Restore File'))}</span></button>
+                <button type="button" class="mini-btn act-del-locate" title="${esc(T('在提交图谱中定位执行删除的提交', 'Locate the deletion commit in Graph'))}">${app.ICONS.commit || ''}<span>${esc(T('图谱定位', 'Locate'))}</span></button>
+              </div>
+            </div>
+          `;
+        }).join('') + renderLoadMoreHtml();
+
+        resultsEl.querySelectorAll('.gm-del-card').forEach((card) => {
+          const f = files[Number(card.getAttribute('data-fidx'))];
+          if (!f) return;
+          card.querySelector('.act-del-view')?.addEventListener('click', () => {
+            if (!f.parentHash) return;
+            ui.close();
+            app.openFileTab({
+              repo,
+              filePath: f.path,
+              commit: f.parentHash,
+              title: `${f.name} (${T('删前 ', 'pre-')}${f.parentHash.slice(0, 7)})`
+            });
+          });
+          card.querySelector('.act-del-tm')?.addEventListener('click', async () => {
+            ui.close();
+            try {
+              await app.rpc('file:timeMachine', { repo, filePath: f.path, commitHash: f.parentHash || f.commitHash });
+            } catch (err) {
+              app.showToast(err.message, 'error');
+            }
+          });
+          card.querySelector('.act-del-tree')?.addEventListener('click', () => {
+            if (!f.parentHash) return;
+            ui.close();
+            app.openCommitTreeTab?.({ repo, commitHash: f.parentHash, initialPath: f.path });
+          });
+          card.querySelector('.act-del-locate')?.addEventListener('click', () => locateInGraph(f.commitHash));
+          const restoreBtn = card.querySelector('.act-del-restore');
+          if (restoreBtn && f.parentHash) {
+            app.bindTwoStepDangerButton(restoreBtn, {
+              armedLabel: T('确认还原此文件', 'Confirm Restore'),
+              onConfirm: async () => {
+                try {
+                  await app.rpc('commit:restorePath', { repo, commitHash: f.parentHash, path: f.path });
+                  app.showToast(
+                    T(`已从 ${f.parentHash.slice(0, 7)} 恢复文件：${f.path}`, `Restored ${f.path} from ${f.parentHash.slice(0, 7)}`),
+                    'info',
+                    { actionLabel: T('打开暂存区', 'Open SCM'), onAction: () => app.openScmModal() }
+                  );
+                  window.GitMapFeatures?.refreshAllStatusesAndContext?.();
+                } catch (err) {
+                  app.showToast(err.message, 'error');
+                }
+              }
+            });
+          }
+        });
+        bindLoadMore();
+        return;
+      }
+
+      // Deleted Folder Groups view
+      if (folders.length === 0) {
+        resultsEl.innerHTML = `<div class="gm-empty-card"><div class="gm-empty-card-title">${esc(T('未找到被删除的目录记录', 'No deleted folder groups found'))}</div><div class="gm-empty-card-desc">${esc(T('尝试放宽关键词、切换到「全部分支历史 (--all)」，或向更早历史继续扫描。', 'Try broadening your filter, switching to All Branches (--all), or scanning older commits.'))}</div>${renderLoadMoreHtml()}</div>`;
+        bindLoadMore();
+        return;
+      }
+      resultsEl.innerHTML = folders.map((g, idx) => {
+        const isRoot = !g.folder || g.folder === '.' || g.folder === '(root)';
+        const folderTitle = isRoot ? T('(仓库根目录文件)', '(Repository Root Files)') : g.folder;
+        const canRestoreDir = !isRoot && !!g.parentHash;
+        const sampleChips = (g.files || []).slice(0, 8).map((p) => {
+          const base = p.split('/').pop() || p;
+          return `<button type="button" class="gm-composer-file-chip gm-del-sample-chip" data-sample-path="${esc(p)}" title="${esc(p + (g.parentHash ? T('（点击查看删除前内容）', ' (click to inspect before delete)') : ''))}">${esc(base)}</button>`;
+        }).join('');
+        const moreChip = g.fileCount > 8 ? `<span class="gm-badge info">+${g.fileCount - 8}</span>` : '';
+        return `
+          <div class="gm-enh-card gm-del-card" data-gidx="${idx}">
+            <div class="gm-del-card-top">
+              <div class="gm-del-path-wrap" title="${esc(folderTitle)}">
+                <span class="icon-slot" style="color:var(--vscode-gitDecoration-deletedResourceForeground,#f14c4c);">${app.ICONS.folder || ''}</span>
+                <strong class="gm-del-path">${esc(folderTitle)}</strong>
+                <span class="gm-badge warn">${esc(T(`${g.fileCount} 个文件被删`, `${g.fileCount} file(s)`))}</span>
+              </div>
+              <div class="gm-del-commit-meta" title="${esc(g.commitHash + '\n' + g.subject)}">
+                <code class="gm-cc-sha">${esc(g.shortHash)}</code>
+                <span class="gm-del-subj">${esc(g.subject || T('(无提交说明)', '(no subject)'))}</span>
+                <span class="gm-del-who">${esc(g.author)} · ${esc(fmtDate(g.date))}</span>
+              </div>
+            </div>
+            <div class="gm-composer-files" style="margin:6px 0 8px;">${sampleChips}${moreChip}</div>
+            <div class="gm-del-actions">
+              <button type="button" class="mini-btn act-delf-tree" ${g.parentHash ? '' : 'disabled'}>${app.ICONS.folderOpen || ''}<span>${esc(T('浏览删除前目录', 'Browse Pre-Delete Folder'))}</span></button>
+              ${canRestoreDir ? `<button type="button" class="mini-btn danger act-delf-restore">${app.ICONS.undo || app.ICONS.download || ''}<span>${esc(T('恢复整个目录', 'Restore Entire Folder'))}</span></button>` : ''}
+              <button type="button" class="mini-btn act-delf-locate">${app.ICONS.commit || ''}<span>${esc(T('图谱定位', 'Locate Commit'))}</span></button>
+            </div>
+          </div>
+        `;
+      }).join('') + renderLoadMoreHtml();
+
+      resultsEl.querySelectorAll('.gm-del-card').forEach((card) => {
+        const g = folders[Number(card.getAttribute('data-gidx'))];
+        if (!g) return;
+        card.querySelectorAll('.gm-del-sample-chip').forEach((chip) => {
+          chip.addEventListener('click', () => {
+            if (!g.parentHash) return;
+            const fp = chip.getAttribute('data-sample-path');
+            if (!fp) return;
+            ui.close();
+            app.openFileTab({
+              repo,
+              filePath: fp,
+              commit: g.parentHash,
+              title: `${fp.split('/').pop()} (${T('删前 ', 'pre-')}${g.parentHash.slice(0, 7)})`
+            });
+          });
+        });
+        card.querySelector('.act-delf-tree')?.addEventListener('click', () => {
+          if (!g.parentHash) return;
+          ui.close();
+          app.openCommitTreeTab?.({
+            repo,
+            commitHash: g.parentHash,
+            initialPath: g.folder === '.' || g.folder === '(root)' ? '' : g.folder
+          });
+        });
+        card.querySelector('.act-delf-locate')?.addEventListener('click', () => locateInGraph(g.commitHash));
+        const restoreDirBtn = card.querySelector('.act-delf-restore');
+        if (restoreDirBtn && g.parentHash && g.folder && g.folder !== '.' && g.folder !== '(root)') {
+          app.bindTwoStepDangerButton(restoreDirBtn, {
+            armedLabel: T('确认还原整个目录', 'Confirm Restore Folder'),
+            onConfirm: async () => {
+              try {
+                await app.rpc('commit:restorePath', { repo, commitHash: g.parentHash, path: g.folder });
+                app.showToast(
+                  T(`已从 ${g.parentHash.slice(0, 7)} 恢复目录：${g.folder}`, `Restored folder ${g.folder} from ${g.parentHash.slice(0, 7)}`),
+                  'info',
+                  { actionLabel: T('打开暂存区', 'Open SCM'), onAction: () => app.openScmModal() }
+                );
+                window.GitMapFeatures?.refreshAllStatusesAndContext?.();
+              } catch (err) {
+                app.showToast(err.message, 'error');
+              }
+            }
+          });
+        }
+      });
+      bindLoadMore();
+    }
+
+    async function runSearch(append) {
+      const seq = ++reqSeq;
+      const loadMoreBtn = resultsEl.querySelector('#gmDelLoadMoreBtn');
+      if (loadMoreBtn) loadMoreBtn.disabled = true;
+      searchBtn.disabled = true;
+      const skip = append && lastData ? (lastData.nextSkip || 0) : 0;
+      if (!append) {
+        sumEl.textContent = T('正在扫描 Git 删除历史…', 'Scanning Git deletion history…');
+        resultsEl.innerHTML = `<div class="browser-empty-state"><span class="fb-spinner"></span>${esc(T('正在检索删除记录…', 'Searching deleted paths…'))}</div>`;
+      } else {
+        sumEl.textContent = T('正在继续向更早历史扫描…', 'Scanning older commits…');
+      }
+      try {
+        const res = await app.rpc('history:findDeleted', {
+          repo,
+          query: queryInp.value.trim(),
+          pathFilter: pathInp.value.trim(),
+          ref: refSel.value,
+          limit: 400,
+          skip,
+          detectRenames: renameChk ? renameChk.checked : true
+        });
+        if (seq !== reqSeq) return;
+        if (append && lastData) {
+          const seenFileKeys = new Set(lastData.files.map((f) => `${f.commitHash}::${f.path}`));
+          const mergedFiles = [...lastData.files];
+          for (const f of (res.files || [])) {
+            const k = `${f.commitHash}::${f.path}`;
+            if (!seenFileKeys.has(k)) {
+              seenFileKeys.add(k);
+              mergedFiles.push(f);
+            }
+          }
+          const seenFolderKeys = new Set(lastData.folders.map((g) => `${g.commitHash}::${g.folder}`));
+          const mergedFolders = [...lastData.folders];
+          for (const g of (res.folders || [])) {
+            const k = `${g.commitHash}::${g.folder}`;
+            if (!seenFolderKeys.has(k)) {
+              seenFolderKeys.add(k);
+              mergedFolders.push(g);
+            }
+          }
+          lastData = {
+            ...res,
+            files: mergedFiles,
+            folders: mergedFolders,
+            scannedCommits: (lastData.scannedCommits || 0) + (res.scannedCommits || 0)
+          };
+        } else {
+          lastData = res;
+        }
+        renderResults();
+      } catch (err) {
+        if (seq !== reqSeq) return;
+        sumEl.textContent = '';
+        if (!append) {
+          resultsEl.innerHTML = `<div class="gm-empty-card"><div class="gm-empty-card-title error-text">${esc(err.message)}</div></div>`;
+        } else {
+          app.showToast(err.message, 'error');
+        }
+      } finally {
+        if (seq === reqSeq) searchBtn.disabled = false;
+      }
+    }
+
+    ui.bodyEl.querySelectorAll('[data-del-tab]').forEach((tabBtn) => {
+      tabBtn.addEventListener('click', () => {
+        activeMode = tabBtn.getAttribute('data-del-tab') || 'files';
+        ui.bodyEl.querySelectorAll('[data-del-tab]').forEach((b) => b.classList.toggle('active', b === tabBtn));
+        renderResults();
+      });
+    });
+    searchBtn.addEventListener('click', () => runSearch(false));
+    refSel.addEventListener('change', () => runSearch(false));
+    renameChk?.addEventListener('change', () => runSearch(false));
+    queryInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(false); });
+    pathInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(false); });
+
+    setTimeout(() => queryInp.focus(), 30);
+    await runSearch(false);
+  }
+
   window.GitMapRemoteAndGitUI = {
     openSubmodulesLfsModal,
     openMultiRepoDashboardModal,
@@ -1799,6 +2184,7 @@
     openCommitCompareModal,
     openCommitComposerModal,
     openPatchBundleModal,
+    openDeletedFilesModal,
     pollSshTelemetry
   };
 })();

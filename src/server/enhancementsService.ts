@@ -4,10 +4,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
 import { DataSource } from '../dataSource';
-import { parseRemoteRepo } from '../remote/repoTransport';
+import { parseRemoteRepo, readRepoFileBuffer, writeRepoFileBuffer } from '../remote/repoTransport';
 import { quotePosixArg, sshManager } from '../remote/sshManager';
 import { RepoFileWatcher } from '../repoFileWatcher';
 import { getRepoName } from '../utils';
+import { LruCache } from './gitCatFilePool';
 import { RepoQuickStatus } from './gitWorkflowService';
 
 const execFileAsync = promisify(execFile);
@@ -171,6 +172,297 @@ export interface PatchInspectResult {
   checkError: string | null;
   patchPreview: string;
   patchBytes: number;
+}
+
+export interface CommitTreeEntry {
+  name: string;
+  path: string;
+  mode: string;
+  type: 'blob' | 'tree' | 'commit';
+  objectHash: string;
+  size: number | null;
+  isDirectory: boolean;
+  isSymlink: boolean;
+  isSubmodule: boolean;
+}
+
+export interface CommitTreeMeta {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  author: string;
+  date: number;
+  parents: string[];
+}
+
+export interface CommitTreeListResult {
+  commit: CommitTreeMeta;
+  subPath: string;
+  entries: CommitTreeEntry[];
+  commitChanges: Record<string, string>;
+  changedDirs: string[];
+  deletedInDir: string[];
+  fromCache?: boolean;
+}
+
+export interface CommitTreeSearchResult {
+  commit: CommitTreeMeta;
+  query: string;
+  totalFiles: number;
+  truncated: boolean;
+  matches: CommitTreeEntry[];
+  commitChanges: Record<string, string>;
+  fromCache?: boolean;
+}
+
+export interface CommitWorkingDiffResult {
+  commitHash: string;
+  workingDiff: Record<string, string>;
+  changedDirs: string[];
+  changedCount: number;
+}
+
+export interface DeletedFileRecord {
+  path: string;
+  folder: string;
+  name: string;
+  commitHash: string;
+  shortHash: string;
+  parentHash: string | null;
+  author: string;
+  date: number;
+  subject: string;
+}
+
+export interface DeletedFolderGroup {
+  folder: string;
+  commitHash: string;
+  shortHash: string;
+  parentHash: string | null;
+  author: string;
+  date: number;
+  subject: string;
+  fileCount: number;
+  files: string[];
+}
+
+export interface DeletedPathsResult {
+  files: DeletedFileRecord[];
+  folders: DeletedFolderGroup[];
+  scannedCommits: number;
+  truncated: boolean;
+  hasMore?: boolean;
+  nextSkip?: number;
+  detectRenames?: boolean;
+}
+
+export function parseDiffNameStatusZ(raw: string): {
+  changes: Record<string, string>;
+  deletedPaths: string[];
+  changedDirs: string[];
+} {
+  const changes: Record<string, string> = {};
+  const deletedPaths: string[] = [];
+  const dirSet = new Set<string>();
+  const addAncestors = (p: string) => {
+    const segs = p.split('/');
+    segs.pop();
+    let acc = '';
+    for (const s of segs) {
+      acc = acc ? `${acc}/${s}` : s;
+      dirSet.add(acc);
+    }
+  };
+  const tokens = raw.split('\0');
+  let i = 0;
+  while (i < tokens.length) {
+    const tok = (tokens[i] || '').trim();
+    if (!tok) {
+      i++;
+      continue;
+    }
+    const code = tok.charAt(0);
+    if (code === 'R' || code === 'C') {
+      const oldPath = tokens[i + 1] || '';
+      const newPath = tokens[i + 2] || '';
+      i += 3;
+      if (newPath) {
+        changes[newPath] = code;
+        addAncestors(newPath);
+      }
+      if (code === 'R' && oldPath && oldPath !== newPath) {
+        addAncestors(oldPath);
+      }
+    } else {
+      const p = tokens[i + 1] || '';
+      i += 2;
+      if (!p) continue;
+      changes[p] = code;
+      addAncestors(p);
+      if (code === 'D') deletedPaths.push(p);
+    }
+  }
+  return { changes, deletedPaths, changedDirs: Array.from(dirSet) };
+}
+
+export function buildExtractCopyPath(relPath: string, shortHash: string, attempt = 0): string {
+  const clean = assertSafeRelSegmentPath(relPath);
+  const slash = clean.lastIndexOf('/');
+  const dir = slash >= 0 ? clean.slice(0, slash + 1) : '';
+  const base = slash >= 0 ? clean.slice(slash + 1) : clean;
+  const dot = base.lastIndexOf('.');
+  const suffix = attempt > 0 ? `.${shortHash}-${attempt + 1}` : `.${shortHash}`;
+  const outName = dot > 0 ? `${base.slice(0, dot)}${suffix}${base.slice(dot)}` : `${base}${suffix}`;
+  return `${dir}${outName}`;
+}
+
+export function parseLsTreeOutput(raw: string, parentSubPath = ''): CommitTreeEntry[] {
+  const entries: CommitTreeEntry[] = [];
+  const prefix = parentSubPath ? parentSubPath.replace(/\/+$/, '') + '/' : '';
+  for (const record of raw.split('\0')) {
+    if (!record) continue;
+    const tabIdx = record.indexOf('\t');
+    if (tabIdx === -1) continue;
+    const metaPart = record.slice(0, tabIdx).trim();
+    const rawName = record.slice(tabIdx + 1);
+    if (!rawName) continue;
+    const m = /^(\d+)\s+(blob|tree|commit)\s+([0-9a-f]{7,64})\s+(\S+)$/.exec(metaPart);
+    if (!m) continue;
+    const mode = m[1];
+    const type = m[2] as CommitTreeEntry['type'];
+    const objectHash = m[3];
+    const sizeNum = m[4] === '-' ? null : parseInt(m[4], 10);
+    const fullPath = prefix ? `${prefix}${rawName}` : rawName;
+    const slash = fullPath.lastIndexOf('/');
+    const name = slash >= 0 ? fullPath.slice(slash + 1) : fullPath;
+    entries.push({
+      name,
+      path: fullPath,
+      mode,
+      type,
+      objectHash,
+      size: sizeNum !== null && Number.isFinite(sizeNum) ? sizeNum : null,
+      isDirectory: type === 'tree',
+      isSymlink: mode === '120000',
+      isSubmodule: type === 'commit' || mode === '160000'
+    });
+  }
+  entries.sort((a, b) => {
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+    return a.path.localeCompare(b.path);
+  });
+  return entries;
+}
+
+export function parseDeletedLogOutput(
+  raw: string,
+  queryLower = '',
+  maxFiles = 400,
+  maxCommitsToParse?: number
+): DeletedPathsResult {
+  const files: DeletedFileRecord[] = [];
+  const folderMap = new Map<string, DeletedFolderGroup>();
+  let scannedCommits = 0;
+  let truncated = false;
+
+  const chunks = raw.split('\x1e');
+  const availableCommits = Math.max(0, chunks.length - 1);
+  const limitCommits = typeof maxCommitsToParse === 'number' && maxCommitsToParse > 0
+    ? Math.min(availableCommits, maxCommitsToParse)
+    : availableCommits;
+  const hasMore = typeof maxCommitsToParse === 'number' && maxCommitsToParse > 0 && availableCommits > maxCommitsToParse;
+
+  for (let cIdx = 1; cIdx <= limitCommits; cIdx++) {
+    const chunk = chunks[cIdx];
+    if (!chunk) continue;
+    const tokens = chunk.split('\0');
+    const header = (tokens[0] || '').trim();
+    if (!header) continue;
+    const [commitHash, shortHash, author, dateStr, subject, parentsStr] = header.split('\x1f');
+    if (!commitHash) continue;
+    scannedCommits++;
+    const parents = (parentsStr || '').trim().split(/\s+/).filter(Boolean);
+    const parentHash = parents[0] || null;
+    const date = parseInt(dateStr || '0', 10) || 0;
+
+    let i = 1;
+    while (i < tokens.length) {
+      const statusTok = (tokens[i] || '').replace(/^\r?\n/, '').trim();
+      if (!statusTok) {
+        i++;
+        continue;
+      }
+      if (statusTok.startsWith('D')) {
+        const delPath = tokens[i + 1] || '';
+        i += 2;
+        if (!delPath) continue;
+        if (
+          queryLower &&
+          !delPath.toLowerCase().includes(queryLower) &&
+          !(subject || '').toLowerCase().includes(queryLower)
+        ) {
+          continue;
+        }
+        if (files.length >= maxFiles) {
+          truncated = true;
+          break;
+        }
+        const slash = delPath.lastIndexOf('/');
+        const folder = slash > 0 ? delPath.slice(0, slash) : '(root)';
+        const name = slash >= 0 ? delPath.slice(slash + 1) : delPath;
+        files.push({
+          path: delPath,
+          folder,
+          name,
+          commitHash,
+          shortHash: shortHash || commitHash.slice(0, 8),
+          parentHash,
+          author: author || '',
+          date,
+          subject: subject || ''
+        });
+
+        // Aggregate deleted files by their containing folder(s) within the same commit
+        if (slash > 0) {
+          const segs = delPath.split('/');
+          segs.pop(); // remove filename
+          let acc = '';
+          for (const seg of segs) {
+            acc = acc ? `${acc}/${seg}` : seg;
+            const gKey = `${commitHash}::${acc}`;
+            let grp = folderMap.get(gKey);
+            if (!grp) {
+              grp = {
+                folder: acc,
+                commitHash,
+                shortHash: shortHash || commitHash.slice(0, 8),
+                parentHash,
+                author: author || '',
+                date,
+                subject: subject || '',
+                fileCount: 0,
+                files: []
+              };
+              folderMap.set(gKey, grp);
+            }
+            grp.fileCount++;
+            if (grp.files.length < 30) grp.files.push(delPath);
+          }
+        }
+      } else if (statusTok.startsWith('R') || statusTok.startsWith('C')) {
+        i += 3;
+      } else {
+        i += 2;
+      }
+    }
+    if (truncated) break;
+  }
+
+  const folders = Array.from(folderMap.values()).sort(
+    (a, b) => b.date - a.date || b.fileCount - a.fileCount || a.folder.localeCompare(b.folder)
+  );
+
+  return { files, folders, scannedCommits, truncated, hasMore };
 }
 
 /** Folder diff: at most this many same-size-different-time files get a content check, each up to HASH_CHECK_MAX_BYTES. */
@@ -1270,6 +1562,263 @@ export class EnhancementsService {
       ok: true,
       appliedFiles: parsed.files,
       usedThreeWay: useThreeWay
+    };
+  }
+
+  /* ── 10. Commit Snapshot File Explorer (git ls-tree + immutable LRU cache) & Deleted Path Archaeology ── */
+
+  private readonly commitTreeCache = new LruCache<string, CommitTreeEntry[]>(500);
+  private readonly commitAllFilesCache = new LruCache<string, CommitTreeEntry[]>(40);
+  private readonly commitChangesCache = new LruCache<string, { changes: Record<string, string>; deletedPaths: string[]; changedDirs: string[] }>(160);
+
+  private async resolveCommitMeta(repo: string, commitRef: string): Promise<CommitTreeMeta> {
+    const cleanRef = String(commitRef || 'HEAD').trim();
+    if (!cleanRef || cleanRef.startsWith('-')) {
+      throw new Error('Invalid commit reference.');
+    }
+    const { stdout } = await this.dataSource.execGitRaw(repo, [
+      '-c', 'log.showSignature=false',
+      'log', '-1',
+      '--format=%H%x1f%h%x1f%an%x1f%at%x1f%P%x1f%s',
+      `${cleanRef}^{commit}`
+    ]);
+    const line = stdout.toString('utf8').trim();
+    if (!line) throw new Error(`Unable to resolve commit "${cleanRef}".`);
+    const [hash, shortHash, author, dateStr, parentsStr, ...subjParts] = line.split('\x1f');
+    return {
+      hash: hash.trim(),
+      shortHash: shortHash.trim(),
+      author: author || '',
+      date: parseInt(dateStr || '0', 10) || 0,
+      parents: (parentsStr || '').trim().split(/\s+/).filter(Boolean),
+      subject: subjParts.join('\x1f')
+    };
+  }
+
+  private async getCommitChangesOverlay(
+    repo: string,
+    commitHash: string
+  ): Promise<{ changes: Record<string, string>; deletedPaths: string[]; changedDirs: string[] }> {
+    const key = `${repo}\0${commitHash}`;
+    const cached = this.commitChangesCache.get(key);
+    if (cached) return cached;
+    const { stdout } = await this.dataSource.execGitRaw(
+      repo,
+      ['-c', 'core.quotepath=false', 'diff-tree', '--no-commit-id', '--name-status', '-r', '-M', '-z', '--root', commitHash],
+      { maxBytes: 8 * 1024 * 1024, ignoreExitCode: true }
+    );
+    const parsed = parseDiffNameStatusZ(stdout.toString('utf8'));
+    this.commitChangesCache.set(key, parsed);
+    return parsed;
+  }
+
+  public async listCommitTree(repo: string, commitRef: string, subPath = ''): Promise<CommitTreeListResult> {
+    const commit = await this.resolveCommitMeta(repo, commitRef);
+    const cleanSub = subPath ? assertSafeRelSegmentPath(subPath).replace(/\/+$/, '') : '';
+    const cacheKey = `${repo}\0${commit.hash}\0${cleanSub}`;
+    let entries = this.commitTreeCache.get(cacheKey);
+    const fromCache = entries !== undefined;
+    const [overlay] = await Promise.all([
+      this.getCommitChangesOverlay(repo, commit.hash),
+      entries === undefined
+        ? (async () => {
+            const treeSpec = cleanSub ? `${commit.hash}:${cleanSub}` : commit.hash;
+            const { stdout } = await this.dataSource.execGitRaw(
+              repo,
+              ['-c', 'core.quotepath=false', 'ls-tree', '-l', '-z', treeSpec],
+              { maxBytes: 8 * 1024 * 1024 }
+            );
+            entries = parseLsTreeOutput(stdout.toString('utf8'), cleanSub);
+            this.commitTreeCache.set(cacheKey, entries);
+          })()
+        : Promise.resolve()
+    ]);
+
+    const prefix = cleanSub ? `${cleanSub}/` : '';
+    const deletedInDir = overlay.deletedPaths.filter((p) => {
+      if (prefix) {
+        if (!p.startsWith(prefix)) return false;
+        return !p.slice(prefix.length).includes('/');
+      }
+      return !p.includes('/');
+    });
+
+    return {
+      commit,
+      subPath: cleanSub,
+      entries: entries || [],
+      commitChanges: overlay.changes,
+      changedDirs: overlay.changedDirs,
+      deletedInDir,
+      fromCache
+    };
+  }
+
+  public async searchCommitTree(
+    repo: string,
+    commitRef: string,
+    query: string,
+    limit = 200
+  ): Promise<CommitTreeSearchResult> {
+    const commit = await this.resolveCommitMeta(repo, commitRef);
+    const q = String(query || '').trim().toLowerCase();
+    const maxHits = Math.max(10, Math.min(1000, Math.floor(limit || 200)));
+    const allKey = `${repo}\0${commit.hash}`;
+    let allEntries = this.commitAllFilesCache.get(allKey);
+    const fromCache = allEntries !== undefined;
+    const [overlay] = await Promise.all([
+      this.getCommitChangesOverlay(repo, commit.hash),
+      allEntries === undefined
+        ? (async () => {
+            const { stdout } = await this.dataSource.execGitRaw(
+              repo,
+              ['-c', 'core.quotepath=false', 'ls-tree', '-r', '-l', '-z', commit.hash],
+              { maxBytes: 16 * 1024 * 1024 }
+            );
+            allEntries = parseLsTreeOutput(stdout.toString('utf8'), '');
+            this.commitAllFilesCache.set(allKey, allEntries);
+          })()
+        : Promise.resolve()
+    ]);
+    const list = allEntries || [];
+    const filtered = q ? list.filter((e) => e.path.toLowerCase().includes(q)) : list;
+    return {
+      commit,
+      query: String(query || '').trim(),
+      totalFiles: list.length,
+      truncated: filtered.length > maxHits,
+      matches: filtered.slice(0, maxHits),
+      commitChanges: overlay.changes,
+      fromCache
+    };
+  }
+
+  public async diffCommitAgainstWorkingTree(repo: string, commitRef: string): Promise<CommitWorkingDiffResult> {
+    const commit = await this.resolveCommitMeta(repo, commitRef);
+    const { stdout } = await this.dataSource.execGitRaw(
+      repo,
+      ['-c', 'core.quotepath=false', 'diff', '--name-status', '-z', commit.hash],
+      { maxBytes: 8 * 1024 * 1024, ignoreExitCode: true }
+    );
+    const parsed = parseDiffNameStatusZ(stdout.toString('utf8'));
+    return {
+      commitHash: commit.hash,
+      workingDiff: parsed.changes,
+      changedDirs: parsed.changedDirs,
+      changedCount: Object.keys(parsed.changes).length
+    };
+  }
+
+  public async extractPathCopyFromCommit(
+    repo: string,
+    commitRef: string,
+    targetPath: string
+  ): Promise<{ ok: true; commitHash: string; sourcePath: string; outputPath: string; bytes: number }> {
+    const commit = await this.resolveCommitMeta(repo, commitRef);
+    const safePath = assertSafeRelSegmentPath(targetPath);
+    if (safePath === '.git' || safePath.startsWith('.git/')) {
+      throw new Error(`Refusing to extract unsafe path "${targetPath}".`);
+    }
+    const { buffer } = await this.dataSource.getCommitFileBuffer(repo, commit.hash, safePath, 32 * 1024 * 1024);
+
+    // Pick a non-clobbering copy filename next to the original path (e.g. foo.<shortHash>.ts)
+    let outputPath = buildExtractCopyPath(safePath, commit.shortHash, 0);
+    for (let attempt = 0; attempt < 25; attempt++) {
+      const candidate = buildExtractCopyPath(safePath, commit.shortHash, attempt);
+      const exists = parseRemoteRepo(repo)
+        ? (await readRepoFileBuffer(repo, candidate, 1)) !== null
+        : fs.existsSync(path.resolve(repo, candidate));
+      if (!exists) {
+        outputPath = candidate;
+        break;
+      }
+      outputPath = candidate;
+    }
+
+    await writeRepoFileBuffer(repo, outputPath, buffer);
+    RepoFileWatcher.notifyPossibleRemoteChange(200);
+    return {
+      ok: true,
+      commitHash: commit.hash,
+      sourcePath: safePath,
+      outputPath,
+      bytes: buffer.length
+    };
+  }
+
+  public async restorePathFromCommit(
+    repo: string,
+    commitRef: string,
+    targetPath: string
+  ): Promise<{ ok: true; commitHash: string; path: string }> {
+    const commit = await this.resolveCommitMeta(repo, commitRef);
+    const safePath = assertSafeRelSegmentPath(targetPath);
+    if (safePath === '.git' || safePath.startsWith('.git/')) {
+      throw new Error(`Refusing to restore unsafe path "${targetPath}".`);
+    }
+    await this.dataSource.execGitRaw(repo, ['checkout', commit.hash, '--', safePath]);
+    RepoFileWatcher.notifyPossibleRemoteChange(200);
+    return { ok: true, commitHash: commit.hash, path: safePath };
+  }
+
+  public async findDeletedPaths(
+    repo: string,
+    options: {
+      query?: string;
+      pathFilter?: string;
+      ref?: string;
+      limit?: number;
+      skip?: number;
+      batchCommits?: number;
+      detectRenames?: boolean;
+    } = {}
+  ): Promise<DeletedPathsResult> {
+    const query = String(options.query || '').trim();
+    const rawPathFilter = String(options.pathFilter || '').trim();
+    const refRaw = String(options.ref || 'HEAD').trim();
+    const allBranches = refRaw === '--all' || refRaw === 'all';
+    if (!allBranches && refRaw.startsWith('-')) {
+      throw new Error('Invalid Git reference.');
+    }
+    const maxFiles = Math.max(20, Math.min(1000, Math.floor(options.limit || 300)));
+    const skip = Math.max(0, Math.floor(options.skip || 0));
+    const detectRenames = options.detectRenames !== false;
+    const defaultBatch = rawPathFilter ? 150 : 250;
+    const batchCommits = Math.max(1, Math.min(500, Math.floor(options.batchCommits || defaultBatch)));
+
+    const args = [
+      '-c', 'core.quotepath=false',
+      '-c', 'log.showSignature=false',
+      'log',
+      ...(detectRenames ? ['-M'] : ['--no-renames']),
+      '--diff-filter=D',
+      '--name-status',
+      '-z',
+      '--format=%x1e%H%x1f%h%x1f%an%x1f%at%x1f%s%x1f%P'
+    ];
+    if (skip > 0) {
+      args.push(`--skip=${skip}`);
+    }
+
+    if (rawPathFilter) {
+      const safeFilter = assertSafeRelSegmentPath(rawPathFilter);
+      args.push('--full-history', '-n', String(batchCommits + 1));
+      args.push(allBranches ? '--all' : refRaw);
+      args.push('--', safeFilter);
+    } else {
+      args.push('-n', String(batchCommits + 1));
+      args.push(allBranches ? '--all' : refRaw);
+    }
+
+    const { stdout } = await this.dataSource.execGitRaw(repo, args, {
+      maxBytes: 12 * 1024 * 1024,
+      ignoreExitCode: true
+    });
+    const parsed = parseDeletedLogOutput(stdout.toString('utf8'), query.toLowerCase(), maxFiles, batchCommits);
+    return {
+      ...parsed,
+      nextSkip: skip + parsed.scannedCommits,
+      detectRenames
     };
   }
 }

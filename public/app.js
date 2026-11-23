@@ -1082,6 +1082,13 @@
           rightHash: data.rightHash || null
         });
       }
+      else if (data.action === 'browse-commit-files') {
+        openCommitTreeTab({
+          repo: data.repo || state.activeRepo,
+          commitHash: data.commitHash || 'HEAD',
+          initialPath: data.initialPath || ''
+        });
+      }
       else if (data.action === 'locate-repo-file' && data.filePath) {
         locateFileInRepoBrowser(String(data.filePath));
       }
@@ -1098,14 +1105,22 @@
   });
 
   /* ==================== Cross-Pane Linkage (Git Map <-> Repo Files) ==================== */
-  function filterGitMapByRepoFile(entryFullPath) {
-    if (!state.activeRepo || !entryFullPath) return;
+  function relPathInActiveRepo(entryFullPath) {
+    if (!state.activeRepo || !entryFullPath) return '';
     const disp = parseRepoDisplay(state.activeRepo);
     // parseRepoDisplay gives the remote path for ssh:// repos and the folder for local ones (there's no `rawPath`)
     const repoRoot = (disp && (disp.isRemote ? disp.remotePath : disp.fullDisplay)) || state.activeRepo;
-    let rel = String(entryFullPath).replace(/\\/g, '/');
+    let rel = String(entryFullPath).replace(/\\/g, '/').replace(/\/+$/, '');
     const normRoot = String(repoRoot).replace(/\\/g, '/').replace(/\/+$/, '');
+    if (rel === normRoot) return '';
     if (rel.startsWith(normRoot + '/')) rel = rel.slice(normRoot.length + 1);
+    return rel;
+  }
+
+  function filterGitMapByRepoFile(entryFullPath) {
+    if (!state.activeRepo || !entryFullPath) return;
+    const rel = relPathInActiveRepo(entryFullPath);
+    if (!rel) return;
     if (state.wsLayout === 'tabs') activateTab('graph');
     const iframe = document.getElementById('gitMapFrame');
     if (iframe && iframe.contentWindow) {
@@ -3323,6 +3338,642 @@
     await renderFileViewerInto(panel, payload, {});
   }
 
+  /* ==================== Commit Snapshot Repository File Explorer Tab ==================== */
+  async function openCommitTreeTab(payload) {
+    const repo = (payload && payload.repo) || state.activeRepo;
+    if (!repo) {
+      showToast(tr('noActiveRepo'), 'warning');
+      return;
+    }
+    let currentRef = String((payload && (payload.commitHash || payload.ref)) || 'HEAD').trim() || 'HEAD';
+    const initialPath = String((payload && payload.initialPath) || '').replace(/^\/+|\/+$/g, '');
+    const zh = state.lang === 'zh';
+    const shortTitle = currentRef.length > 10 && /^[0-9a-f]+$/i.test(currentRef) ? currentRef.slice(0, 8) : currentRef;
+    const tabId = hashTabKey('ctree-', `${repo}:${currentRef}`);
+    const panel = createOrReplacePanelTab(
+      tabId,
+      (zh ? '提交文件 ' : 'Files @ ') + shortTitle,
+      ICONS.folderOpen
+    );
+
+    const expandedDirs = new Set();
+    const dirCache = new Map(); // subPath -> entries[]
+    const deletedByDir = new Map(); // subPath -> deleted file paths in this dir
+    let commitMeta = null;
+    let commitChanges = {};
+    let changedDirSet = new Set();
+    let workingDiffMap = null;
+    let filterMode = 'all'; // 'all' | 'commit' | 'working'
+    let selectedFile = null;
+    let searchQuery = '';
+    let searchMatches = null;
+    let searchSeq = 0;
+    let activeSearchIdx = -1;
+    let previewKeyTimer = null;
+
+    panel.innerHTML = `
+      <div class="ctree-shell">
+        <div class="ctree-topbar">
+          <div class="ctree-meta" id="ctreeMeta">
+            <span class="fb-spinner"></span><span>${escapeHtml(zh ? '正在加载提交快照目录…' : 'Loading commit tree snapshot…')}</span>
+          </div>
+          <div class="ctree-top-actions">
+            <input type="text" class="ctree-ref-input" value="${escapeHtml(currentRef)}" placeholder="${escapeHtml(zh ? '切换提交 SHA / 分支 / Tag (回车)' : 'Switch SHA / branch / tag (Enter)')}" title="${escapeHtml(zh ? '输入任意提交哈希、分支或标签名并回车，立即浏览该版本全部文件' : 'Enter any commit hash, branch, or tag and press Enter')}" />
+            <button type="button" class="mini-btn act-ctree-graph" title="${escapeHtml(zh ? '在提交图谱中定位此提交' : 'Reveal this commit in Graph')}">${ICONS.commit}<span>${escapeHtml(zh ? '图谱定位' : 'Locate')}</span></button>
+            <button type="button" class="mini-btn act-ctree-deleted" title="${escapeHtml(zh ? '查找仓库中被删除的文件或文件夹' : 'Find deleted files or folders in history')}">${ICONS.history}<span>${escapeHtml(zh ? '已删溯源' : 'Deleted')}</span></button>
+          </div>
+        </div>
+        <div class="ctree-body">
+          <aside class="ctree-tree-pane">
+            <div class="ctree-search-bar">
+              <span class="icon-slot">${ICONS.search}</span>
+              <input type="text" class="ctree-search-input" spellcheck="false" placeholder="${escapeHtml(zh ? '快速跳文件 (/ 或 ⌘K · ↑↓ 实时预览)…' : 'Quick jump files (/ or ⌘K · ↑↓ live preview)…')}" />
+              <button type="button" class="mini-icon-btn act-ctree-clear-search hidden" title="${escapeHtml(zh ? '清空搜索' : 'Clear search')}">${ICONS.close}</button>
+            </div>
+            <div class="ctree-filter-bar">
+              <button type="button" class="ctree-filter-chip active" data-fmode="all">${escapeHtml(zh ? '全部文件' : 'All Files')}</button>
+              <button type="button" class="ctree-filter-chip" data-fmode="commit" title="${escapeHtml(zh ? '仅显示本次提交增删改的文件' : 'Only files modified/added/deleted in this commit')}">${escapeHtml(zh ? '本次改动' : 'In Commit')} <span class="ctree-cnt-commit"></span></button>
+              <button type="button" class="ctree-filter-chip" data-fmode="working" title="${escapeHtml(zh ? '仅显示与当前工作区存在差异的文件' : 'Only files differing from your current working tree')}">${escapeHtml(zh ? '与工作区差异' : '≠ Working')} <span class="ctree-cnt-working"></span></button>
+            </div>
+            <div class="ctree-tree-scroll" tabindex="0"></div>
+          </aside>
+          <section class="ctree-preview-pane">
+            <div class="ctree-preview-bar hidden"></div>
+            <div class="ctree-viewer-host">
+              <div class="gm-empty-card" style="margin:24px;">
+                <div class="gm-empty-card-icon">${ICONS.folderOpen}</div>
+                <div class="gm-empty-card-title">${escapeHtml(zh ? '提交历史全量文件快照' : 'Full Repository Snapshot at Commit')}</div>
+                <div class="gm-empty-card-desc">${escapeHtml(zh ? '在左侧展开任意目录或直接输入路径关键字（支持 ↑ / ↓ 方向键实时预览），本次提交变动的文件会自动标注状态徽标；支持与当前工作区对比、打开时光机、非破坏性另存副本或一键还原。' : 'Expand any folder or type to jump (↑ / ↓ live-previews). Files changed in this commit are badged inline; diff against working tree, open Time Machine, extract a safe copy, or restore.')}</div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    `;
+
+    const metaEl = panel.querySelector('#ctreeMeta');
+    const refInput = panel.querySelector('.ctree-ref-input');
+    const searchInput = panel.querySelector('.ctree-search-input');
+    const clearSearchBtn = panel.querySelector('.act-ctree-clear-search');
+    const treeScroll = panel.querySelector('.ctree-tree-scroll');
+    const previewBar = panel.querySelector('.ctree-preview-bar');
+    const viewerHost = panel.querySelector('.ctree-viewer-host');
+    const commitCntEl = panel.querySelector('.ctree-cnt-commit');
+    const workingCntEl = panel.querySelector('.ctree-cnt-working');
+
+    const highlightQueryMatch = (text, q) => {
+      if (!q) return escapeHtml(text);
+      const lower = text.toLowerCase();
+      const qLower = q.toLowerCase();
+      const idx = lower.indexOf(qLower);
+      if (idx === -1) return escapeHtml(text);
+      return escapeHtml(text.slice(0, idx))
+        + `<mark class="ctree-hl">${escapeHtml(text.slice(idx, idx + q.length))}</mark>`
+        + escapeHtml(text.slice(idx + q.length));
+    };
+
+    const iconForTreeEntry = (ent) => {
+      if (ent.isDirectory) return expandedDirs.has(ent.path) ? ICONS.folderOpen : ICONS.folder;
+      if (ent.isSubmodule) return ICONS.gitRepo;
+      if (ent.isSymlink) return ICONS.link;
+      if (/\.(png|jpe?g|gif|webp|svg|ico)$/i.test(ent.name)) return ICONS.fileImage;
+      if (/\.(zip|tar|gz|tgz|7z|rar)$/i.test(ent.name)) return ICONS.fileArchive;
+      return ICONS.fileCode;
+    };
+
+    const renderHeader = () => {
+      if (!commitMeta) return;
+      const dt = commitMeta.date ? new Date(commitMeta.date * 1000).toLocaleString() : '';
+      metaEl.innerHTML = `
+        <span class="ctree-sha-pill" title="${escapeHtml(commitMeta.hash)}">${ICONS.commit}<code>${escapeHtml(commitMeta.shortHash)}</code></span>
+        <strong class="ctree-subj" title="${escapeHtml(commitMeta.subject)}">${escapeHtml(commitMeta.subject)}</strong>
+        <span class="ctree-author">${escapeHtml(commitMeta.author)}${dt ? ' · ' + escapeHtml(dt) : ''}</span>
+      `;
+      const tabBtn = document.querySelector(`.ws-tab[data-tab-id="${tabId}"] .ws-tab-title`);
+      if (tabBtn) tabBtn.textContent = (zh ? '提交文件 ' : 'Files @ ') + commitMeta.shortHash;
+      const changedTotal = Object.keys(commitChanges || {}).length;
+      if (commitCntEl) commitCntEl.textContent = changedTotal > 0 ? `(${changedTotal})` : '';
+      if (workingCntEl) {
+        workingCntEl.textContent = workingDiffMap !== null ? `(${Object.keys(workingDiffMap).length})` : '';
+      }
+    };
+
+    const loadDir = async (subPath) => {
+      if (dirCache.has(subPath)) return dirCache.get(subPath);
+      const res = await rpc('commit:tree', { repo, commitHash: currentRef, subPath });
+      if (res.commit) {
+        commitMeta = res.commit;
+        currentRef = res.commit.hash;
+        refInput.value = res.commit.shortHash;
+      }
+      if (res.commitChanges) commitChanges = res.commitChanges;
+      if (Array.isArray(res.changedDirs)) changedDirSet = new Set(res.changedDirs);
+      deletedByDir.set(subPath, Array.isArray(res.deletedInDir) ? res.deletedInDir : []);
+      renderHeader();
+      dirCache.set(subPath, res.entries || []);
+      return res.entries || [];
+    };
+
+    const previewFile = async (entry, optsPreview) => {
+      if (!entry || !commitMeta) return;
+      const isDeletedGhost = !!(optsPreview && optsPreview.isDeletedGhost);
+      const effectiveCommit = isDeletedGhost ? (commitMeta.parents && commitMeta.parents[0]) : commitMeta.hash;
+      const effectiveShort = effectiveCommit ? effectiveCommit.slice(0, 7) : commitMeta.shortHash;
+      selectedFile = { ...entry, isDeletedGhost };
+      renderTree();
+
+      if (isDeletedGhost && !effectiveCommit) {
+        previewBar.classList.add('hidden');
+        viewerHost.innerHTML = `<div class="gm-empty-card" style="margin:24px;"><div class="gm-empty-card-title">${escapeHtml(zh ? '该文件在此次提交中已删除且无父提交快照' : 'Deleted without parent snapshot')}</div></div>`;
+        return;
+      }
+
+      if (entry.isSubmodule) {
+        previewBar.classList.add('hidden');
+        viewerHost.innerHTML = `<div class="gm-empty-card" style="margin:24px;"><div class="gm-empty-card-icon">${ICONS.gitRepo}</div><div class="gm-empty-card-title">${escapeHtml(zh ? 'Git 子模块引用 (Submodule)' : 'Git Submodule Reference')}</div><div class="gm-empty-card-desc">${escapeHtml(entry.path)} @ <code>${escapeHtml(entry.objectHash)}</code></div></div>`;
+        return;
+      }
+
+      const stCode = commitChanges[entry.path] || (isDeletedGhost ? 'D' : '');
+      previewBar.classList.remove('hidden');
+      previewBar.innerHTML = `
+        <span class="ctree-preview-path" title="${escapeHtml(entry.path)}">
+          ${stCode ? `<span class="scm-status-badge st-${escapeHtml(stCode)}">${escapeHtml(stCode)}</span>` : ''}
+          ${escapeHtml(entry.path)}
+          ${isDeletedGhost ? `<span class="gm-badge warn">${escapeHtml(zh ? `已删除 · 展示删前 (${effectiveShort})` : `Deleted · Pre-delete (${effectiveShort})`)}</span>` : ''}
+          ${entry.size != null ? ` <span class="ctree-size-tag">${escapeHtml(formatBytes(entry.size))}</span>` : ''}
+        </span>
+        <div class="ctree-preview-actions">
+          <button type="button" class="mini-btn act-cp-diff">${ICONS.diff}<span>${escapeHtml(zh ? '与工作区对比' : 'Diff Working')}</span></button>
+          <button type="button" class="mini-btn act-cp-tm">${ICONS.clock}<span>${escapeHtml(zh ? '时光机' : 'Time Machine')}</span></button>
+          <button type="button" class="mini-btn act-cp-vfh">${ICONS.chart}<span>${escapeHtml(zh ? '文件演进' : 'Visual History')}</span></button>
+          <button type="button" class="mini-btn act-cp-full">${ICONS.fileCode}<span>${escapeHtml(zh ? '独立标签页' : 'Open Tab')}</span></button>
+          <button type="button" class="mini-btn act-cp-extract" title="${escapeHtml(zh ? '非破坏性另存为副本（如 foo.' + effectiveShort + '.ts），不覆盖当前工作区改动' : 'Extract a non-destructive copy alongside the file without overwriting working tree')}">${ICONS.download}<span>${escapeHtml(zh ? '另存副本' : 'Extract Copy')}</span></button>
+          <button type="button" class="mini-btn danger act-cp-restore" title="${escapeHtml(zh ? '将该提交版本的此文件检出还原到当前工作区' : 'Restore this file version to your working tree')}">${ICONS.undo}<span>${escapeHtml(zh ? '还原到工作区' : 'Restore')}</span></button>
+        </div>
+      `;
+
+      previewBar.querySelector('.act-cp-diff').addEventListener('click', () => {
+        openDiffTab({
+          repo,
+          fromHash: effectiveCommit,
+          toHash: '*',
+          oldFilePath: entry.path,
+          newFilePath: entry.path,
+          type: 'M',
+          title: `${entry.name} (${effectiveShort} ↔ ${zh ? '工作区' : 'Working'})`
+        });
+      });
+      previewBar.querySelector('.act-cp-tm').addEventListener('click', () => {
+        rpc('file:timeMachine', { repo, filePath: entry.path, commitHash: effectiveCommit }).catch((e) => showToast(e.message, 'error'));
+      });
+      previewBar.querySelector('.act-cp-vfh').addEventListener('click', () => {
+        rpc('file:visualHistory', { repo, filePath: entry.path, commitHash: effectiveCommit }).catch((e) => showToast(e.message, 'error'));
+      });
+      previewBar.querySelector('.act-cp-full').addEventListener('click', () => {
+        openFileTab({
+          repo,
+          filePath: entry.path,
+          commit: effectiveCommit,
+          title: `${entry.name} (${effectiveShort})`
+        });
+      });
+      previewBar.querySelector('.act-cp-extract').addEventListener('click', async () => {
+        try {
+          const res = await rpc('commit:extractCopy', { repo, commitHash: effectiveCommit, path: entry.path });
+          showToast(
+            zh ? `已提取副本：${res.outputPath}` : `Extracted copy: ${res.outputPath}`,
+            'info',
+            {
+              actionLabel: zh ? '打开副本' : 'Open Copy',
+              onAction: () => openFileTab({ repo, filePath: res.outputPath, title: res.outputPath.split('/').pop() })
+            }
+          );
+          window.GitMapFeatures?.refreshAllStatusesAndContext?.();
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      });
+      bindTwoStepDangerButton(previewBar.querySelector('.act-cp-restore'), {
+        armedLabel: zh ? '确认覆盖还原' : 'Confirm Restore',
+        onConfirm: async () => {
+          try {
+            await rpc('commit:restorePath', { repo, commitHash: effectiveCommit, path: entry.path });
+            showToast(zh ? `已从 ${effectiveShort} 还原文件：${entry.path}` : `Restored ${entry.path} from ${effectiveShort}`, 'info', {
+              actionLabel: zh ? '打开暂存区' : 'Open SCM',
+              onAction: () => openScmModal()
+            });
+            window.GitMapFeatures?.refreshAllStatusesAndContext?.();
+          } catch (err) {
+            showToast(err.message, 'error');
+          }
+        }
+      });
+
+      await renderFileViewerInto(viewerHost, {
+        repo,
+        filePath: entry.path,
+        commit: effectiveCommit,
+        title: `${entry.name} (${effectiveShort})`
+      }, { isInlinePreview: false });
+    };
+
+    const scheduleKeyPreview = (ent, optsPreview) => {
+      if (previewKeyTimer) clearTimeout(previewKeyTimer);
+      previewKeyTimer = setTimeout(() => {
+        void previewFile(ent, optsPreview);
+      }, 90);
+    };
+
+    const getFlatFilteredEntries = () => {
+      if (searchQuery && searchMatches !== null) {
+        let list = searchMatches.matches || [];
+        if (filterMode === 'commit') list = list.filter((e) => !!commitChanges[e.path]);
+        else if (filterMode === 'working' && workingDiffMap) list = list.filter((e) => !!workingDiffMap[e.path]);
+        return list.map((e) => ({ entry: e, isDeletedGhost: false, status: commitChanges[e.path] || '' }));
+      }
+      if (filterMode === 'commit') {
+        const entries = Object.entries(commitChanges || {}).sort((a, b) => a[0].localeCompare(b[0]));
+        return entries.map(([p, st]) => ({
+          entry: { name: p.split('/').pop() || p, path: p, isDirectory: false, size: null },
+          isDeletedGhost: st === 'D',
+          status: st
+        }));
+      }
+      if (filterMode === 'working' && workingDiffMap) {
+        const entries = Object.entries(workingDiffMap).sort((a, b) => a[0].localeCompare(b[0]));
+        return entries.map(([p, st]) => ({
+          entry: { name: p.split('/').pop() || p, path: p, isDirectory: false, size: null },
+          isDeletedGhost: st === 'A', // Added in working tree => did not exist in this commit
+          status: st,
+          workingOnlyAdd: st === 'A'
+        }));
+      }
+      return null;
+    };
+
+    const renderTree = () => {
+      const flatItems = getFlatFilteredEntries();
+      if (flatItems !== null) {
+        if (flatItems.length === 0) {
+          const emptyMsg = searchQuery
+            ? (zh ? '该提交快照中没有匹配的文件。' : 'No matching files in this commit snapshot.')
+            : filterMode === 'working'
+              ? (zh ? '此提交快照与当前工作区完全一致，无差异文件。' : 'Commit snapshot matches working tree with no differences.')
+              : (zh ? '此提交没有文件变动记录。' : 'No changed files in this commit.');
+          treeScroll.innerHTML = `<div class="scm-empty" style="padding:14px;">${escapeHtml(emptyMsg)}</div>`;
+          return;
+        }
+        const summaryText = searchQuery && searchMatches
+          ? (zh ? `匹配 ${flatItems.length}${searchMatches.truncated ? '+' : ''} / 全仓 ${searchMatches.totalFiles} 个文件 · ↑↓ 实时预览` : `${flatItems.length}${searchMatches.truncated ? '+' : ''} of ${searchMatches.totalFiles} files · ↑↓ live preview`)
+          : filterMode === 'working'
+            ? (zh ? `与当前工作区共有 ${flatItems.length} 个差异文件` : `${flatItems.length} file(s) differ from working tree`)
+            : (zh ? `本次提交共变动 ${flatItems.length} 个文件` : `${flatItems.length} file(s) changed in this commit`);
+
+        treeScroll.innerHTML = `
+          <div class="ctree-search-summary">${escapeHtml(summaryText)}</div>
+          ${flatItems.map((item, idx) => {
+            const ent = item.entry;
+            const isSel = selectedFile && selectedFile.path === ent.path;
+            const stBadge = filterMode === 'working'
+              ? `<span class="ctree-wt-tag">${escapeHtml(item.workingOnlyAdd ? (zh ? '仅工作区' : 'WT+') : '≠WT')}</span>`
+              : (item.status ? `<span class="scm-status-badge st-${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>` : '');
+            return `
+              <button type="button" class="ctree-row${isSel ? ' active' : ''}${item.isDeletedGhost ? ' is-deleted-ghost' : ''}" data-flat-idx="${idx}" title="${escapeHtml(ent.path)}">
+                <span class="icon-slot">${iconForTreeEntry(ent)}</span>
+                <span class="ctree-row-name">${highlightQueryMatch(ent.path, searchQuery)}</span>
+                ${stBadge}
+                ${ent.size != null ? `<span class="ctree-row-size">${escapeHtml(formatBytes(ent.size))}</span>` : ''}
+              </button>
+            `;
+          }).join('')}
+        `;
+        treeScroll.querySelectorAll('[data-flat-idx]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const idx = Number(btn.getAttribute('data-flat-idx'));
+            activeSearchIdx = idx;
+            const item = flatItems[idx];
+            if (!item) return;
+            if (item.workingOnlyAdd) {
+              openFileTab({ repo, filePath: item.entry.path, title: item.entry.name });
+              return;
+            }
+            void previewFile(item.entry, { isDeletedGhost: item.isDeletedGhost });
+          });
+        });
+        return;
+      }
+
+      const rowsHtml = [];
+      const walkRender = (subPath, depth) => {
+        const list = dirCache.get(subPath);
+        if (!list) return;
+        for (const ent of list) {
+          const isExp = ent.isDirectory && expandedDirs.has(ent.path);
+          const isSel = !ent.isDirectory && selectedFile && !selectedFile.isDeletedGhost && selectedFile.path === ent.path;
+          const stCode = !ent.isDirectory ? (commitChanges[ent.path] || '') : '';
+          const dirHasChange = ent.isDirectory && changedDirSet.has(ent.path);
+          const wtDiff = !ent.isDirectory && workingDiffMap && workingDiffMap[ent.path];
+          rowsHtml.push(`
+            <div class="ctree-row${isSel ? ' active' : ''}${ent.isDirectory ? ' is-dir' : ''}" style="padding-left:${8 + depth * 14}px" data-path="${escapeHtml(ent.path)}" data-dir="${ent.isDirectory ? '1' : '0'}">
+              <span class="ctree-chev">${ent.isDirectory ? (isExp ? ICONS.chevronDown : ICONS.chevronRight) : ''}</span>
+              <span class="icon-slot">${iconForTreeEntry(ent)}</span>
+              <span class="ctree-row-name" title="${escapeHtml(ent.path)}">${escapeHtml(ent.name)}</span>
+              ${dirHasChange ? `<span class="ctree-dir-dot" title="${escapeHtml(zh ? '此目录下包含本次提交改动的文件' : 'Contains files changed in this commit')}"></span>` : ''}
+              ${stCode ? `<span class="scm-status-badge st-${escapeHtml(stCode)}" title="${escapeHtml(zh ? '本次提交变动' : 'Changed in this commit')}">${escapeHtml(stCode)}</span>` : ''}
+              ${wtDiff ? `<span class="ctree-wt-tag" title="${escapeHtml(zh ? '与当前工作区有差异' : 'Differs from working tree')}">≠WT</span>` : ''}
+              ${ent.isDirectory ? `<button type="button" class="ctree-dir-restore" data-rdir="${escapeHtml(ent.path)}" title="${escapeHtml(zh ? `从 ${commitMeta?.shortHash || ''} 还原整个目录到工作区` : `Restore folder ${ent.path} to working tree`)}">${ICONS.undo}</button>` : ''}
+              ${!ent.isDirectory && ent.size != null ? `<span class="ctree-row-size">${escapeHtml(formatBytes(ent.size))}</span>` : ''}
+            </div>
+          `);
+          if (isExp) {
+            if (dirCache.has(ent.path)) {
+              walkRender(ent.path, depth + 1);
+            } else {
+              rowsHtml.push(`<div class="ctree-row-loading" style="padding-left:${24 + depth * 14}px">${escapeHtml(zh ? '加载中…' : 'Loading…')}</div>`);
+            }
+          }
+        }
+        // Append deleted-in-this-commit ghost items right inside this directory
+        const delItems = deletedByDir.get(subPath) || [];
+        for (const dp of delItems) {
+          const dName = dp.split('/').pop() || dp;
+          const isSel = selectedFile && selectedFile.isDeletedGhost && selectedFile.path === dp;
+          rowsHtml.push(`
+            <div class="ctree-row is-deleted-ghost${isSel ? ' active' : ''}" style="padding-left:${8 + depth * 14}px" data-ghost-path="${escapeHtml(dp)}" title="${escapeHtml(dp + (zh ? '（在此提交中被删除，点击查看删前快照）' : ' (deleted in this commit — click to inspect pre-delete snapshot)'))}">
+              <span class="ctree-chev"></span>
+              <span class="icon-slot">${ICONS.fileCode}</span>
+              <span class="ctree-row-name">${escapeHtml(dName)}</span>
+              <span class="scm-status-badge st-D">D</span>
+            </div>
+          `);
+        }
+      };
+      walkRender('', 0);
+      treeScroll.innerHTML = rowsHtml.length > 0
+        ? rowsHtml.join('')
+        : `<div class="scm-empty" style="padding:14px;">${escapeHtml(zh ? '此提交快照目录为空。' : 'Empty tree at this commit.')}</div>`;
+
+      treeScroll.querySelectorAll('.ctree-dir-restore').forEach((btn) => {
+        const dirPath = btn.getAttribute('data-rdir');
+        btn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          if (!commitMeta || !dirPath) return;
+          const ok = await confirmDialog(
+            zh ? '还原历史目录到工作区' : 'Restore Folder from Commit',
+            zh ? `确定将提交 ${commitMeta.shortHash} 时的目录「${dirPath}」完整检出还原到当前工作区？（同名文件会被覆盖）` : `Restore folder "${dirPath}" from commit ${commitMeta.shortHash} into your working tree?`,
+            zh ? '确认还原' : 'Restore Folder',
+            true
+          );
+          if (!ok) return;
+          try {
+            await rpc('commit:restorePath', { repo, commitHash: commitMeta.hash, path: dirPath });
+            showToast(zh ? `已从 ${commitMeta.shortHash} 还原目录：${dirPath}` : `Restored folder ${dirPath} from ${commitMeta.shortHash}`, 'info', {
+              actionLabel: zh ? '打开暂存区' : 'Open SCM',
+              onAction: () => openScmModal()
+            });
+            window.GitMapFeatures?.refreshAllStatusesAndContext?.();
+          } catch (err) {
+            showToast(err.message, 'error');
+          }
+        });
+      });
+
+      treeScroll.querySelectorAll('.ctree-row[data-ghost-path]').forEach((row) => {
+        row.addEventListener('click', () => {
+          const dp = row.getAttribute('data-ghost-path');
+          if (!dp) return;
+          void previewFile({ name: dp.split('/').pop() || dp, path: dp, isDirectory: false, size: null }, { isDeletedGhost: true });
+        });
+      });
+
+      treeScroll.querySelectorAll('.ctree-row[data-path]').forEach((row) => {
+        row.addEventListener('click', async () => {
+          const p = row.getAttribute('data-path');
+          const isDir = row.getAttribute('data-dir') === '1';
+          if (isDir) {
+            if (expandedDirs.has(p)) {
+              expandedDirs.delete(p);
+              renderTree();
+            } else {
+              expandedDirs.add(p);
+              renderTree();
+              try {
+                await loadDir(p);
+                renderTree();
+              } catch (err) {
+                expandedDirs.delete(p);
+                renderTree();
+                showToast(err.message, 'error');
+              }
+            }
+          } else {
+            const parentDir = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+            const list = dirCache.get(parentDir) || [];
+            const ent = list.find((e) => e.path === p);
+            if (ent) void previewFile(ent);
+          }
+        });
+      });
+    };
+
+    const loadRootAndInit = async (targetPath) => {
+      dirCache.clear();
+      deletedByDir.clear();
+      expandedDirs.clear();
+      commitChanges = {};
+      changedDirSet = new Set();
+      workingDiffMap = null;
+      filterMode = 'all';
+      panel.querySelectorAll('.ctree-filter-chip').forEach((b) => b.classList.toggle('active', b.getAttribute('data-fmode') === 'all'));
+      selectedFile = null;
+      searchMatches = null;
+      searchQuery = '';
+      activeSearchIdx = -1;
+      searchInput.value = '';
+      clearSearchBtn.classList.add('hidden');
+      treeScroll.innerHTML = `<div class="browser-empty-state"><span class="fb-spinner"></span>${escapeHtml(zh ? '正在读取目录树…' : 'Loading tree…')}</div>`;
+      try {
+        await loadDir('');
+        if (targetPath) {
+          const segs = targetPath.split('/').filter(Boolean);
+          let cur = '';
+          let targetFileEntry = null;
+          for (let i = 0; i < segs.length; i++) {
+            const list = dirCache.get(cur) || [];
+            const nextPath = cur ? `${cur}/${segs[i]}` : segs[i];
+            const found = list.find((e) => e.path === nextPath);
+            if (!found) break;
+            if (found.isDirectory) {
+              expandedDirs.add(found.path);
+              await loadDir(found.path);
+              cur = found.path;
+            } else {
+              targetFileEntry = found;
+              break;
+            }
+          }
+          renderTree();
+          if (targetFileEntry) void previewFile(targetFileEntry);
+        } else {
+          renderTree();
+        }
+      } catch (err) {
+        metaEl.innerHTML = `<span class="error-text">${escapeHtml(err.message)}</span>`;
+        treeScroll.innerHTML = `<div class="browser-empty-state error-text">${escapeHtml(err.message)}</div>`;
+      }
+    };
+
+    panel.querySelectorAll('.ctree-filter-chip').forEach((chip) => {
+      chip.addEventListener('click', async () => {
+        const nextMode = chip.getAttribute('data-fmode') || 'all';
+        filterMode = nextMode;
+        activeSearchIdx = -1;
+        panel.querySelectorAll('.ctree-filter-chip').forEach((b) => b.classList.toggle('active', b === chip));
+        if (nextMode === 'working' && workingDiffMap === null && commitMeta) {
+          treeScroll.innerHTML = `<div class="browser-empty-state"><span class="fb-spinner"></span>${escapeHtml(zh ? '正在比对与当前工作区差异…' : 'Comparing with working tree…')}</div>`;
+          try {
+            const res = await rpc('commit:diffWorking', { repo, commitHash: commitMeta.hash });
+            workingDiffMap = res.workingDiff || {};
+            renderHeader();
+          } catch (err) {
+            showToast(err.message, 'error');
+            workingDiffMap = {};
+          }
+        }
+        renderTree();
+      });
+    });
+
+    let searchTimer = null;
+    searchInput.addEventListener('input', () => {
+      searchQuery = searchInput.value.trim();
+      activeSearchIdx = -1;
+      clearSearchBtn.classList.toggle('hidden', !searchQuery);
+      if (searchTimer) clearTimeout(searchTimer);
+      if (!searchQuery) {
+        searchMatches = null;
+        renderTree();
+        return;
+      }
+      searchTimer = setTimeout(async () => {
+        const mySeq = ++searchSeq;
+        treeScroll.innerHTML = `<div class="browser-empty-state"><span class="fb-spinner"></span>${escapeHtml(zh ? '正在检索提交内全仓文件…' : 'Searching commit tree…')}</div>`;
+        try {
+          const res = await rpc('commit:searchTree', { repo, commitHash: currentRef, query: searchQuery, limit: 250 });
+          if (mySeq !== searchSeq) return;
+          if (res.commitChanges) commitChanges = res.commitChanges;
+          searchMatches = res;
+          activeSearchIdx = 0;
+          renderTree();
+          const flat = getFlatFilteredEntries();
+          if (flat && flat[0] && !flat[0].workingOnlyAdd) {
+            scheduleKeyPreview(flat[0].entry, { isDeletedGhost: flat[0].isDeletedGhost });
+          }
+        } catch (err) {
+          if (mySeq !== searchSeq) return;
+          treeScroll.innerHTML = `<div class="browser-empty-state error-text">${escapeHtml(err.message)}</div>`;
+        }
+      }, 150);
+    });
+    searchInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        searchInput.value = '';
+        searchQuery = '';
+        searchMatches = null;
+        activeSearchIdx = -1;
+        clearSearchBtn.classList.add('hidden');
+        renderTree();
+        return;
+      }
+      const flat = getFlatFilteredEntries();
+      if (!flat || flat.length === 0) return;
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        const delta = ev.key === 'ArrowDown' ? 1 : -1;
+        activeSearchIdx = activeSearchIdx < 0 ? 0 : (activeSearchIdx + delta + flat.length) % flat.length;
+        const item = flat[activeSearchIdx];
+        if (item && !item.workingOnlyAdd) {
+          selectedFile = { ...item.entry, isDeletedGhost: item.isDeletedGhost };
+          renderTree();
+          treeScroll.querySelector(`[data-flat-idx="${activeSearchIdx}"]`)?.scrollIntoView({ block: 'nearest' });
+          scheduleKeyPreview(item.entry, { isDeletedGhost: item.isDeletedGhost });
+        }
+      } else if (ev.key === 'Enter' && activeSearchIdx >= 0 && flat[activeSearchIdx]) {
+        ev.preventDefault();
+        const item = flat[activeSearchIdx];
+        if (item.workingOnlyAdd) openFileTab({ repo, filePath: item.entry.path, title: item.entry.name });
+        else void previewFile(item.entry, { isDeletedGhost: item.isDeletedGhost });
+      }
+    });
+    treeScroll.addEventListener('keydown', (ev) => {
+      const rows = Array.from(treeScroll.querySelectorAll('.ctree-row'));
+      if (rows.length === 0) return;
+      const curIdx = rows.findIndex((r) => r.classList.contains('active'));
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        const nextIdx = curIdx < 0 ? 0 : (curIdx + (ev.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+        const target = rows[nextIdx];
+        if (!target) return;
+        target.scrollIntoView({ block: 'nearest' });
+        if (target.getAttribute('data-dir') !== '1') {
+          target.click();
+        } else {
+          rows.forEach((r) => r.classList.remove('active'));
+          target.classList.add('active');
+        }
+      } else if (ev.key === 'ArrowRight' && curIdx >= 0 && rows[curIdx].getAttribute('data-dir') === '1') {
+        const p = rows[curIdx].getAttribute('data-path');
+        if (p && !expandedDirs.has(p)) rows[curIdx].click();
+      } else if (ev.key === 'ArrowLeft' && curIdx >= 0 && rows[curIdx].getAttribute('data-dir') === '1') {
+        const p = rows[curIdx].getAttribute('data-path');
+        if (p && expandedDirs.has(p)) rows[curIdx].click();
+      } else if (ev.key === 'Enter' && curIdx >= 0) {
+        ev.preventDefault();
+        rows[curIdx].click();
+      }
+    });
+    panel.addEventListener('keydown', (ev) => {
+      if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 'k') {
+        ev.preventDefault();
+        searchInput.focus();
+        searchInput.select();
+      } else if (ev.key === '/' && document.activeElement !== searchInput && document.activeElement !== refInput && !ev.target.closest('input, textarea')) {
+        ev.preventDefault();
+        searchInput.focus();
+      }
+    });
+    clearSearchBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      searchQuery = '';
+      searchMatches = null;
+      activeSearchIdx = -1;
+      clearSearchBtn.classList.add('hidden');
+      renderTree();
+    });
+
+    refInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        const nextRef = refInput.value.trim();
+        if (!nextRef) return;
+        currentRef = nextRef;
+        void loadRootAndInit('');
+      }
+    });
+
+    panel.querySelector('.act-ctree-graph').addEventListener('click', () => {
+      if (!commitMeta) return;
+      activateTab('graph');
+      sendWs({ type: 'graph:message', payload: { command: 'scrollToCommit', hash: commitMeta.hash } });
+    });
+    panel.querySelector('.act-ctree-deleted').addEventListener('click', () => {
+      window.GitMapRemoteAndGitUI?.openDeletedFilesModal?.();
+    });
+
+    await loadRootAndInit(initialPath);
+  }
+
   async function renderFileViewerInto(panel, payload, extraOpts) {
     const opts = extraOpts || {};
     if (typeof panel.__disposeViewer === 'function') {
@@ -3382,6 +4033,10 @@
 
       let showBlame = false;
       let blameData = fileRes.blame || null;
+      let blameIgnoreWs = localStorage.getItem('gitmap.blame.ignoreWs') === '1';
+      let blameDetectMoves = localStorage.getItem('gitmap.blame.detectMoves') === '1';
+      let blameStack = [];
+      let activeBlameView = null;
       let selStart = payload.lines ? payload.lines.start : null;
       let selEnd = payload.lines ? payload.lines.end : null;
       let wrapLines = localStorage.getItem('gitmap.viewer.wrapLines') !== '0';
@@ -3502,8 +4157,8 @@
                 <button type="button" class="mini-btn act-blame ${showBlame ? 'primary' : ''}">${escapeHtml(tr('toggleBlame'))}</button>
                 <button type="button" class="mini-btn act-line-hist">${escapeHtml(tr('lineHistoryGraph'))}</button>
                 <button type="button" class="mini-btn act-file-hist">${escapeHtml(tr('fileHistoryGraph'))}</button>
-                ${opts.isInlinePreview ? '' : `<button type="button" class="mini-btn act-vfh">${escapeHtml(tr('visualHistory'))}</button>
-                <button type="button" class="mini-btn act-ftm">${ICONS.clock}<span>${escapeHtml(tr('timeMachine'))}</span></button>`}
+                ${opts.isInlinePreview ? '' : `<button type="button" class="mini-btn act-vfh">${escapeHtml(tr('visualHistory'))}</button>`}
+                <button type="button" class="mini-btn act-ftm" title="${escapeHtml(tr('timeMachine'))}">${ICONS.clock}<span>${escapeHtml(tr('timeMachine'))}</span></button>
               ` : ''}
               ${opts.isInlinePreview ? `
                 <button type="button" class="mini-btn act-promote-tab" title="${escapeHtml(zh ? '在独立标签页中全屏打开' : 'Open in Full Tab')}">${ICONS.layoutTabs}<span>${escapeHtml(zh ? '标签页打开' : 'Open Tab')}</span></button>
@@ -3511,6 +4166,29 @@
               ` : ''}
             </div>
           </div>
+          ${showBlame && hasRepo && !isEditing ? `
+            <div class="blame-control-strip">
+              <div class="blame-strip-left">
+                <span class="gm-badge info">${escapeHtml(activeBlameView
+                  ? (zh ? `Blame 穿透第 ${blameStack.length} 层 · @ ${activeBlameView.commit.slice(0, 7)}` : `Blame depth ${blameStack.length} · @ ${activeBlameView.commit.slice(0, 7)}`)
+                  : (zh ? `Blame 基准：${fileRes.commit ? fileRes.commit.slice(0, 7) : '当前工作区'}` : `Blame @ ${fileRes.commit ? fileRes.commit.slice(0, 7) : 'Working Tree'}`))}</span>
+                ${activeBlameView && activeBlameView.filePath !== fileRes.filePath ? `<span class="blame-strip-note" title="${escapeHtml(activeBlameView.filePath)}">${escapeHtml(zh ? `原路径：${activeBlameView.filePath}` : `Path: ${activeBlameView.filePath}`)}</span>` : ''}
+                ${activeBlameView ? `<span class="blame-strip-note">${escapeHtml(zh ? `已穿透 ${activeBlameView.skippedHash.slice(0, 7)}` : `Skipped ${activeBlameView.skippedHash.slice(0, 7)}`)}</span>` : `<span class="blame-strip-note">${escapeHtml(zh ? '悬停某行 Blame 点击 ↩ 可穿透格式化/重构提交追查原作者' : 'Hover any blame line and click ↩ to re-blame before formatting/refactor commits')}</span>`}
+              </div>
+              <div class="blame-strip-right">
+                ${blameStack.length > 0 ? `<button type="button" class="mini-btn act-blame-pop">${escapeHtml(zh ? '← 返回上一层' : '← Step Back')}</button>
+                <button type="button" class="mini-btn act-blame-root">${escapeHtml(zh ? '回到初始' : 'Reset')}</button>` : ''}
+                <label class="inline-check" title="${escapeHtml(zh ? '忽略纯空白/缩进改动 (git blame -w)' : 'Ignore whitespace/indentation changes (git blame -w)')}">
+                  <input type="checkbox" class="blame-ws-toggle" ${blameIgnoreWs ? 'checked' : ''} />
+                  <span>${escapeHtml(zh ? '忽略空白 (-w)' : 'Ignore WS (-w)')}</span>
+                </label>
+                <label class="inline-check" title="${escapeHtml(zh ? '追踪文件内移动或跨文件复制的代码 (git blame -M -C)' : 'Detect lines moved or copied across files (git blame -M -C)')}">
+                  <input type="checkbox" class="blame-mc-toggle" ${blameDetectMoves ? 'checked' : ''} />
+                  <span>${escapeHtml(zh ? '追踪搬运 (-M -C)' : 'Moves (-M -C)')}</span>
+                </label>
+              </div>
+            </div>
+          ` : ''}
           <div class="diff-scroll-area"></div>
         `;
 
@@ -3628,11 +4306,14 @@
           });
           if (rendered) return;
         }
-        const normalizedContent = fileRes.content.replace(/\r\n/g, '\n');
+        const effectiveContent = activeBlameView ? activeBlameView.content : fileRes.content;
+        const effectiveFilePath = activeBlameView ? activeBlameView.filePath : fileRes.filePath;
+        const effectiveBlame = activeBlameView ? activeBlameView.blameData : blameData;
+        const normalizedContent = effectiveContent.replace(/\r\n/g, '\n');
         const lines = normalizedContent.split('\n');
         const isVirtual = lines.length > 1500;
         const ROW_H = 20;
-        const fileSyntax = lines.length <= 20000 ? getSyntaxHighlighter(fileRes.filePath) : null;
+        const fileSyntax = lines.length <= 20000 ? getSyntaxHighlighter(effectiveFilePath) : null;
         const syntaxLines = fileSyntax !== null ? fileSyntax.highlight(normalizedContent) : null;
 
         const buildRowHtml = (idx, prevBlameHash) => {
@@ -3641,15 +4322,18 @@
           const isSelected = selStart !== null && selEnd !== null && lineNo >= selStart && lineNo <= selEnd;
           let blameHtml = '';
           let nextBlameHash = prevBlameHash;
-          if (showBlame && blameData && blameData.lines && blameData.lines[idx]) {
-            const bl = blameData.lines[idx];
-            const bc = blameData.commits[bl.hash];
+          if (showBlame && effectiveBlame && effectiveBlame.lines && effectiveBlame.lines[idx]) {
+            const bl = effectiveBlame.lines[idx];
+            const bc = effectiveBlame.commits[bl.hash];
+            const penBtn = bc && bc.committed && bc.previousCommit
+              ? `<button type="button" class="blame-pen-btn" data-prev-commit="${escapeHtml(bc.previousCommit)}" data-prev-path="${escapeHtml(bc.previousFilePath || effectiveFilePath)}" data-skip-hash="${escapeHtml(bl.hash)}" title="${escapeHtml(zh ? `穿透提交 ${bl.hash.slice(0, 7)}，查看其父提交 ${bc.previousCommit.slice(0, 7)} 时的 Blame` : `Re-blame before ${bl.hash.slice(0, 7)} (at parent ${bc.previousCommit.slice(0, 7)})`)}">↩</button>`
+              : '';
             if (bl.hash !== prevBlameHash && bc) {
               const shortHash = bc.committed ? bl.hash.slice(0, 7) : 'Uncomm.';
               const dateStr = bc.authorDate ? new Date(bc.authorDate * 1000).toISOString().slice(0, 10) : '';
-              blameHtml = `<td class="blame-gutter" data-hash="${escapeHtml(bc.committed ? bl.hash : '')}" title="${escapeHtml(bc.summary)}">${escapeHtml(shortHash + ' · ' + bc.author + ' · ' + dateStr)}</td>`;
+              blameHtml = `<td class="blame-gutter" data-hash="${escapeHtml(bc.committed ? bl.hash : '')}" title="${escapeHtml(bc.summary)}"><span class="blame-gutter-text">${escapeHtml(shortHash + ' · ' + bc.author + ' · ' + dateStr)}</span>${penBtn}</td>`;
             } else {
-              blameHtml = `<td class="blame-gutter" data-hash="${escapeHtml(bc && bc.committed ? bl.hash : '')}"></td>`;
+              blameHtml = `<td class="blame-gutter" data-hash="${escapeHtml(bc && bc.committed ? bl.hash : '')}">${penBtn}</td>`;
             }
             nextBlameHash = bl.hash;
           } else if (showBlame) {
@@ -3697,8 +4381,8 @@
           if (start > 0) {
             out.push(`<tr style="height:${start * ROW_H}px"><td colspan="${colSpan}"></td></tr>`);
           }
-          let prevHash = start > 0 && showBlame && blameData && blameData.lines && blameData.lines[start - 1]
-            ? blameData.lines[start - 1].hash
+          let prevHash = start > 0 && showBlame && effectiveBlame && effectiveBlame.lines && effectiveBlame.lines[start - 1]
+            ? effectiveBlame.lines[start - 1].hash
             : null;
           for (let idx = start; idx < end; idx++) {
             const r = buildRowHtml(idx, prevHash);
@@ -3722,7 +4406,7 @@
           });
         }
 
-        scrollArea.addEventListener('click', (ev) => {
+        scrollArea.addEventListener('click', async (ev) => {
           const numEl = ev.target.closest('.file-line-num');
           if (numEl) {
             const clicked = Number(numEl.getAttribute('data-line'));
@@ -3737,6 +4421,53 @@
               const ln = Number(row.getAttribute('data-line'));
               row.classList.toggle('selected-line', ln >= selStart && ln <= selEnd);
             });
+            return;
+          }
+          const penBtn = ev.target.closest('.blame-pen-btn');
+          if (penBtn) {
+            ev.stopPropagation();
+            const prevCommit = penBtn.getAttribute('data-prev-commit');
+            const prevPath = penBtn.getAttribute('data-prev-path') || effectiveFilePath;
+            const skipHash = penBtn.getAttribute('data-skip-hash') || '';
+            if (!prevCommit || !fileRes.repo) return;
+            penBtn.disabled = true;
+            const curScroll = scrollArea.scrollTop;
+            try {
+              const [readRes, blRes] = await Promise.all([
+                rpc('file:read', { repo: fileRes.repo, filePath: prevPath, commit: prevCommit }),
+                rpc('file:blame', {
+                  repo: fileRes.repo,
+                  filePath: prevPath,
+                  commit: prevCommit,
+                  ignoreWhitespace: blameIgnoreWs,
+                  detectMoves: blameDetectMoves
+                })
+              ]);
+              if (readRes.error || !blRes.blame) {
+                showToast(readRes.error || (zh ? '无法继续穿透：父提交中未找到此文件' : 'Unable to re-blame parent revision'), 'warning');
+                penBtn.disabled = false;
+                return;
+              }
+              blameStack.push(activeBlameView || {
+                commit: fileRes.commit || null,
+                filePath: fileRes.filePath,
+                content: fileRes.content,
+                blameData
+              });
+              activeBlameView = {
+                commit: prevCommit,
+                filePath: prevPath,
+                content: readRes.content || '',
+                blameData: blRes.blame,
+                skippedHash: skipHash
+              };
+              mountViewer();
+              const nextArea = panel.querySelector('.diff-scroll-area');
+              if (nextArea) nextArea.scrollTop = curScroll;
+            } catch (err) {
+              showToast(err.message, 'error');
+              penBtn.disabled = false;
+            }
             return;
           }
           const bg = ev.target.closest('.blame-gutter[data-hash]');
@@ -3760,15 +4491,35 @@
         });
 
         if (hasRepo) {
+          const fetchCurrentBlame = async () => {
+            const targetCommit = activeBlameView ? activeBlameView.commit : (fileRes.commit || undefined);
+            const targetPath = activeBlameView ? activeBlameView.filePath : fileRes.filePath;
+            const res = await rpc('file:blame', {
+              repo: fileRes.repo,
+              filePath: targetPath,
+              commit: targetCommit,
+              ignoreWhitespace: blameIgnoreWs,
+              detectMoves: blameDetectMoves
+            });
+            if (activeBlameView) activeBlameView.blameData = res.blame;
+            else blameData = res.blame;
+          };
+
           const blameBtn = panel.querySelector('.act-blame');
           blameBtn.addEventListener('click', async () => {
             if (blameBtn.disabled) return;
             const nextShow = !showBlame;
-            if (nextShow && !blameData) {
+            if (!nextShow) {
+              showBlame = false;
+              activeBlameView = null;
+              blameStack = [];
+              mountViewer();
+              return;
+            }
+            if (!blameData) {
               blameBtn.disabled = true;
               try {
-                const res = await rpc('file:blame', { repo: fileRes.repo, filePath: fileRes.filePath, commit: fileRes.commit || undefined });
-                blameData = res.blame;
+                await fetchCurrentBlame();
               } catch (err) {
                 showToast(err.message, 'error');
                 blameBtn.disabled = false;
@@ -3776,9 +4527,40 @@
               }
               blameBtn.disabled = false;
             }
-            showBlame = nextShow;
-            blameBtn.classList.toggle('primary', showBlame);
-            renderFileLines(true);
+            showBlame = true;
+            mountViewer();
+          });
+
+          panel.querySelector('.act-blame-pop')?.addEventListener('click', () => {
+            if (blameStack.length === 0) return;
+            const prev = blameStack.pop();
+            activeBlameView = blameStack.length === 0 ? null : prev;
+            if (blameStack.length === 0 && prev) blameData = prev.blameData;
+            mountViewer();
+          });
+          panel.querySelector('.act-blame-root')?.addEventListener('click', () => {
+            if (blameStack.length > 0) blameData = blameStack[0].blameData;
+            blameStack = [];
+            activeBlameView = null;
+            mountViewer();
+          });
+          const reloadBlameFlags = async () => {
+            try {
+              await fetchCurrentBlame();
+              mountViewer();
+            } catch (err) {
+              showToast(err.message, 'error');
+            }
+          };
+          panel.querySelector('.blame-ws-toggle')?.addEventListener('change', (e) => {
+            blameIgnoreWs = e.target.checked;
+            try { localStorage.setItem('gitmap.blame.ignoreWs', blameIgnoreWs ? '1' : '0'); } catch (_) {}
+            void reloadBlameFlags();
+          });
+          panel.querySelector('.blame-mc-toggle')?.addEventListener('change', (e) => {
+            blameDetectMoves = e.target.checked;
+            try { localStorage.setItem('gitmap.blame.detectMoves', blameDetectMoves ? '1' : '0'); } catch (_) {}
+            void reloadBlameFlags();
           });
           panel.querySelector('.act-line-hist').addEventListener('click', async () => {
             const range = selStart !== null ? { start: selStart, end: selEnd || selStart } : { start: 1, end: Math.min(20, lines.length) };
@@ -4280,6 +5062,8 @@
       <div class="fb-conn">
         <span class="fb-conn-summary"></span>
         <span class="fb-conn-actions">
+          ${opts.kind === 'repo' ? `<button type="button" class="mini-btn act-repo-deleted" title="${escapeHtml(T('查找此仓库或子目录中已被删除的文件与文件夹，支持查看删前内容并一键恢复', 'Find deleted files & folders in Git history, inspect pre-delete snapshots, or restore'))}">${ICONS.history}<span>${escapeHtml(T('已删溯源', 'Deleted'))}</span></button>
+          <button type="button" class="mini-btn act-repo-commit-tree" title="${escapeHtml(T('按提交历史浏览当时仓库内的完整目录与全部文件', 'Browse full repository file tree at any historical commit'))}">${ICONS.folderOpen}<span>${escapeHtml(T('提交快照', 'Snapshots'))}</span></button>` : ''}
           ${opts.inlinePreviewToggle ? `<button type="button" class="mini-btn act-inline-preview${state.repoInlinePreview ? ' primary' : ''}" title="${escapeHtml(T('开启后单击文件直接在内联分栏预览/编辑，双击在独立标签页打开', 'Single-click files to preview inline; double-click to open in a tab'))}">${ICONS.splitHorizontal}<span>${escapeHtml(tr('inlinePreview'))}</span></button>` : ''}
           ${features.scan ? `<button type="button" class="mini-btn act-scan" title="${escapeHtml(T('扫描当前目录下（最多 3 层）的 Git 仓库', 'Find Git repositories up to 3 levels below this folder'))}">${ICONS.scan}<span>${escapeHtml(tr('scanSubfolders'))}</span></button>` : ''}
           ${features.launch ? `<button type="button" class="mini-btn act-here-term" title="${escapeHtml(T('在外部终端中打开当前目录', 'Open This Folder in External Terminal'))}">${ICONS.terminal}<span>${escapeHtml(T('终端', 'Terminal'))}</span></button>
@@ -4693,6 +5477,15 @@
         if (features.transfer && opts.upload) {
           ctxActions.push({ icon: ICONS.upload, label: zh ? '上传文件到此目录…' : 'Upload Files Here…', run: () => { fb.expandedDirs.add(entry.path); opts.upload(entry.path, false); } });
         }
+        if (opts.kind === 'repo' && state.activeRepo) {
+          const relDir = relPathInActiveRepo(entry.path);
+          ctxActions.push({ sep: true });
+          ctxActions.push({
+            icon: ICONS.history || ICONS.search,
+            label: zh ? '查找此目录已删除文件…' : 'Find Deleted Files in Folder…',
+            run: () => window.GitMapRemoteAndGitUI?.openDeletedFilesModal?.(relDir)
+          });
+        }
       } else {
         ctxActions.push({
           icon: ICONS.fileCode || ICONS.file,
@@ -4700,11 +5493,24 @@
           run: () => openEntry(entry)
         });
         if (state.activeRepo) {
+          const relFile = relPathInActiveRepo(entry.path);
           ctxActions.push({
             icon: ICONS.history || ICONS.branch,
             label: zh ? '在 Git Map 中查看此文件历史' : 'Filter File History in Git Map',
             run: () => filterGitMapByRepoFile(entry.path)
           });
+          if (relFile) {
+            ctxActions.push({
+              icon: ICONS.clock || ICONS.history,
+              label: zh ? '文件变更时光机 (Time Machine)' : 'File Time Machine',
+              run: () => rpc('file:timeMachine', { repo: state.activeRepo, filePath: relFile }).catch((err) => showToast(err.message, 'error'))
+            });
+            ctxActions.push({
+              icon: ICONS.branch || ICONS.history,
+              label: zh ? '可视化文件演进 (Visual History)' : 'Visual File History',
+              run: () => rpc('file:visualHistory', { repo: state.activeRepo, filePath: relFile }).catch((err) => showToast(err.message, 'error'))
+            });
+          }
         }
         if (opts.onDoubleClickFile) {
           ctxActions.push({
@@ -5322,6 +6128,21 @@
     });
     $('.act-expand-top').addEventListener('click', () => expandTopLevelFolders());
     $('.act-collapse-all').addEventListener('click', () => collapseAllFolders());
+    const repoDelBtn = $('.act-repo-deleted');
+    if (repoDelBtn) {
+      repoDelBtn.addEventListener('click', () => {
+        const relDir = fb.currentPath ? relPathInActiveRepo(fb.currentPath) : '';
+        window.GitMapRemoteAndGitUI?.openDeletedFilesModal?.(relDir);
+      });
+    }
+    const repoTreeBtn = $('.act-repo-commit-tree');
+    if (repoTreeBtn) {
+      repoTreeBtn.addEventListener('click', () => {
+        if (!state.activeRepo) return;
+        const relDir = fb.currentPath ? relPathInActiveRepo(fb.currentPath) : '';
+        openCommitTreeTab({ repo: state.activeRepo, commitHash: 'HEAD', initialPath: relDir });
+      });
+    }
     const inlinePrevBtn = $('.act-inline-preview');
     if (inlinePrevBtn) {
       inlinePrevBtn.addEventListener('click', () => {
@@ -8486,6 +9307,7 @@
     openDiffTab,
     openMultiDiffTab,
     openFileTab,
+    openCommitTreeTab,
     openLocalModal,
     openSshModal,
     openCloneModal,

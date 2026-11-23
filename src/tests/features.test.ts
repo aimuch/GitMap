@@ -1324,4 +1324,211 @@ describe('GitMap 11 Advanced Features End-to-End Suite', () => {
     assert.equal(wtOpen.ok, true);
     assert.ok(wtOpen.root);
   });
+
+  it('Commit Snapshot File Explorer (ls-tree / search / restore) and Deleted Path Archaeology work end-to-end', async () => {
+    const repoDir = path.join(tmpRoot, 'repo-snapshot-deleted');
+    fs.mkdirSync(path.join(repoDir, 'src', 'legacy'), { recursive: true });
+    fs.mkdirSync(path.join(repoDir, 'docs'), { recursive: true });
+    execGitSync(repoDir, ['init', '-b', 'main']);
+    execGitSync(repoDir, ['config', 'user.name', 'Andy']);
+    execGitSync(repoDir, ['config', 'user.email', 'andy@example.com']);
+
+    // Commit 1: nested folders + CJK filename with spaces
+    fs.writeFileSync(path.join(repoDir, 'keep.ts'), 'export const v = 1;\n');
+    fs.writeFileSync(path.join(repoDir, 'src', 'legacy', 'a.ts'), 'export const legacyA = "alpha";\n');
+    fs.writeFileSync(path.join(repoDir, 'src', 'legacy', 'b.ts'), 'export const legacyB = "beta";\n');
+    fs.writeFileSync(path.join(repoDir, 'docs', '中文 说明.md'), '# 旧文档\n');
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '-m', 'feat: initial tree with legacy folder and docs']);
+    const c1 = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+
+    // Commit 2: delete the entire src/legacy folder
+    fs.rmSync(path.join(repoDir, 'src', 'legacy'), { recursive: true, force: true });
+    fs.writeFileSync(path.join(repoDir, 'keep.ts'), 'export const v = 2;\n');
+    execGitSync(repoDir, ['add', '-A']);
+    execGitSync(repoDir, ['commit', '-m', 'refactor: remove legacy folder']);
+    const c2 = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+
+    // Commit 3: delete docs/中文 说明.md and add new.ts
+    fs.rmSync(path.join(repoDir, 'docs', '中文 说明.md'), { force: true });
+    fs.writeFileSync(path.join(repoDir, 'new.ts'), 'export const fresh = true;\n');
+    execGitSync(repoDir, ['add', '-A']);
+    execGitSync(repoDir, ['commit', '-m', 'docs: remove old chinese manual']);
+    const c3 = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+
+    // 1. Browse root directory tree at Commit 1 (dirs sorted first)
+    const rootTree = await rpc.call('commit:tree', { repo: repoDir, commitHash: c1, subPath: '' });
+    assert.equal(rootTree.commit.hash, c1);
+    assert.deepEqual(
+      rootTree.entries.map((e: any) => ({ path: e.path, isDirectory: e.isDirectory })),
+      [
+        { path: 'docs', isDirectory: true },
+        { path: 'src', isDirectory: true },
+        { path: 'keep.ts', isDirectory: false }
+      ]
+    );
+
+    // 2. Drill into deleted folder at Commit 1
+    const legacyTree = await rpc.call('commit:tree', { repo: repoDir, commitHash: c1, subPath: 'src/legacy' });
+    assert.deepEqual(
+      legacyTree.entries.map((e: any) => e.path),
+      ['src/legacy/a.ts', 'src/legacy/b.ts']
+    );
+    assert.ok(legacyTree.entries[0].size > 0);
+
+    // 3. Full-commit fuzzy search at Commit 1 (both ASCII and CJK)
+    const searchLegacy = await rpc.call('commit:searchTree', { repo: repoDir, commitHash: c1, query: 'legacy' });
+    assert.equal(searchLegacy.totalFiles, 4);
+    assert.deepEqual(
+      searchLegacy.matches.map((m: any) => m.path),
+      ['src/legacy/a.ts', 'src/legacy/b.ts']
+    );
+
+    const searchCjk = await rpc.call('commit:searchTree', { repo: repoDir, commitHash: c1, query: '中文' });
+    assert.equal(searchCjk.matches.length, 1);
+    assert.equal(searchCjk.matches[0].path, 'docs/中文 说明.md');
+
+    // 4. Find when src/legacy was deleted (keyword + folder grouping)
+    const delLegacy = await rpc.call('history:findDeleted', { repo: repoDir, query: 'legacy', ref: 'HEAD' });
+    assert.equal(delLegacy.files.length, 2);
+    assert.equal(delLegacy.files[0].commitHash, c2);
+    assert.equal(delLegacy.files[0].parentHash, c1);
+    const legacyFolderGrp = delLegacy.folders.find((g: any) => g.folder === 'src/legacy');
+    assert.ok(legacyFolderGrp, 'should aggregate deleted folder group for src/legacy');
+    assert.equal(legacyFolderGrp.fileCount, 2);
+    assert.equal(legacyFolderGrp.parentHash, c1);
+
+    // 5. Find deleted files scoped to a specific folder path (pathFilter)
+    const delDocs = await rpc.call('history:findDeleted', { repo: repoDir, pathFilter: 'docs', ref: 'HEAD' });
+    assert.equal(delDocs.files.length, 1);
+    assert.equal(delDocs.files[0].path, 'docs/中文 说明.md');
+    assert.equal(delDocs.files[0].commitHash, c3);
+    assert.equal(delDocs.files[0].parentHash, c2);
+
+    // 6. Restore the entire deleted folder src/legacy from pre-deletion parent commit (c1)
+    assert.equal(fs.existsSync(path.join(repoDir, 'src', 'legacy', 'a.ts')), false);
+    const restoredDir = await rpc.call('commit:restorePath', {
+      repo: repoDir,
+      commitHash: c1,
+      path: 'src/legacy'
+    });
+    assert.equal(restoredDir.ok, true);
+    assert.equal(fs.readFileSync(path.join(repoDir, 'src', 'legacy', 'a.ts'), 'utf8'), 'export const legacyA = "alpha";\n');
+    assert.equal(fs.readFileSync(path.join(repoDir, 'src', 'legacy', 'b.ts'), 'utf8'), 'export const legacyB = "beta";\n');
+
+    // 7. Reject unsafe path restoration attempts
+    await assert.rejects(
+      rpc.call('commit:restorePath', { repo: repoDir, commitHash: c1, path: '../escape.txt' }),
+      /Unsafe relative path/i
+    );
+    await assert.rejects(
+      rpc.call('commit:restorePath', { repo: repoDir, commitHash: c1, path: '.git/config' }),
+      /unsafe path/i
+    );
+
+    // 8. Commit change overlay + immutable LRU cache + working diff + non-destructive extract copy
+    const c2Tree1 = await rpc.call('commit:tree', { repo: repoDir, commitHash: c2, subPath: '' });
+    assert.equal(c2Tree1.commitChanges['keep.ts'], 'M');
+    assert.equal(c2Tree1.commitChanges['src/legacy/a.ts'], 'D');
+    assert.ok(c2Tree1.changedDirs.includes('src/legacy'));
+    const c2Tree2 = await rpc.call('commit:tree', { repo: repoDir, commitHash: c2, subPath: '' });
+    assert.equal(c2Tree2.fromCache, true, 'immutable commit tree hits LRU cache on repeat read');
+
+    const c1SearchAgain = await rpc.call('commit:searchTree', { repo: repoDir, commitHash: c1, query: 'keep' });
+    assert.equal(c1SearchAgain.fromCache, true, 'recursive commit file index hits LRU cache');
+
+    fs.writeFileSync(path.join(repoDir, 'keep.ts'), 'export const v = 999;\n');
+    const wtDiff = await rpc.call('commit:diffWorking', { repo: repoDir, commitHash: c1 });
+    assert.equal(wtDiff.workingDiff['keep.ts'], 'M');
+    assert.ok(wtDiff.changedCount >= 1);
+
+    const copy1 = await rpc.call('commit:extractCopy', { repo: repoDir, commitHash: c1, path: 'keep.ts' });
+    assert.equal(copy1.ok, true);
+    assert.ok(copy1.outputPath.startsWith('keep.') && copy1.outputPath.endsWith('.ts'));
+    assert.equal(fs.readFileSync(path.join(repoDir, copy1.outputPath), 'utf8'), 'export const v = 1;\n');
+    // Working-tree keep.ts must remain untouched!
+    assert.equal(fs.readFileSync(path.join(repoDir, 'keep.ts'), 'utf8'), 'export const v = 999;\n');
+    const copy2 = await rpc.call('commit:extractCopy', { repo: repoDir, commitHash: c1, path: 'keep.ts' });
+    assert.notEqual(copy2.outputPath, copy1.outputPath, 'second extract does not overwrite first copy');
+  });
+
+  it('Blame penetration + -w whitespace ignore, Deleted Archaeology -M/pagination, and Time Machine Pin A↔B work end-to-end', async () => {
+    const repoDir = path.join(tmpRoot, 'repo-blame-del-tm');
+    fs.mkdirSync(repoDir, { recursive: true });
+    execGitSync(repoDir, ['init', '-b', 'main']);
+    execGitSync(repoDir, ['config', 'user.name', 'Alice']);
+    execGitSync(repoDir, ['config', 'user.email', 'alice@example.com']);
+
+    // Commit 1: Alice writes real logic + 4 files that will be deleted across 4 commits + 1 file to rename
+    fs.writeFileSync(path.join(repoDir, 'logic.ts'), 'export function calc(x: number) {\nreturn x * 2;\n}\n');
+    fs.writeFileSync(path.join(repoDir, 'rename-me.ts'), 'export const moved = 123456789;\n');
+    for (let i = 1; i <= 4; i++) {
+      fs.writeFileSync(path.join(repoDir, `drop-${i}.txt`), `drop file ${i}\n`);
+    }
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '--author=Alice <alice@example.com>', '-m', 'feat: initial logic by Alice']);
+    const c1 = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+
+    // Commit 2: Bob reformats indentation only (whitespace-only change)
+    fs.writeFileSync(path.join(repoDir, 'logic.ts'), 'export function calc(x: number) {\n  return x * 2;\n}\n');
+    execGitSync(repoDir, ['commit', '-a', '--author=Bob <bob@example.com>', '-m', 'style: indent logic.ts']);
+    const c2 = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+
+    // Commit 3: Pure rename (must NOT be flagged as deleted when detectRenames=true)
+    fs.renameSync(path.join(repoDir, 'rename-me.ts'), path.join(repoDir, 'renamed-cleanly.ts'));
+    execGitSync(repoDir, ['add', '-A']);
+    execGitSync(repoDir, ['commit', '-m', 'refactor: rename file cleanly']);
+
+    // Commits 4..7: 4 separate deletions to test pagination (batchCommits=2)
+    for (let i = 1; i <= 4; i++) {
+      fs.rmSync(path.join(repoDir, `drop-${i}.txt`));
+      execGitSync(repoDir, ['add', '-A']);
+      execGitSync(repoDir, ['commit', '-m', `chore: drop file ${i}`]);
+    }
+
+    // 1. Blame without -w attributes line 2 to Bob (c2) AND exposes previousCommit=c1 for penetration
+    const blNormal = await rpc.call('file:blame', { repo: repoDir, filePath: 'logic.ts', ignoreWhitespace: false });
+    assert.ok(blNormal.blame);
+    assert.equal(blNormal.blame.lines[1].hash, c2);
+    assert.equal(blNormal.blame.commits[c2].author, 'Bob');
+    assert.equal(blNormal.blame.commits[c2].previousCommit, c1);
+    assert.equal(blNormal.blame.commits[c2].previousFilePath, 'logic.ts');
+
+    // 2. Blame with -w ignores Bob's whitespace reformat and attributes line 2 back to Alice (c1)
+    const blIgnoreWs = await rpc.call('file:blame', { repo: repoDir, filePath: 'logic.ts', ignoreWhitespace: true });
+    assert.equal(blIgnoreWs.blame.lines[1].hash, c1);
+    assert.equal(blIgnoreWs.blame.commits[c1].author, 'Alice');
+
+    // 3. Penetrate using previousCommit -> blame at c1 shows Alice
+    const blPenetrated = await rpc.call('file:blame', {
+      repo: repoDir,
+      filePath: blNormal.blame.commits[c2].previousFilePath,
+      commit: blNormal.blame.commits[c2].previousCommit
+    });
+    assert.equal(blPenetrated.blame.lines[1].hash, c1);
+
+    // 4. Deleted Archaeology with -M ignores rename-me.ts and paginates 4 deletions in 2 pages of 2
+    const page1 = await rpc.call('history:findDeleted', {
+      repo: repoDir,
+      ref: 'HEAD',
+      detectRenames: true,
+      batchCommits: 2,
+      skip: 0
+    });
+    assert.equal(page1.hasMore, true);
+    assert.equal(page1.files.length, 2);
+    assert.equal(page1.files.some((f: any) => f.path === 'rename-me.ts'), false, '-M must not falsely report renamed file as deleted');
+
+    const page2 = await rpc.call('history:findDeleted', {
+      repo: repoDir,
+      ref: 'HEAD',
+      detectRenames: true,
+      batchCommits: 2,
+      skip: page1.nextSkip
+    });
+    assert.equal(page2.files.length, 2);
+    assert.equal(page2.hasMore, false);
+    const allDropped = [...page1.files, ...page2.files].map((f: any) => f.path).sort();
+    assert.deepEqual(allDropped, ['drop-1.txt', 'drop-2.txt', 'drop-3.txt', 'drop-4.txt']);
+  });
 });

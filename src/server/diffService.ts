@@ -468,8 +468,13 @@ export class DiffService {
     };
   }
 
-  public async loadFileBlame(repo: string, filePath: string, commit?: string | null): Promise<GitFileBlame | null> {
+  public async loadFileBlame(
+    repo: string,
+    filePath: string,
+    commit?: string | null,
+    options?: { ignoreWhitespace?: boolean; detectMoves?: boolean }
+  ): Promise<GitFileBlame | null> {
     if (!repo) return null;
-    return this.dataSource.getFileBlame(repo, filePath, null, undefined, commit || null);
+    return this.dataSource.getFileBlame(repo, filePath, null, undefined, commit || null, options);
   }
 }

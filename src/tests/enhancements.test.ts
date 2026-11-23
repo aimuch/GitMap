@@ -5,7 +5,15 @@ import * as os from 'os';
 import * as path from 'path';
 import { describe, it } from 'node:test';
 import { buildHeuristicCommitMessage, buildHeuristicCommitPlan } from '../server/aiAssistantService';
-import { assertSafeRelSegmentPath, EnhancementsService } from '../server/enhancementsService';
+import {
+  assertSafeRelSegmentPath,
+  buildExtractCopyPath,
+  EnhancementsService,
+  parseDeletedLogOutput,
+  parseDiffNameStatusZ,
+  parseLsTreeOutput
+} from '../server/enhancementsService';
+import { CatFileBatchPool } from '../server/gitCatFilePool';
 import { computeReviewScorecard } from '../server/gitWorkflowService';
 import {
   BackupPayload,
@@ -297,5 +305,184 @@ describe('GitMap Enhancements Suite', () => {
         execFileSync(process.execPath, ['--check', diskPath]);
       }
     }
+  });
+
+  it('parses git ls-tree -l -z output with dirs, blobs, symlinks, submodules, CJK names, and subPath prefix', () => {
+    const raw = [
+      '100644 blob 1111111111111111111111111111111111111111     128\tREADME.md',
+      '040000 tree 2222222222222222222222222222222222222222       -\tsrc',
+      '120000 blob 3333333333333333333333333333333333333333      14\tlink-to-cfg',
+      '160000 commit 4444444444444444444444444444444444444444       -\tvendor/sub',
+      '100644 blob 5555555555555555555555555555555555555555    2048\t文档 笔记.md',
+      ''
+    ].join('\0');
+
+    const rootEntries = parseLsTreeOutput(raw, '');
+    assert.strictEqual(rootEntries.length, 5);
+    // Directories sort first
+    assert.strictEqual(rootEntries[0].name, 'src');
+    assert.strictEqual(rootEntries[0].isDirectory, true);
+    assert.strictEqual(rootEntries[0].size, null);
+
+    const symlink = rootEntries.find((e) => e.name === 'link-to-cfg')!;
+    assert.strictEqual(symlink.isSymlink, true);
+    assert.strictEqual(symlink.size, 14);
+
+    const submod = rootEntries.find((e) => e.path === 'vendor/sub')!;
+    assert.strictEqual(submod.isSubmodule, true);
+    assert.strictEqual(submod.name, 'sub');
+    assert.strictEqual(submod.size, null);
+
+    const cjk = rootEntries.find((e) => e.name === '文档 笔记.md')!;
+    assert.strictEqual(cjk.size, 2048);
+
+    // Prefixing parentSubPath
+    const subEntries = parseLsTreeOutput('100644 blob 1111111111111111111111111111111111111111      42\tindex.ts\0', 'src/core/');
+    assert.strictEqual(subEntries.length, 1);
+    assert.strictEqual(subEntries[0].path, 'src/core/index.ts');
+    assert.strictEqual(subEntries[0].name, 'index.ts');
+  });
+
+  it('parses git log --diff-filter=D -z output into deleted files and folder groups with query & truncation', () => {
+    const c2 = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const c1 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const c0 = 'cccccccccccccccccccccccccccccccccccccccc';
+    const raw =
+      `\x1e${c2}\x1faaaaaaa\x1fAndy\x1f1700000200\x1fchore: remove legacy module\x1f${c1} 9999999999999999999999999999999999999999\0\n` +
+      `D\0src/legacy/a.ts\0D\0src/legacy/b.ts\0D\0root-old.txt\0` +
+      `\x1e${c1}\x1fbbbbbbb\x1fBob\x1f1700000100\x1fdocs: drop 中文 手册\x1f${c0}\0\n` +
+      `D\0docs/中文 手册.md\0`;
+
+    const all = parseDeletedLogOutput(raw, '', 100);
+    assert.strictEqual(all.scannedCommits, 2);
+    assert.strictEqual(all.truncated, false);
+    assert.strictEqual(all.files.length, 4);
+    assert.strictEqual(all.files[0].commitHash, c2);
+    assert.strictEqual(all.files[0].parentHash, c1, 'first parent of merge commit is used');
+    assert.strictEqual(all.files[0].folder, 'src/legacy');
+    assert.strictEqual(all.files[2].folder, '(root)');
+
+    const legacyGroup = all.folders.find((g) => g.folder === 'src/legacy')!;
+    assert.ok(legacyGroup);
+    assert.strictEqual(legacyGroup.fileCount, 2);
+    assert.deepStrictEqual(legacyGroup.files, ['src/legacy/a.ts', 'src/legacy/b.ts']);
+
+    // Query matches CJK filename
+    const cjkOnly = parseDeletedLogOutput(raw, '中文', 100);
+    assert.strictEqual(cjkOnly.files.length, 1);
+    assert.strictEqual(cjkOnly.files[0].path, 'docs/中文 手册.md');
+    assert.strictEqual(cjkOnly.files[0].parentHash, c0);
+
+    // Truncation cap
+    const capped = parseDeletedLogOutput(raw, '', 2);
+    assert.strictEqual(capped.files.length, 2);
+    assert.strictEqual(capped.truncated, true);
+  });
+
+  it('streams blobs via persistent git cat-file --batch pool with truncation safety, binary/empty files, and LRU cache', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitmap-catfile-'));
+    const pool = new CatFileBatchPool({ maxWorkers: 2, idleTimeoutMs: 5000, maxCachedBlobs: 16 });
+    try {
+      execFileSync('git', ['init', '-b', 'main'], { cwd: tmpDir });
+      execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir });
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmpDir });
+      fs.mkdirSync(path.join(tmpDir, 'docs'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, 'hello.txt'), 'hello cat-file\n');
+      fs.writeFileSync(path.join(tmpDir, 'empty.txt'), '');
+      fs.writeFileSync(path.join(tmpDir, 'docs', '中文 说明.md'), '你好 GitMap!\n');
+      fs.writeFileSync(path.join(tmpDir, 'big.bin'), Buffer.concat([Buffer.from([0x00, 0x01, 0x02]), Buffer.alloc(4096, 0x41)]));
+      execFileSync('git', ['add', '.'], { cwd: tmpDir });
+      execFileSync('git', ['commit', '-m', 'init'], { cwd: tmpDir });
+      const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: tmpDir }).toString('utf8').trim();
+
+      // Concurrent reads including oversized truncated blob + empty file + CJK path + missing object
+      const [r1, rBigTrunc, rEmpty, rCjk, rMissing] = await Promise.all([
+        pool.readLocalCommitBlob('git', tmpDir, sha, 'hello.txt', 1024),
+        pool.readLocalCommitBlob('git', tmpDir, sha, 'big.bin', 64),
+        pool.readLocalCommitBlob('git', tmpDir, sha, 'empty.txt', 1024),
+        pool.readLocalCommitBlob('git', tmpDir, sha, 'docs/中文 说明.md', 1024),
+        pool.readLocalCommitBlob('git', tmpDir, sha, 'does-not-exist.txt', 1024)
+      ]);
+      assert.strictEqual(r1?.buffer.toString('utf8'), 'hello cat-file\n');
+      assert.strictEqual(rBigTrunc?.truncated, true);
+      assert.strictEqual(rBigTrunc?.buffer.length, 64);
+      assert.strictEqual(rBigTrunc?.size, 4099);
+      assert.strictEqual(rEmpty?.buffer.length, 0);
+      assert.strictEqual(rCjk?.buffer.toString('utf8'), '你好 GitMap!\n');
+      assert.strictEqual(rMissing, null);
+      assert.strictEqual(pool.activeWorkerCount, 1);
+
+      // Re-reading hello.txt hits the immutable LRU cache; re-reading big.bin with larger cap re-fetches full bytes
+      const r1Cached = await pool.readLocalCommitBlob('git', tmpDir, sha, 'hello.txt', 1024);
+      assert.strictEqual(r1Cached?.fromCache, true);
+      assert.strictEqual(r1Cached?.buffer.toString('utf8'), 'hello cat-file\n');
+
+      const rBigFull = await pool.readLocalCommitBlob('git', tmpDir, sha, 'big.bin', 8192);
+      assert.strictEqual(rBigFull?.truncated, false);
+      assert.strictEqual(rBigFull?.buffer.length, 4099);
+    } finally {
+      pool.dispose();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('parses diff-tree --name-status -z overlays and builds non-clobbering extract copy filenames', () => {
+    const raw = 'A\0src/new.ts\0M\0src/app/main.ts\0D\0old/dead.ts\0R100\0a/x.ts\0b/y.ts\0';
+    const parsed = parseDiffNameStatusZ(raw);
+    assert.strictEqual(parsed.changes['src/new.ts'], 'A');
+    assert.strictEqual(parsed.changes['src/app/main.ts'], 'M');
+    assert.strictEqual(parsed.changes['old/dead.ts'], 'D');
+    assert.strictEqual(parsed.changes['b/y.ts'], 'R');
+    assert.deepStrictEqual(parsed.deletedPaths, ['old/dead.ts']);
+    assert.ok(parsed.changedDirs.includes('src'));
+    assert.ok(parsed.changedDirs.includes('src/app'));
+    assert.ok(parsed.changedDirs.includes('old'));
+
+    assert.strictEqual(buildExtractCopyPath('src/app.ts', '1a2b3c4', 0), 'src/app.1a2b3c4.ts');
+    assert.strictEqual(buildExtractCopyPath('src/app.ts', '1a2b3c4', 1), 'src/app.1a2b3c4-2.ts');
+    assert.strictEqual(buildExtractCopyPath('Makefile', '1a2b3c4', 0), 'Makefile.1a2b3c4');
+  });
+
+  it('renders File Time Machine HTML with Pin Base A↔B, Extract Copy, and Restore controls', async () => {
+    const { getFileTimeMachineHtml } = await import('../fileTimeMachine');
+    const html = getFileTimeMachineHtml(
+      'src/demo.ts',
+      [
+        {
+          hash: '1111111111111111111111111111111111111111',
+          author: 'Alice',
+          email: 'alice@example.com',
+          date: 1700000200,
+          subject: 'feat: v2',
+          filePath: 'src/demo.ts',
+          oldFilePath: null,
+          additions: 3,
+          deletions: 1,
+          added: false,
+          isLive: true
+        },
+        {
+          hash: '2222222222222222222222222222222222222222',
+          author: 'Alice',
+          email: 'alice@example.com',
+          date: 1700000100,
+          subject: 'feat: v1',
+          filePath: 'src/demo.ts',
+          oldFilePath: null,
+          additions: 5,
+          deletions: 0,
+          added: true,
+          isLive: false
+        }
+      ],
+      0,
+      'diff',
+      'self'
+    );
+    assert.ok(html.includes('id="ftmPinBtn"'), 'Pin Base A button present');
+    assert.ok(html.includes('id="ftmPinBanner"'), 'Compare A↔B banner present');
+    assert.ok(html.includes('id="ftmExtractBtn"'), 'Extract Copy button present');
+    assert.ok(html.includes('id="ftmRestoreBtn"'), 'Restore Version button present');
+    assert.ok(html.includes('loadCompare'), 'Cross-revision compare command wired');
   });
 });

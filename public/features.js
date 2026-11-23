@@ -1527,7 +1527,7 @@
     });
   }
 
-  function openNlSearchModal() {
+  function openNlSearchModal(initialQuery) {
     const repo = requireActiveRepo();
     if (!repo) return;
     const ui = openFeatureModal({
@@ -1537,7 +1537,7 @@
       width: 'min(820px, 94vw)',
       bodyHtml: `
         <form id="nlSearchForm" style="display:flex;gap:8px;">
-          <input type="text" id="nlSearchQuery" style="flex:1;" placeholder="${escapeHtml(T('例如：谁改过 SSH 超时逻辑 / 最近两周修复内存泄漏的提交 / auth token', 'e.g. commits touching ssh timeout / memory leak fixes by Andy last month'))}" />
+          <input type="text" id="nlSearchQuery" style="flex:1;" value="${escapeHtml(initialQuery || '')}" placeholder="${escapeHtml(T('例如：谁改过 SSH 超时逻辑 / 最近两周修复内存泄漏的提交 / auth token', 'e.g. commits touching ssh timeout / memory leak fixes by Andy last month'))}" />
           <button type="submit" class="mini-btn primary">${ICONS.search}<span>${escapeHtml(T('智能检索', 'Search'))}</span></button>
         </form>
         <div id="nlSearchResults"><div class="scm-empty">${escapeHtml(T('支持自然语言描述、函数/变量名（git log -S）及路径组合检索。', 'Searches commit messages, code pickaxe (-S), authors, dates, and paths.'))}</div></div>
@@ -1545,7 +1545,12 @@
     });
 
     const input = document.getElementById('nlSearchQuery');
-    setTimeout(() => input.focus(), 30);
+    setTimeout(() => {
+      input.focus();
+      if (initialQuery && String(initialQuery).trim()) {
+        document.getElementById('nlSearchForm')?.requestSubmit?.();
+      }
+    }, 30);
 
     document.getElementById('nlSearchForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -1873,6 +1878,8 @@
       { id: 'patch-bundle', icon: ICONS.patch || ICONS.copy, title: T('便携式 Review Patch 补丁包（导出 / 导入预检）', 'Portable Review Patch Bundles (Export / Inspect & Apply)'), sub: T('无需推送分支即可分享完整上下文补丁包，支持预检与 --3way 应用', 'Share uncommitted or range diffs with metadata, check cleanly, and apply'), run: () => window.GitMapRemoteAndGitUI?.openPatchBundleModal() },
       { id: 'launchpad', icon: ICONS.flame || ICONS.chart, title: T('多仓库指挥台 & 活动热力图 (Launchpad)', 'Multi-Repo Launchpad & Activity Heatmap'), sub: T('跨仓库行动清单（冲突/待提交/待推送/落后）+ 16 周交互式提交热力图', 'Actionable cross-repo buckets plus interactive 16-week commit heatmap'), kbd: '⇧⌘D', run: () => window.GitMapRemoteAndGitUI?.openMultiRepoDashboardModal() },
       { id: 'compare-commits', icon: ICONS.branch || ICONS.layers, title: T('对比两个分支的指定提交 (Compare Commits)', 'Compare Specific Commits Across Branches'), sub: T('在两个分支/标签上分别挑选任意提交，对比精确文件差异与独有提交', 'Pick any commit on two branches or tags to compare file diffs and unique commits'), run: () => window.GitMapRemoteAndGitUI?.openCommitCompareModal() },
+      { id: 'browse-commit-files', icon: ICONS.folderOpen, title: T('浏览提交历史全量文件快照 (Commit Snapshot Files)', 'Browse Full Repository Files at Commit'), sub: T('查看任意提交当时仓库内的完整目录树与文件内容，支持模糊搜索与一键还原', 'Explore every file & folder at any commit, fuzzy-search paths, diff, or restore'), run: () => App.openCommitTreeTab?.({ repo: state.activeRepo, commitHash: 'HEAD' }) },
+      { id: 'deleted-files', icon: ICONS.history, title: T('已删除文件 / 文件夹历史溯源 (Deleted Files Archaeology)', 'Find Deleted Files & Folders in History'), sub: T('定位某个文件或目录在何时被哪次提交删除，查看删前内容、时光机或一键恢复', 'Find when files/folders were deleted, view pre-delete snapshots, Time Machine, or restore'), run: () => window.GitMapRemoteAndGitUI?.openDeletedFilesModal?.() },
       { id: 'rebase', icon: ICONS.merge, title: T('可视化交互式变基 (Interactive Rebase)', 'Visual Interactive Rebase'), sub: T('拖拽排序提交、Pick / Reword / Squash / Fixup / Drop', 'Reorder, reword, squash, fixup, or drop commits'), run: () => openInteractiveRebaseModal() },
       { id: 'worktrees', icon: ICONS.layers, title: T('Git Worktree 多工作树管理', 'Manage Git Worktrees'), sub: T('并行检出多个分支供多任务 / 多 Agent 同时开发', 'Checkout multiple branches simultaneously in parallel folders'), run: () => openWorktreesModal() },
       { id: 'prs', icon: ICONS.pullRequest, title: T('Pull Requests / Merge Requests 协作', 'Pull Requests & Merge Requests'), sub: T('查看 PR 与 CI 状态、检出分支、AI 生成并发起 PR', 'View PRs & CI checks, checkout PR branch, or create PR with AI'), run: () => openPullRequestsModal() },
@@ -1929,6 +1936,8 @@
       ${item('commit-composer', ICONS.sparkle, T('AI 提交编排器 (Composer)', 'AI Commit Composer'))}
       ${item('patch-bundle', ICONS.patch || ICONS.copy, T('Review Patch 补丁包', 'Review Patch Bundles'))}
       ${item('compare-commits', ICONS.branch || ICONS.layers, T('对比两个分支的指定提交', 'Compare Branch Commits'))}
+      ${item('browse-commit-files', ICONS.folderOpen, T('浏览提交历史全量文件快照', 'Browse Files at Commit'))}
+      ${item('deleted-files', ICONS.history, T('已删除文件 / 目录历史溯源', 'Deleted Files Archaeology'))}
       ${item('rebase', ICONS.merge, T('可视化交互式变基', 'Interactive Rebase'))}
       ${item('worktrees', ICONS.layers, T('Git Worktree 多工作树', 'Git Worktrees'))}
       ${item('prs', ICONS.pullRequest, T('PR / MR 状态与创建', 'Pull / Merge Requests'))}

@@ -355,6 +355,9 @@ function observeResponseMessages(gitGraph: GitGraphView, imageResizer: ImageResi
 			case 'viewFileAtRevision':
 				finishOrDisplayError(msg.error, t('Unable to View File at Revision'));
 				break;
+			case 'loadCommitTree':
+				gitGraph.receiveCommitTree(msg.commitHash, msg.subPath, msg.entries, msg.error);
+				break;
 			case 'viewScm':
 				finishOrDisplayError(msg.error, t('Unable to open the Source Control View'));
 				break;

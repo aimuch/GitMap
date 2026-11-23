@@ -2105,7 +2105,10 @@ export class GitMapServer {
         const repo = String(params.repo || '');
         const filePath = String(params.filePath || '');
         const commit = params.commit ? String(params.commit) : null;
-        const blame = await this.diffService.loadFileBlame(repo, filePath, commit);
+        const blame = await this.diffService.loadFileBlame(repo, filePath, commit, {
+          ignoreWhitespace: !!params.ignoreWhitespace,
+          detectMoves: !!params.detectMoves
+        });
         return { blame };
       }
 
@@ -2459,6 +2462,67 @@ export class GitMapServer {
         });
         this.openViewTo({ repo });
         return { ...res, status: await this.dataSource.getWorkingTreeStatus(repo) };
+      }
+
+      /* Commit Snapshot File Explorer & Deleted File / Folder Archaeology */
+      case 'commit:tree': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const commitHash = String(params.commitHash || params.ref || 'HEAD').trim();
+        const subPath = typeof params.subPath === 'string' ? params.subPath : '';
+        return this.enhancementsService.listCommitTree(repo, commitHash, subPath);
+      }
+
+      case 'commit:searchTree': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const commitHash = String(params.commitHash || params.ref || 'HEAD').trim();
+        const query = String(params.query || '');
+        const limit = Number(params.limit) || 200;
+        return this.enhancementsService.searchCommitTree(repo, commitHash, query, limit);
+      }
+
+      case 'commit:diffWorking': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const commitHash = String(params.commitHash || params.ref || 'HEAD').trim();
+        return this.enhancementsService.diffCommitAgainstWorkingTree(repo, commitHash);
+      }
+
+      case 'commit:extractCopy': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const commitHash = String(params.commitHash || params.ref || '').trim();
+        const targetPath = String(params.path || params.targetPath || '').trim();
+        if (!commitHash || !targetPath) throw new Error('Both commitHash and path are required.');
+        const res = await this.enhancementsService.extractPathCopyFromCommit(repo, commitHash, targetPath);
+        this.openViewTo({ repo });
+        return res;
+      }
+
+      case 'commit:restorePath': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const commitHash = String(params.commitHash || params.ref || '').trim();
+        const targetPath = String(params.path || params.targetPath || '').trim();
+        if (!commitHash || !targetPath) throw new Error('Both commitHash and path are required.');
+        const res = await this.enhancementsService.restorePathFromCommit(repo, commitHash, targetPath);
+        this.openViewTo({ repo });
+        return res;
+      }
+
+      case 'history:findDeleted': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        return this.enhancementsService.findDeletedPaths(repo, {
+          query: typeof params.query === 'string' ? params.query : undefined,
+          pathFilter: typeof params.pathFilter === 'string' ? params.pathFilter : undefined,
+          ref: typeof params.ref === 'string' ? params.ref : 'HEAD',
+          limit: Number(params.limit) || 300,
+          skip: Number(params.skip) || 0,
+          batchCommits: Number(params.batchCommits) || undefined,
+          detectRenames: params.detectRenames !== false
+        });
       }
 
       /* Settings Export / Import (Sanitized or AES-256-GCM Encrypted) */

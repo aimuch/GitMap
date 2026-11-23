@@ -15,6 +15,7 @@ import { Event } from './utils/event';
 import { t } from './l10n';
 import { createRepoTempFiles, formatRemoteRepoUri, isRemoteRepo, joinRepoPath, parseRemoteRepo, readRepoFileBuffer, removeRepoTempDir } from './remote/repoTransport';
 import { sshManager } from './remote/sshManager';
+import { CatFileBatchPool, isImmutableCommitHash } from './server/gitCatFilePool';
 
 const DRIVE_LETTER_PATH_REGEX = /^[a-z]:\//;
 const EOL_REGEX = /\r\n|\r|\n/g;
@@ -56,6 +57,7 @@ export class DataSource extends Disposable {
 	private readonly askpassEnv: AskpassEnvironment;
 	private gitExecutable!: GitExecutable | null;
 	private gitExecutableSupportsGpgInfo!: boolean;
+	private readonly catFilePool = new CatFileBatchPool();
 	private gitFormatCommitDetails!: string;
 	private gitFormatLog!: string;
 	private gitFormatStash!: string;
@@ -88,8 +90,10 @@ export class DataSource extends Disposable {
 			}),
 			onDidChangeGitExecutable((gitExecutable) => {
 				this.setGitExecutable(gitExecutable);
+				this.catFilePool.dispose();
 			}),
-			askpassManager
+			askpassManager,
+			this.catFilePool
 		);
 	}
 
@@ -573,23 +577,47 @@ export class DataSource extends Disposable {
 	 * @param filePath The path of the file relative to the repositories root.
 	 * @returns The file contents.
 	 */
-	public getCommitFile(repo: string, commitHash: string, filePath: string) {
-		if (!commitHash || commitHash.startsWith('-')) {
-			return Promise.reject('Invalid Git revision.');
-		}
-		return this._spawnGit(['show', commitHash + ':' + filePath], repo, stdout => {
-			const encoding = getConfig(repo).fileEncoding;
-			return decode(stdout, encodingExists(encoding) ? encoding : 'utf8');
-		});
-	}
-
-	public getCommitFileBuffer(repo: string, commitHash: string, filePath: string, maxBytes: number): Promise<{ buffer: Buffer; encoding: string }> {
+	public async getCommitFile(repo: string, commitHash: string, filePath: string) {
 		if (!commitHash || commitHash.startsWith('-')) {
 			return Promise.reject('Invalid Git revision.');
 		}
 		const encoding = getConfig(repo).fileEncoding;
 		const resolvedEncoding = encodingExists(encoding) ? encoding : 'utf8';
-		return this._spawnGit(
+		const { buffer } = await this.getCommitFileBuffer(repo, commitHash, filePath, 16 * 1024 * 1024);
+		return decode(buffer, resolvedEncoding);
+	}
+
+	public async getCommitFileBuffer(repo: string, commitHash: string, filePath: string, maxBytes: number): Promise<{ buffer: Buffer; encoding: string }> {
+		if (!commitHash || commitHash.startsWith('-')) {
+			return Promise.reject('Invalid Git revision.');
+		}
+		const encoding = getConfig(repo).fileEncoding;
+		const resolvedEncoding = encodingExists(encoding) ? encoding : 'utf8';
+		const safeForBatch = !commitHash.includes('\n') && !commitHash.includes('\r') && !filePath.includes('\n') && !filePath.includes('\r');
+
+		// 1. Check immutable SHA-keyed blob LRU cache (works for both local and Remote-SSH repos)
+		if (safeForBatch) {
+			const cached = this.catFilePool.getCachedCommitFile(repo, commitHash, filePath, maxBytes);
+			if (cached) {
+				return { buffer: cached.buffer, encoding: resolvedEncoding };
+			}
+		}
+
+		// 2. For local repos, use pooled persistent `git cat-file --batch` worker (<5ms, zero fork overhead)
+		if (safeForBatch && !isRemoteRepo(repo) && this.gitExecutable !== null) {
+			try {
+				const hit = await this.catFilePool.readLocalCommitBlob(this.gitExecutable.path, repo, commitHash, filePath, maxBytes);
+				if (hit !== null) {
+					return { buffer: hit.buffer, encoding: resolvedEncoding };
+				}
+				return Promise.reject(`Path '${filePath}' does not exist in '${commitHash}'`);
+			} catch {
+				// Fall through to standard `git show` on transient batch pipe issues
+			}
+		}
+
+		// 3. Fallback (Remote-SSH or unusual filenames): `git show <commit>:<filePath>` + populate immutable cache
+		const res = await this._spawnGit(
 			['show', commitHash + ':' + filePath],
 			repo,
 			(stdout) => ({ buffer: stdout, encoding: resolvedEncoding }),
@@ -598,6 +626,16 @@ export class DataSource extends Disposable {
 			null,
 			{ maxBytes }
 		);
+		if (safeForBatch && isImmutableCommitHash(commitHash)) {
+			this.catFilePool.putCachedCommitFile(repo, commitHash, filePath, {
+				objectHash: '',
+				size: res.buffer.length,
+				buffer: res.buffer,
+				truncated: res.buffer.length >= maxBytes,
+				maxBytesCap: maxBytes
+			});
+		}
+		return res;
 	}
 
 
@@ -2279,8 +2317,22 @@ export class DataSource extends Disposable {
 	 * @param cancellation Optional token cancelling the blame process.
 	 * @returns The blame of the file, or NULL if it couldn't be determined (e.g. the file isn't tracked).
 	 */
-	public getFileBlame(repo: string, filePath: string, contents: string | null = null, cancellation?: vscode.CancellationToken, commitHash?: string | null): Promise<GitFileBlame | null> {
-		const args = ['-c', 'core.quotepath=false', 'blame', '--porcelain', ...this.getBlameOptions(repo)];
+	public getFileBlame(
+		repo: string,
+		filePath: string,
+		contents: string | null = null,
+		cancellation?: vscode.CancellationToken,
+		commitHash?: string | null,
+		blameOptions?: { ignoreWhitespace?: boolean; detectMoves?: boolean }
+	): Promise<GitFileBlame | null> {
+		const opts = [...this.getBlameOptions(repo)];
+		if (blameOptions?.ignoreWhitespace && !opts.includes('-w')) {
+			opts.push('-w');
+		}
+		if (blameOptions?.detectMoves) {
+			opts.push('-M', '-C');
+		}
+		const args = ['-c', 'core.quotepath=false', 'blame', '--porcelain', ...opts];
 		if (contents !== null) {
 			args.push('--contents', '-');
 		} else if (commitHash && commitHash !== '*' && !commitHash.startsWith('-')) {
@@ -2302,6 +2354,13 @@ export class DataSource extends Disposable {
 					else if (key === 'author-time') commit.authorDate = parseInt(value) || 0;
 					else if (key === 'summary') commit.summary = value;
 					else if (key === 'filename') commit.filePath = value;
+					else if (key === 'previous') {
+						const prevSpace = value.indexOf(' ');
+						if (prevSpace > 0) {
+							commit.previousCommit = value.substring(0, prevSpace);
+							commit.previousFilePath = value.substring(prevSpace + 1);
+						}
+					}
 				}
 			});
 			return lines.length > 0 ? { lines: lines, commits: commits } : null;

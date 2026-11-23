@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { getConfig } from './config';
 import { DataSource } from './dataSource';
@@ -5,8 +7,10 @@ import { DiffDocProvider, decodeDiffDocUri } from './diffDocProvider';
 import { GitFeatures } from './gitFeatures';
 import { getLanguage, t } from './l10n';
 import { Logger } from './logger';
-import { joinRepoPath, readRepoFileBuffer } from './remote/repoTransport';
+import { joinRepoPath, parseRemoteRepo, readRepoFileBuffer, writeRepoFileBuffer } from './remote/repoTransport';
+import { RepoFileWatcher } from './repoFileWatcher';
 import { RepoManager } from './repoManager';
+import { buildExtractCopyPath } from './server/enhancementsService';
 import { GitFileStatus, GitFileTimelineCommit } from './types';
 import { UNCOMMITTED, getNonce, getPathFromUri, showErrorMessage, viewDiff, viewFileAtRevision } from './utils';
 import { Disposable } from './utils/disposable';
@@ -248,6 +252,34 @@ export class FileTimeMachine extends Disposable {
 		return { diff: buildSimpleUnifiedDiff(filePath, headContent, workContent), error: null };
 	}
 
+	private async loadCompareData(
+		shown: ShownTimeMachine,
+		baseIndex: number,
+		targetIndex: number
+	): Promise<{ diff: string; error: string | null }> {
+		const base = shown.entries[baseIndex];
+		const target = shown.entries[targetIndex];
+		if (!base || !target) return { diff: '', error: 'Invalid comparison revision index.' };
+		if (baseIndex === targetIndex) return { diff: '', error: null };
+
+		if (base.hash !== UNCOMMITTED && target.hash !== UNCOMMITTED) {
+			return this.dataSource.getFileDiff(shown.repo, target.hash, base.hash, base.filePath, target.filePath);
+		}
+
+		const readSide = async (entry: TimeMachineEntry): Promise<string> => {
+			if (entry.hash === UNCOMMITTED) {
+				if (!isSafeRelativePath(entry.filePath)) return '';
+				const buf = await readRepoFileBuffer(shown.repo, entry.filePath).catch(() => null);
+				if (buf === null || buf.includes(0)) return '';
+				return buf.toString('utf8').slice(0, MAX_SNAPSHOT_CHARS);
+			}
+			return this.dataSource.getCommitFile(shown.repo, entry.hash, entry.filePath)
+				.then((c) => c.slice(0, MAX_SNAPSHOT_CHARS), () => '');
+		};
+		const [baseText, targetText] = await Promise.all([readSide(base), readSide(target)]);
+		return { diff: buildSimpleUnifiedDiff(target.filePath, baseText, targetText), error: null };
+	}
+
 	private async onMessage(message: any) {
 		const shown = this.shown;
 		if (shown === null || this.panel === null || typeof message !== 'object' || message === null) return;
@@ -263,6 +295,32 @@ export class FileTimeMachine extends Disposable {
 					error: data.error
 				});
 			}
+			return;
+		}
+
+		if (message.command === 'loadCompare' && typeof message.baseIndex === 'number' && typeof message.targetIndex === 'number') {
+			const data = await this.loadCompareData(shown, message.baseIndex, message.targetIndex);
+			if (this.panel !== null && this.shown === shown) {
+				this.panel.webview.postMessage({
+					command: 'compareData',
+					baseIndex: message.baseIndex,
+					targetIndex: message.targetIndex,
+					diff: data.diff,
+					error: data.error
+				});
+			}
+			return;
+		}
+
+		if (message.command === 'openCompareDiff' && typeof message.baseIndex === 'number' && typeof message.targetIndex === 'number') {
+			const base = shown.entries[message.baseIndex];
+			const target = shown.entries[message.targetIndex];
+			if (!base || !target) return;
+			const swapLive = base.hash === UNCOMMITTED && target.hash !== UNCOMMITTED;
+			const left = swapLive ? target : base;
+			const right = swapLive ? base : target;
+			const err = await viewDiff(shown.repo, left.hash, right.hash, left.filePath, right.filePath, GitFileStatus.Modified);
+			if (err !== null) showErrorMessage(err);
 			return;
 		}
 
@@ -302,6 +360,49 @@ export class FileTimeMachine extends Disposable {
 			case 'viewCommit':
 				if (entry.hash !== UNCOMMITTED) {
 					await vscode.commands.executeCommand('git-map.viewCommitInGitMap', shown.repo, entry.hash);
+				}
+				break;
+			case 'restoreRevision':
+				if (entry.hash !== UNCOMMITTED) {
+					try {
+						if (!isSafeRelativePath(shown.filePath)) throw new Error('Invalid file path.');
+						const { buffer } = await this.dataSource.getCommitFileBuffer(shown.repo, entry.hash, entry.filePath, 32 * 1024 * 1024);
+						await writeRepoFileBuffer(shown.repo, shown.filePath, buffer);
+						RepoFileWatcher.notifyPossibleRemoteChange(200);
+						const feedback = t('Restored {0} from {1}', shown.filePath, entry.hash.substring(0, 7));
+						this.panel.webview.postMessage({ command: 'actionFeedback', ok: true, message: feedback });
+					} catch (e) {
+						const msg = e instanceof Error ? e.message : String(e);
+						this.panel.webview.postMessage({ command: 'actionFeedback', ok: false, message: msg });
+					}
+				}
+				break;
+			case 'extractCopy':
+				if (entry.hash !== UNCOMMITTED) {
+					try {
+						if (!isSafeRelativePath(shown.filePath)) throw new Error('Invalid file path.');
+						const { buffer } = await this.dataSource.getCommitFileBuffer(shown.repo, entry.hash, entry.filePath, 32 * 1024 * 1024);
+						const shortHash = entry.hash.substring(0, 7);
+						let outPath = buildExtractCopyPath(shown.filePath, shortHash, 0);
+						for (let attempt = 0; attempt < 25; attempt++) {
+							const candidate = buildExtractCopyPath(shown.filePath, shortHash, attempt);
+							const exists = parseRemoteRepo(shown.repo)
+								? (await readRepoFileBuffer(shown.repo, candidate, 1)) !== null
+								: fs.existsSync(path.resolve(shown.repo, candidate));
+							if (!exists) {
+								outPath = candidate;
+								break;
+							}
+							outPath = candidate;
+						}
+						await writeRepoFileBuffer(shown.repo, outPath, buffer);
+						RepoFileWatcher.notifyPossibleRemoteChange(200);
+						const feedback = t('Extracted copy to {0}', outPath);
+						this.panel.webview.postMessage({ command: 'actionFeedback', ok: true, message: feedback });
+					} catch (e) {
+						const msg = e instanceof Error ? e.message : String(e);
+						this.panel.webview.postMessage({ command: 'actionFeedback', ok: false, message: msg });
+					}
 				}
 				break;
 		}
@@ -370,7 +471,16 @@ export function getFileTimeMachineHtml(
 		hiddenLines: t('⋯ {0} unchanged lines collapsed ⋯'),
 		zoomOut: t('Zoom Out Timeline'),
 		zoomIn: t('Zoom In Timeline'),
-		scrubHint: t('Drag playhead, click ticks, or use ↑ / ↓ keys to travel through commits')
+		scrubHint: t('Drag playhead, click ticks, or use ↑ / ↓ keys to travel through commits'),
+		pinBase: t('Pin Base (A)'),
+		unpinBase: t('Unpin A'),
+		pinnedSameHint: t('Pinned Base A ({0}) — scrub timeline or press ↑ / ↓ to compare against another revision B'),
+		comparingPair: t('Comparing Base A ({0}) → Current B ({1})'),
+		swapPair: t('Swap A ↔ B'),
+		openPairDiff: t('Open A ↔ B Diff'),
+		extractCopy: t('Extract Copy'),
+		restoreVersion: t('Restore Version'),
+		confirmRestore: t('Click Again to Restore')
 	};
 	const serialised = entries.map((e) => ({
 		h: e.hash,
@@ -412,11 +522,16 @@ export function getFileTimeMachineHtml(
 						'<div id="ftmSubline" class="ftmSubline"></div>' +
 					'</div>' +
 					'<div class="ftmActions">' +
+						'<button type="button" id="ftmPinBtn" class="ftmBtn">' + escapeHtml(strings.pinBase) + '</button>' +
 						'<button type="button" class="ftmBtn primary" data-action="openChanges">' + escapeHtml(strings.openChanges) + '</button>' +
 						'<button type="button" class="ftmBtn" data-action="openFile">' + escapeHtml(strings.openFile) + '</button>' +
+						'<button type="button" id="ftmExtractBtn" class="ftmBtn" data-action="extractCopy">' + escapeHtml(strings.extractCopy) + '</button>' +
+						'<button type="button" id="ftmRestoreBtn" class="ftmBtn danger">' + escapeHtml(strings.restoreVersion) + '</button>' +
 						'<button type="button" id="ftmViewCommit" class="ftmBtn" data-action="viewCommit">' + escapeHtml(strings.viewCommit) + '</button>' +
 					'</div>' +
 				'</section>' +
+				'<div id="ftmPinBanner" class="ftmPinBanner hidden"></div>' +
+				'<div id="ftmToast" class="ftmToast hidden"></div>' +
 				'<div id="ftmCode" class="ftmCode" tabindex="0"></div>' +
 			'</main>' +
 			'<aside class="ftmRulerDock" aria-label="' + escapeHtml(strings.scrubHint) + '">' +
@@ -463,6 +578,16 @@ button{font:inherit;color:inherit}
 .ftmBtn{height:26px;padding:0 10px;border:1px solid var(--vscode-dropdown-border,rgba(128,128,128,.38));border-radius:6px;background:var(--vscode-button-secondaryBackground,rgba(128,128,128,.14));color:var(--vscode-button-secondaryForeground,inherit);cursor:pointer;font-size:12px;white-space:nowrap}
 .ftmBtn:hover{filter:brightness(1.08)}
 .ftmBtn.primary{border-color:transparent;background:var(--vscode-button-background);color:var(--vscode-button-foreground);font-weight:600}
+.ftmBtn.pinned{border-color:#f59e0b;background:rgba(245,158,11,.18);color:#f59e0b;font-weight:600}
+.ftmBtn.danger{border-color:rgba(248,81,73,.45);color:#f85149}
+.ftmBtn.danger.armed{border-color:#f85149;background:#f85149;color:#fff;font-weight:600}
+.ftmPinBanner{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:6px 14px;background:rgba(245,158,11,.14);border-bottom:1px solid rgba(245,158,11,.38);font-size:12px}
+.ftmPinBannerText{font-weight:600;color:var(--vscode-foreground)}
+.ftmPinBannerBtns{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+.ftmToast{padding:6px 14px;font-size:12px;border-bottom:1px solid var(--vscode-panel-border);background:rgba(34,197,94,.14);color:#22c55e;font-weight:500}
+.ftmToast.err{background:rgba(248,81,73,.14);color:#f85149}
+.ftmCommitTick.pinned .ftmCommitPip{background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.45)}
+.ftmCommitTick.pinned .ftmTickLabel{color:#f59e0b;font-weight:700}
 .ftmCommitBar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 14px;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.22));background:color-mix(in srgb,var(--vscode-sideBar-background,var(--vscode-editor-background)) 60%,transparent)}
 .ftmNavBtns{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto}
 .ftmIconBtn{width:26px;height:26px;border-radius:6px;border:1px solid var(--vscode-dropdown-border,rgba(128,128,128,.35));background:transparent;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
@@ -520,6 +645,10 @@ const SCRIPT = `
 	var mode = INITIAL_MODE;
 	var zoom = 1;
 	var cache = {};
+	var compareCache = {};
+	var pinnedIndex = null;
+	var restoreArmed = false, restoreTimer = null;
+	var toastTimer = null;
 	var inflight = false, pendingIndex = -1;
 	var PAD_TOP = 28, PAD_BOTTOM = 28;
 
@@ -580,7 +709,7 @@ const SCRIPT = `
 			if (showLabel) lastLabelY = cy;
 			var e = ENTRIES[i];
 			var delta = (e.p > 0 || e.m > 0) ? ('+' + e.p + ' −' + e.m) : '';
-			html += '<div class="ftmCommitTick' + (i === currentIndex ? ' active' : '') + '" data-index="' + i + '" style="top:' + cy.toFixed(1) + 'px" title="' + esc(e.s + ' · ' + e.a) + '">' +
+			html += '<div class="ftmCommitTick' + (i === currentIndex ? ' active' : '') + (i === pinnedIndex ? ' pinned' : '') + '" data-index="' + i + '" style="top:' + cy.toFixed(1) + 'px" title="' + esc(e.s + ' · ' + e.a) + '">' +
 				'<span class="ftmTickLabel">' + (showLabel ? esc(formatRulerTime(e.d, i)) : '') + '</span>' +
 				'<span class="ftmTickMark"></span>' +
 				'<span class="ftmCommitPip"></span>' +
@@ -602,7 +731,9 @@ const SCRIPT = `
 		var entry = ENTRIES[currentIndex];
 		badge.textContent = entry.live ? STRINGS.live : dtfTime.format(new Date(entry.d * 1000));
 		document.querySelectorAll('.ftmCommitTick').forEach(function (el) {
-			el.classList.toggle('active', parseInt(el.dataset.index) === currentIndex);
+			var idxNum = parseInt(el.dataset.index);
+			el.classList.toggle('active', idxNum === currentIndex);
+			el.classList.toggle('pinned', idxNum === pinnedIndex);
 		});
 		if (ensureVisible) {
 			var scrollEl = document.getElementById('ftmRulerScroll');
@@ -623,13 +754,53 @@ const SCRIPT = `
 		vscode.postMessage({ command: 'loadRevision', index: idx });
 	}
 
+	function shortLabel(idx) {
+		var e = ENTRIES[idx];
+		if (!e) return '';
+		return e.h === '*' ? STRINGS.live : e.h.substring(0, 7);
+	}
+
+	function disarmRestore() {
+		restoreArmed = false;
+		if (restoreTimer) { clearTimeout(restoreTimer); restoreTimer = null; }
+		var rb = document.getElementById('ftmRestoreBtn');
+		if (rb) {
+			rb.classList.remove('armed');
+			rb.textContent = STRINGS.restoreVersion;
+		}
+	}
+
+	function showToastBanner(msg, isErr) {
+		var el = document.getElementById('ftmToast');
+		if (!el) return;
+		el.textContent = msg;
+		el.classList.toggle('err', !!isErr);
+		el.classList.remove('hidden');
+		if (toastTimer) clearTimeout(toastTimer);
+		toastTimer = setTimeout(function () { el.classList.add('hidden'); }, 4500);
+	}
+
+	function requestCompare(baseIdx, targetIdx) {
+		if (baseIdx === null || baseIdx === targetIdx) return;
+		var key = baseIdx + ':' + targetIdx;
+		if (compareCache[key]) {
+			renderCode();
+			return;
+		}
+		vscode.postMessage({ command: 'loadCompare', baseIndex: baseIdx, targetIndex: targetIdx });
+	}
+
 	function selectIndex(idx, ensureVisible) {
 		var clamped = Math.min(Math.max(idx, 0), ENTRIES.length - 1);
 		if (clamped !== currentIndex) {
+			disarmRestore();
 			currentIndex = clamped;
 			updatePlayheadPosition(null, ensureVisible);
 			renderHeader();
 			renderCode();
+			if (pinnedIndex !== null && pinnedIndex !== currentIndex && mode !== 'snapshot') {
+				requestCompare(pinnedIndex, currentIndex);
+			}
 			requestRevision(currentIndex);
 		}
 	}
@@ -657,7 +828,36 @@ const SCRIPT = `
 			'<span>' + esc(dtfFull.format(new Date(e.d * 1000))) + '</span><span>·</span>' +
 			'<span class="ftmHash">' + esc(hashText) + '</span>' +
 			((e.p > 0 || e.m > 0) ? '<span>·</span><span class="ftmAdd">+' + e.p + '</span><span class="ftmDel">−' + e.m + '</span>' : '');
-		document.getElementById('ftmViewCommit').classList.toggle('hidden', e.h === '*');
+		var isLiveEntry = e.h === '*';
+		document.getElementById('ftmViewCommit').classList.toggle('hidden', isLiveEntry);
+		document.getElementById('ftmExtractBtn').classList.toggle('hidden', isLiveEntry);
+		document.getElementById('ftmRestoreBtn').classList.toggle('hidden', isLiveEntry);
+
+		var pinBtn = document.getElementById('ftmPinBtn');
+		var isPinnedHere = pinnedIndex === currentIndex;
+		pinBtn.classList.toggle('pinned', pinnedIndex !== null);
+		pinBtn.textContent = isPinnedHere ? STRINGS.unpinBase : STRINGS.pinBase;
+
+		var banner = document.getElementById('ftmPinBanner');
+		if (pinnedIndex === null) {
+			banner.classList.add('hidden');
+			banner.innerHTML = '';
+		} else {
+			banner.classList.remove('hidden');
+			if (pinnedIndex === currentIndex) {
+				banner.innerHTML =
+					'<span class="ftmPinBannerText">' + esc(STRINGS.pinnedSameHint.replace('{0}', shortLabel(pinnedIndex))) + '</span>' +
+					'<span class="ftmPinBannerBtns"><button type="button" id="ftmUnpinBanner" class="ftmBtn">' + esc(STRINGS.unpinBase) + '</button></span>';
+			} else {
+				banner.innerHTML =
+					'<span class="ftmPinBannerText">' + esc(STRINGS.comparingPair.replace('{0}', shortLabel(pinnedIndex)).replace('{1}', shortLabel(currentIndex))) + '</span>' +
+					'<span class="ftmPinBannerBtns">' +
+						'<button type="button" id="ftmSwapPair" class="ftmBtn">' + esc(STRINGS.swapPair) + '</button>' +
+						'<button type="button" id="ftmOpenPairDiff" class="ftmBtn primary">' + esc(STRINGS.openPairDiff) + '</button>' +
+						'<button type="button" id="ftmUnpinBanner" class="ftmBtn">' + esc(STRINGS.unpinBase) + '</button>' +
+					'</span>';
+			}
+		}
 	}
 
 	function renderDiffHtml(diffText, collapseContext) {
@@ -713,6 +913,20 @@ const SCRIPT = `
 
 	function renderCode() {
 		var codeEl = document.getElementById('ftmCode');
+		if (pinnedIndex !== null && pinnedIndex !== currentIndex && mode !== 'snapshot') {
+			var pairKey = pinnedIndex + ':' + currentIndex;
+			var pair = compareCache[pairKey];
+			if (!pair) {
+				codeEl.innerHTML = '<div class="ftmEmpty">' + esc(STRINGS.loading) + '</div>';
+				return;
+			}
+			if (pair.error) {
+				codeEl.innerHTML = '<div class="ftmEmpty">' + esc(pair.error) + '</div>';
+				return;
+			}
+			codeEl.innerHTML = renderDiffHtml(pair.diff, mode === 'changes');
+			return;
+		}
 		var data = cache[currentIndex];
 		if (!data) {
 			codeEl.innerHTML = '<div class="ftmEmpty">' + esc(STRINGS.loading) + '</div>';
@@ -731,7 +945,17 @@ const SCRIPT = `
 
 	window.addEventListener('message', function (ev) {
 		var msg = ev.data;
-		if (!msg || msg.command !== 'revisionData') return;
+		if (!msg) return;
+		if (msg.command === 'compareData') {
+			compareCache[msg.baseIndex + ':' + msg.targetIndex] = { diff: msg.diff, error: msg.error };
+			if (pinnedIndex === msg.baseIndex && currentIndex === msg.targetIndex) renderCode();
+			return;
+		}
+		if (msg.command === 'actionFeedback') {
+			showToastBanner(msg.message || '', !msg.ok);
+			return;
+		}
+		if (msg.command !== 'revisionData') return;
 		cache[msg.index] = { diff: msg.diff, snapshot: msg.snapshot, error: msg.error };
 		inflight = false;
 		if (msg.index === currentIndex) renderCode();
@@ -790,7 +1014,54 @@ const SCRIPT = `
 		if (modeBtn) {
 			mode = modeBtn.dataset.mode;
 			renderHeader();
+			if (pinnedIndex !== null && pinnedIndex !== currentIndex && mode !== 'snapshot') {
+				requestCompare(pinnedIndex, currentIndex);
+			}
 			renderCode();
+			return;
+		}
+		if (t.closest('#ftmPinBtn')) {
+			pinnedIndex = pinnedIndex === currentIndex ? null : currentIndex;
+			updatePlayheadPosition(null, false);
+			renderHeader();
+			if (pinnedIndex !== null && pinnedIndex !== currentIndex && mode !== 'snapshot') {
+				requestCompare(pinnedIndex, currentIndex);
+			}
+			renderCode();
+			return;
+		}
+		if (t.closest('#ftmUnpinBanner')) {
+			pinnedIndex = null;
+			updatePlayheadPosition(null, false);
+			renderHeader();
+			renderCode();
+			return;
+		}
+		if (t.closest('#ftmSwapPair') && pinnedIndex !== null && pinnedIndex !== currentIndex) {
+			var oldPin = pinnedIndex;
+			pinnedIndex = currentIndex;
+			currentIndex = oldPin;
+			updatePlayheadPosition(null, true);
+			renderHeader();
+			requestCompare(pinnedIndex, currentIndex);
+			renderCode();
+			return;
+		}
+		if (t.closest('#ftmOpenPairDiff') && pinnedIndex !== null && pinnedIndex !== currentIndex) {
+			vscode.postMessage({ command: 'openCompareDiff', baseIndex: pinnedIndex, targetIndex: currentIndex });
+			return;
+		}
+		if (t.closest('#ftmRestoreBtn')) {
+			var rb = document.getElementById('ftmRestoreBtn');
+			if (!restoreArmed) {
+				restoreArmed = true;
+				rb.classList.add('armed');
+				rb.textContent = STRINGS.confirmRestore;
+				restoreTimer = setTimeout(disarmRestore, 3500);
+			} else {
+				disarmRestore();
+				vscode.postMessage({ command: 'restoreRevision', index: currentIndex });
+			}
 			return;
 		}
 		if (t.closest('#ftmNewer')) { selectIndex(currentIndex - 1, true); return; }

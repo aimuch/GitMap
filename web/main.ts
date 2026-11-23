@@ -81,7 +81,13 @@ class GitGraphView {
 	private scrollToStashPending: { stash: GG.GitStash, attempts: number } | null = null;
 	public stashStats: { [hash: string]: GG.GitStashStats } = {};
 	public expandedCommit: ExpandedCommit | null = null;
-	private activeCdvTab: 'files' | 'message' | 'explain' = 'files';
+	private activeCdvTab: 'files' | 'allFiles' | 'message' | 'explain' = 'files';
+	private cdvTreeCommitHash: string | null = null;
+	private cdvTreeCache: Map<string, ReadonlyArray<GG.CommitTreeFileEntry>> = new Map();
+	private cdvTreeExpanded: Set<string> = new Set();
+	private cdvTreeLoading: Set<string> = new Set();
+	private cdvTreeError: string | null = null;
+	private cdvTreeFilter: string = '';
 	private rowContext: RowRenderContext | null = null;
 	private renderedRows: { start: number, end: number } | null = null; // The rows rendered when they're virtualised (NULL => all rows are rendered)
 	private readonly pinnedRows: Set<number> = new Set(); // Rows rendered outside of the rendered range (e.g. to open the details of a commit)
@@ -270,7 +276,7 @@ class GitGraphView {
 			this.knownAuthors = prevState.knownAuthors || [];
 			this.maxCommits = prevState.maxCommits;
 			this.expandedCommit = prevState.expandedCommit;
-			if (prevState.activeCdvTab === 'files' || prevState.activeCdvTab === 'message' || prevState.activeCdvTab === 'explain') {
+			if (prevState.activeCdvTab === 'files' || prevState.activeCdvTab === 'allFiles' || prevState.activeCdvTab === 'message' || prevState.activeCdvTab === 'explain') {
 				this.activeCdvTab = prevState.activeCdvTab;
 			}
 			this.avatars = prevState.avatars;
@@ -3021,7 +3027,7 @@ class GitGraphView {
 		const codeReviewPossible = !expandedCommit.loading && commitOrder.to !== UNCOMMITTED;
 		const externalDiffPossible = !expandedCommit.loading && (expandedCommit.compareWithHash !== null || this.commits[this.commitLookup[expandedCommit.commitHash]].parents.length > 0);
 		const explainPossible = this.config.explainCommit && expandedCommit.compareWithHash === null && expandedCommit.commitHash !== UNCOMMITTED && this.commits[this.commitLookup[expandedCommit.commitHash]].stash === null;
-		let activeTab: 'files' | 'message' | 'explain' = 'files';
+		let activeTab: 'files' | 'allFiles' | 'message' | 'explain' = 'files';
 
 		if (elem === null) {
 			if (!isDocked && this.renderedRows !== null) {
@@ -3095,18 +3101,21 @@ class GitGraphView {
 			}
 			const fileViewHtml = generateFileViewHtml(expandedCommit.fileTree!, expandedCommit.fileChanges!, expandedCommit.lastViewedFile, expandedCommit.contextMenuOpen.fileView, this.cdvFileView.getFileViewType(), commitOrder.to === UNCOMMITTED);
 			const reviewBarHtml = generateCdvReviewBarHtml(expandedCommit.fileChanges!);
-			activeTab = (this.activeCdvTab === 'explain' && explainPossible) || (this.activeCdvTab === 'message' && messageHtml !== '') ? this.activeCdvTab : 'files';
-			html += '</div><div id="cdvFiles">' + ((isRight || explainPossible)
-				? '<div id="cdvTabs"><span class="cdvTab' + (activeTab === 'files' ? ' active' : '') + '" data-tab="files">' + MENU_ICONS.files + t('Changed Files') + ' · ' + expandedCommit.fileChanges!.length + '</span>' + (messageHtml !== '' ? '<span class="cdvTab' + (activeTab === 'message' ? ' active' : '') + '" data-tab="message">' + MENU_ICONS.subject + t('Commit Message') + '</span>' : '') + (explainPossible ? '<span class="cdvTab' + (activeTab === 'explain' ? ' active' : '') + '" data-tab="explain">' + CommitExplainer.ICON + t('Explain') + '</span>' : '') + '<span class="cdvTabsSpacer"></span>' +
+			const allFilesPossible = expandedCommit.commitHash !== UNCOMMITTED && expandedCommit.compareWithHash === null;
+			activeTab = (this.activeCdvTab === 'explain' && explainPossible) || (this.activeCdvTab === 'message' && messageHtml !== '') || (this.activeCdvTab === 'allFiles' && allFilesPossible) ? this.activeCdvTab : 'files';
+			html += '</div><div id="cdvFiles">' + ((isRight || explainPossible || allFilesPossible)
+				? '<div id="cdvTabs"><span class="cdvTab' + (activeTab === 'files' ? ' active' : '') + '" data-tab="files">' + MENU_ICONS.files + t('Changed Files') + ' · ' + expandedCommit.fileChanges!.length + '</span>' + (allFilesPossible ? '<span class="cdvTab' + (activeTab === 'allFiles' ? ' active' : '') + '" data-tab="allFiles">' + SVG_ICONS.fileTree + t('All Files') + '</span>' : '') + (messageHtml !== '' ? '<span class="cdvTab' + (activeTab === 'message' ? ' active' : '') + '" data-tab="message">' + MENU_ICONS.subject + t('Commit Message') + '</span>' : '') + (explainPossible ? '<span class="cdvTab' + (activeTab === 'explain' ? ' active' : '') + '" data-tab="explain">' + CommitExplainer.ICON + t('Explain') + '</span>' : '') + '<span class="cdvTabsSpacer"></span>' +
 					(isRight ? '<div class="cdvTabTools"><div class="cdvViewModeGroup"><div id="cdvFileViewTypeTree" class="cdvControlBtn cdvFileViewTypeBtn" title="' + t('File Tree View') + '">' + SVG_ICONS.fileTree + '</div><div id="cdvFileViewTypeList" class="cdvControlBtn cdvFileViewTypeBtn" title="' + t('File List View') + '">' + SVG_ICONS.fileList + '</div></div></div>' : '') + '</div>' +
 					(reviewBarHtml !== '' ? (activeTab !== 'files' ? reviewBarHtml.replace('class="cdvReviewBar', 'class="cdvReviewBar hidden') : reviewBarHtml) : '') +
-					'<div id="cdvFileView"' + (activeTab !== 'files' ? ' class="hidden"' : '') + '>' + fileViewHtml + '</div>' + (messageHtml !== '' ? '<div id="cdvMessageView"' + (activeTab !== 'message' ? ' class="hidden"' : '') + '>' + messageHtml + '</div>' : '') + (explainPossible ? '<div id="cdvExplainView"' + (activeTab !== 'explain' ? ' class="hidden"' : '') + '></div>' : '')
+					'<div id="cdvFileView"' + (activeTab !== 'files' ? ' class="hidden"' : '') + '>' + fileViewHtml + '</div>' + (allFilesPossible ? '<div id="cdvAllFilesView"' + (activeTab !== 'allFiles' ? ' class="hidden"' : '') + '></div>' : '') + (messageHtml !== '' ? '<div id="cdvMessageView"' + (activeTab !== 'message' ? ' class="hidden"' : '') + '>' + messageHtml + '</div>' : '') + (explainPossible ? '<div id="cdvExplainView"' + (activeTab !== 'explain' ? ' class="hidden"' : '') + '></div>' : '')
 				: reviewBarHtml + '<div id="cdvFileView">' + fileViewHtml + '</div>') + '</div><div id="cdvDivider"></div>';
 		}
+		const canBrowseCommitTree = !expandedCommit.loading && expandedCommit.commitHash !== UNCOMMITTED && expandedCommit.compareWithHash === null;
 		if (isRight) {
 			const title = expandedCommit.compareWithHash !== null ? t('Commit Comparison') : expandedCommit.commitHash === UNCOMMITTED ? t('Uncommitted Changes')
 				: !expandedCommit.loading && expandedCommit.fileChanges !== null && this.getCdvFileFocus(expandedCommit.commitHash, expandedCommit.fileChanges) !== null ? t('Changes to this File in the Commit') : t('Commit Details');
 			html = '<div id="cdvHeader"><span class="cdvHeaderTitle">' + title + '</span>' +
+				(canBrowseCommitTree ? '<div id="cdvBrowseTree" class="cdvDiffModePill" title="' + t('Browse all repository files at this commit') + '">' + MENU_ICONS.files + '<span class="cdvDiffModeLabel">' + t('All Files') + '</span></div>' : '') +
 				(!expandedCommit.loading ? '<div id="cdvHideUnchanged" class="cdvDiffModePill">' + MENU_ICONS.foldDiff + '<span class="cdvDiffModeLabel">' + t('Changes Only') + '</span></div>' : '') +
 				(codeReviewPossible ? '<div id="cdvCodeReview" class="cdvControlBtn">' + SVG_ICONS.review + '</div>' : '') +
 				(externalDiffPossible ? '<div id="cdvExternalDiff" class="cdvControlBtn">' + SVG_ICONS.linkExternal + '</div>' : '') +
@@ -3115,6 +3124,7 @@ class GitGraphView {
 				html + '</div><div class="cdvHeightResize"></div>';
 		} else {
 			html += '</div><div id="cdvControls"><div id="cdvClose" class="cdvControlBtn" title="' + t('Close') + '">' + SVG_ICONS.close + '</div>' +
+				(canBrowseCommitTree ? '<div id="cdvBrowseTree" class="cdvControlBtn" title="' + t('Browse all repository files at this commit') + '">' + MENU_ICONS.files + '</div>' : '') +
 				(codeReviewPossible ? '<div id="cdvCodeReview" class="cdvControlBtn">' + SVG_ICONS.review + '</div>' : '') +
 				(!expandedCommit.loading ? '<div id="cdvHideUnchanged" class="cdvControlBtn">' + MENU_ICONS.foldDiff + '</div><div id="cdvFileViewTypeTree" class="cdvControlBtn cdvFileViewTypeBtn" title="' + t('File Tree View') + '">' + SVG_ICONS.fileTree + '</div><div id="cdvFileViewTypeList" class="cdvControlBtn cdvFileViewTypeBtn" title="' + t('File List View') + '">' + SVG_ICONS.fileList + '</div>' : '') +
 				(externalDiffPossible ? '<div id="cdvExternalDiff" class="cdvControlBtn">' + SVG_ICONS.linkExternal + '</div>' : '') +
@@ -3160,9 +3170,10 @@ class GitGraphView {
 		});
 
 		if (isRight) this.makeCdvHeaderInteractive();
-		if (isRight || explainPossible) this.makeCdvTabsInteractive();
+		if (isRight || explainPossible || canBrowseCommitTree) this.makeCdvTabsInteractive();
 		if (isRight && !expandedCommit.loading) this.makeCdvFileFocusInteractive();
 		if (!expandedCommit.loading && activeTab === 'explain') this.commitExplainer.show(expandedCommit.commitHash);
+		if (!expandedCommit.loading && activeTab === 'allFiles') this.ensureCdvAllFilesLoaded();
 
 		if (!expandedCommit.loading) {
 			this.cdvFileView.makeCdvFileViewInteractive();
@@ -3176,6 +3187,18 @@ class GitGraphView {
 			if (hideUnchangedBtn !== null) {
 				hideUnchangedBtn.addEventListener('click', () => {
 					this.setHideUnchangedRegions(!this.isHideUnchangedRegions(), true);
+				});
+			}
+
+			const browseTreeBtn = document.getElementById('cdvBrowseTree');
+			if (browseTreeBtn !== null) {
+				browseTreeBtn.addEventListener('click', () => {
+					if (this.expandedCommit === null || this.expandedCommit.commitHash === UNCOMMITTED) return;
+					window.parent.postMessage({
+						type: 'gitmap-shell-action',
+						action: 'browse-commit-files',
+						commitHash: this.expandedCommit.commitHash
+					}, window.location.origin || '*');
 				});
 			}
 
@@ -3539,19 +3562,194 @@ class GitGraphView {
 	private makeCdvTabsInteractive() {
 		addListenerToClass('cdvTab', 'click', (e) => {
 			const tab = (<HTMLElement>(<Element>e.target).closest('.cdvTab')!).dataset.tab;
-			if (tab === 'files' || tab === 'message' || tab === 'explain') {
+			if (tab === 'files' || tab === 'allFiles' || tab === 'message' || tab === 'explain') {
 				this.activeCdvTab = tab;
 				this.saveState();
 			}
 			document.querySelectorAll<HTMLElement>('.cdvTab').forEach((elem) => alterClass(elem, CLASS_ACTIVE, elem.dataset.tab === tab));
-			const fileViewElem = document.getElementById('cdvFileView'), reviewBarElem = document.getElementById('cdvReviewBar'), messageViewElem = document.getElementById('cdvMessageView'), explainViewElem = document.getElementById('cdvExplainView');
+			const fileViewElem = document.getElementById('cdvFileView'), allFilesElem = document.getElementById('cdvAllFilesView'), reviewBarElem = document.getElementById('cdvReviewBar'), messageViewElem = document.getElementById('cdvMessageView'), explainViewElem = document.getElementById('cdvExplainView');
 			if (fileViewElem !== null) alterClass(fileViewElem, 'hidden', tab !== 'files');
 			if (reviewBarElem !== null) alterClass(reviewBarElem, 'hidden', tab !== 'files');
+			if (allFilesElem !== null) {
+				alterClass(allFilesElem, 'hidden', tab !== 'allFiles');
+				if (tab === 'allFiles') this.ensureCdvAllFilesLoaded();
+			}
 			if (messageViewElem !== null) alterClass(messageViewElem, 'hidden', tab !== 'message');
 			if (explainViewElem !== null) {
 				alterClass(explainViewElem, 'hidden', tab !== 'explain');
 				if (tab === 'explain' && this.expandedCommit !== null) this.commitExplainer.show(this.expandedCommit.commitHash);
 			}
+		});
+	}
+
+	private ensureCdvAllFilesLoaded() {
+		const expandedCommit = this.expandedCommit;
+		if (expandedCommit === null || expandedCommit.commitHash === UNCOMMITTED || expandedCommit.compareWithHash !== null) return;
+		if (this.cdvTreeCommitHash !== expandedCommit.commitHash) {
+			this.cdvTreeCommitHash = expandedCommit.commitHash;
+			this.cdvTreeCache.clear();
+			this.cdvTreeExpanded.clear();
+			this.cdvTreeLoading.clear();
+			this.cdvTreeError = null;
+			this.cdvTreeFilter = '';
+		}
+		if (!this.cdvTreeCache.has('') && !this.cdvTreeLoading.has('')) {
+			this.cdvTreeLoading.add('');
+			sendMessage({ command: 'loadCommitTree', repo: this.currentRepo, commitHash: expandedCommit.commitHash, subPath: '' });
+		}
+		this.renderCdvAllFilesView();
+	}
+
+	public receiveCommitTree(commitHash: string, subPath: string, entries: ReadonlyArray<GG.CommitTreeFileEntry>, error: GG.ErrorInfo) {
+		if (this.cdvTreeCommitHash !== commitHash) return;
+		this.cdvTreeLoading.delete(subPath);
+		if (error !== null) {
+			this.cdvTreeError = error;
+		} else {
+			this.cdvTreeError = null;
+			this.cdvTreeCache.set(subPath, entries);
+		}
+		this.renderCdvAllFilesView();
+	}
+
+	private renderCdvAllFilesView() {
+		const host = document.getElementById('cdvAllFilesView');
+		const expandedCommit = this.expandedCommit;
+		if (host === null || expandedCommit === null) return;
+
+		// Build status badge & changed-folder lookup from the already-loaded commit fileChanges (zero extra git calls)
+		const changeStatus: { [filePath: string]: string } = {};
+		const changedDirs = new Set<string>();
+		const deletedByDir: { [dir: string]: string[] } = {};
+		for (const fc of (expandedCommit.fileChanges || [])) {
+			const p = fc.newFilePath || fc.oldFilePath;
+			if (!p) continue;
+			changeStatus[p] = fc.type;
+			const segs = p.split('/');
+			segs.pop();
+			let acc = '';
+			for (const s of segs) {
+				acc = acc ? acc + '/' + s : s;
+				changedDirs.add(acc);
+			}
+			if (fc.type === GG.GitFileStatus.Deleted) {
+				const parent = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+				(deletedByDir[parent] || (deletedByDir[parent] = [])).push(p);
+			}
+		}
+
+		const q = this.cdvTreeFilter.trim().toLowerCase();
+		const rows: string[] = [];
+		const walk = (subPath: string, depth: number) => {
+			const list = this.cdvTreeCache.get(subPath);
+			if (!list) return;
+			for (const ent of list) {
+				const isExp = ent.isDirectory && this.cdvTreeExpanded.has(ent.path);
+				const st = !ent.isDirectory ? (changeStatus[ent.path] || '') : '';
+				const hasDirChange = ent.isDirectory && changedDirs.has(ent.path);
+				const matchesFilter = !q || ent.path.toLowerCase().includes(q) || ent.isDirectory;
+				if (matchesFilter) {
+					rows.push(
+						'<div class="cdvAllFilesRow' + (ent.isDirectory ? ' isDir' : '') + '" style="padding-left:' + (8 + depth * 14) + 'px" data-path="' + escapeHtml(ent.path) + '" data-dir="' + (ent.isDirectory ? '1' : '0') + '">' +
+						'<span class="cdvAfChev">' + (ent.isDirectory ? (isExp ? '▾' : '▸') : '') + '</span>' +
+						'<span class="cdvAfIcon">' + (ent.isDirectory ? SVG_ICONS.fileTree : MENU_ICONS.files) + '</span>' +
+						'<span class="cdvAfName" title="' + escapeHtml(ent.path) + '">' + escapeHtml(ent.name) + '</span>' +
+						(hasDirChange ? '<span class="cdvAfDirDot" title="' + escapeHtml(t('Changed Files')) + '"></span>' : '') +
+						(st !== '' ? '<span class="cdvAfBadge st-' + escapeHtml(st) + '">' + escapeHtml(st) + '</span>' : '') +
+						(!ent.isDirectory && !ent.isSubmodule ? '<button type="button" class="cdvAfDiffBtn" data-diff-path="' + escapeHtml(ent.path) + '" title="' + escapeHtml(t('Diff with Working Tree')) + '">' + SVG_ICONS.compare + '</button>' : '') +
+						'</div>'
+					);
+				}
+				if (isExp) {
+					if (this.cdvTreeCache.has(ent.path)) {
+						walk(ent.path, depth + 1);
+					} else if (this.cdvTreeLoading.has(ent.path)) {
+						rows.push('<div class="cdvAllFilesLoading" style="padding-left:' + (24 + depth * 14) + 'px">' + escapeHtml(t('Loading')) + '…</div>');
+					}
+				}
+			}
+			const dels = deletedByDir[subPath] || [];
+			for (const dp of dels) {
+				if (q && !dp.toLowerCase().includes(q)) continue;
+				const name = dp.split('/').pop() || dp;
+				rows.push(
+					'<div class="cdvAllFilesRow isDeletedGhost" style="padding-left:' + (8 + depth * 14) + 'px" title="' + escapeHtml(dp) + '">' +
+					'<span class="cdvAfChev"></span>' +
+					'<span class="cdvAfIcon">' + MENU_ICONS.files + '</span>' +
+					'<span class="cdvAfName">' + escapeHtml(name) + '</span>' +
+					'<span class="cdvAfBadge st-D">D</span>' +
+					'</div>'
+				);
+			}
+		};
+
+		let bodyHtml = '';
+		if (this.cdvTreeError !== null) {
+			bodyHtml = '<div class="cdvAllFilesEmpty">' + escapeHtml(this.cdvTreeError) + '</div>';
+		} else if (!this.cdvTreeCache.has('')) {
+			bodyHtml = '<div class="cdvAllFilesLoading">' + escapeHtml(t('Loading')) + '…</div>';
+		} else {
+			walk('', 0);
+			bodyHtml = rows.length > 0 ? rows.join('') : '<div class="cdvAllFilesEmpty">' + escapeHtml(t('No files in this directory.')) + '</div>';
+		}
+
+		const prevFocus = document.activeElement && document.activeElement.id === 'cdvAllFilesFilter';
+		const prevSelStart = prevFocus ? (<HTMLInputElement>document.activeElement).selectionStart : null;
+		host.innerHTML =
+			'<div class="cdvAllFilesBar">' +
+			'<input id="cdvAllFilesFilter" type="text" class="cdvAllFilesFilter" value="' + escapeHtml(this.cdvTreeFilter) + '" placeholder="' + escapeHtml(t('Filter files in this directory…')) + '" />' +
+			'<button type="button" id="cdvAllFilesOpenFull" class="cdvDiffModePill" title="' + escapeHtml(t('Browse all repository files at this commit')) + '">' + SVG_ICONS.linkExternal + '<span>' + escapeHtml(t('Full Snapshot')) + '</span></button>' +
+			'</div>' +
+			'<div class="cdvAllFilesTree">' + bodyHtml + '</div>';
+
+		const filterInput = <HTMLInputElement | null>document.getElementById('cdvAllFilesFilter');
+		if (filterInput !== null) {
+			if (prevFocus) {
+				filterInput.focus();
+				if (prevSelStart !== null) filterInput.setSelectionRange(prevSelStart, prevSelStart);
+			}
+			filterInput.addEventListener('input', () => {
+				this.cdvTreeFilter = filterInput.value;
+				this.renderCdvAllFilesView();
+			});
+		}
+		document.getElementById('cdvAllFilesOpenFull')?.addEventListener('click', () => {
+			if (this.expandedCommit === null) return;
+			window.parent.postMessage({
+				type: 'gitmap-shell-action',
+				action: 'browse-commit-files',
+				commitHash: this.expandedCommit.commitHash
+			}, window.location.origin || '*');
+		});
+		host.querySelectorAll<HTMLElement>('.cdvAfDiffBtn').forEach((btn) => {
+			btn.addEventListener('click', (ev) => {
+				ev.stopPropagation();
+				const fp = btn.getAttribute('data-diff-path');
+				if (!fp || this.expandedCommit === null) return;
+				sendMessage({ command: 'viewDiffWithWorkingFile', repo: this.currentRepo, hash: this.expandedCommit.commitHash, filePath: fp });
+			});
+		});
+		host.querySelectorAll<HTMLElement>('.cdvAllFilesRow[data-path]').forEach((row) => {
+			row.addEventListener('click', () => {
+				const p = row.getAttribute('data-path') || '';
+				const isDir = row.getAttribute('data-dir') === '1';
+				if (!p || this.expandedCommit === null) return;
+				if (isDir) {
+					if (this.cdvTreeExpanded.has(p)) {
+						this.cdvTreeExpanded.delete(p);
+						this.renderCdvAllFilesView();
+					} else {
+						this.cdvTreeExpanded.add(p);
+						if (!this.cdvTreeCache.has(p) && !this.cdvTreeLoading.has(p)) {
+							this.cdvTreeLoading.add(p);
+							sendMessage({ command: 'loadCommitTree', repo: this.currentRepo, commitHash: this.expandedCommit.commitHash, subPath: p });
+						}
+						this.renderCdvAllFilesView();
+					}
+				} else {
+					sendMessage({ command: 'viewFileAtRevision', repo: this.currentRepo, hash: this.expandedCommit.commitHash, filePath: p });
+				}
+			});
 		});
 	}
 

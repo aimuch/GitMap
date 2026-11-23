@@ -13,12 +13,14 @@ import { buildFileIconTheme, findFileIconTheme, getFileIconThemeExtensionPaths, 
 import { GitFeatures } from './gitFeatures';
 import { Logger } from './logger';
 import { GitWorkflowService } from './server/gitWorkflowService';
+import { assertSafeRelSegmentPath, parseLsTreeOutput } from './server/enhancementsService';
+import { LruCache } from './server/gitCatFilePool';
 import { hostBridge } from './platform/hostBridge';
 import { isRemoteRepo, joinRepoPath } from './remote/repoTransport';
 import { RepoFileWatcher } from './repoFileWatcher';
 import { RepoManager } from './repoManager';
 import { UndoManager, getUndoManager } from './undoManager';
-import { ErrorInfo, GitConfigLocation, GitFileStatus, GitGraphViewInitialState, GitPushBranchMode, GitRepoSet, LoadGitGraphViewTo, MergeActionOn, RebaseActionOn, RequestMessage, ResponseMessage, TabIconColourTheme } from './types';
+import { CommitTreeFileEntry, ErrorInfo, GitConfigLocation, GitFileStatus, GitGraphViewInitialState, GitPushBranchMode, GitRepoSet, LoadGitGraphViewTo, MergeActionOn, RebaseActionOn, RequestMessage, ResponseMessage, TabIconColourTheme } from './types';
 import { UNABLE_TO_FIND_GIT_MSG, UNCOMMITTED, abbrevCommit, archive, copyFilePathToClipboard, copyToClipboard, createPullRequest, fillScmCommitMessage, getNonce, openExtensionSettings, openExternalUrl, openFile, openFolderInNewWindow, showErrorMessage, syncDiffHideUnchanged, updateExtensionSetting, viewDiff, viewDiffWithWorkingFile, viewFileAtRevision, viewScm } from './utils';
 import { Disposable, toDisposable } from './utils/disposable';
 import { getL10nBundle, getLanguage, t } from './l10n';
@@ -69,6 +71,7 @@ export class GitGraphView extends Disposable {
 
 	private loadRepoInfoRefreshId: number = 0;
 	private loadCommitsRefreshId: number = 0;
+	private readonly cdvTreeCache = new LruCache<string, ReadonlyArray<CommitTreeFileEntry>>(300);
 
 	/**
 	 * If a Git Map View already exists, show and update it. Otherwise, create a Git Map View.
@@ -852,6 +855,50 @@ export class GitGraphView extends Disposable {
 					error: await viewFileAtRevision(msg.repo, msg.hash, msg.filePath)
 				});
 				break;
+			case 'loadCommitTree': {
+				try {
+					const cleanHash = String(msg.commitHash || '').trim();
+					if (!cleanHash || cleanHash.startsWith('-')) {
+						throw new Error('Invalid commit hash.');
+					}
+					const cleanSub = msg.subPath ? assertSafeRelSegmentPath(msg.subPath).replace(/\/+$/, '') : '';
+					const cacheKey = `${msg.repo}\0${cleanHash}\0${cleanSub}`;
+					let entries = this.cdvTreeCache.get(cacheKey);
+					if (!entries) {
+						const treeSpec = cleanSub ? `${cleanHash}:${cleanSub}` : cleanHash;
+						const { stdout } = await this.dataSource.execGitRaw(
+							msg.repo,
+							['-c', 'core.quotepath=false', 'ls-tree', '-l', '-z', treeSpec],
+							{ maxBytes: 8 * 1024 * 1024 }
+						);
+						entries = parseLsTreeOutput(stdout.toString('utf8'), cleanSub).map((e) => ({
+							name: e.name,
+							path: e.path,
+							isDirectory: e.isDirectory,
+							size: e.size,
+							isSymlink: e.isSymlink,
+							isSubmodule: e.isSubmodule
+						}));
+						this.cdvTreeCache.set(cacheKey, entries);
+					}
+					this.sendMessage({
+						command: 'loadCommitTree',
+						commitHash: cleanHash,
+						subPath: cleanSub,
+						entries,
+						error: null
+					});
+				} catch (err) {
+					this.sendMessage({
+						command: 'loadCommitTree',
+						commitHash: msg.commitHash,
+						subPath: msg.subPath,
+						entries: [],
+						error: err instanceof Error ? err.message : String(err)
+					});
+				}
+				break;
+			}
 			case 'loadWorktrees':
 				this.sendMessage({
 					command: 'loadWorktrees',

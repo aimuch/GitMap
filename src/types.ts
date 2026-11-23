@@ -228,6 +228,8 @@ export interface GitBlameCommit {
 	readonly authorDate: number;
 	readonly summary: string;
 	readonly filePath: string; // The path of the file in the commit
+	readonly previousCommit?: string; // Parent commit SHA from `git blame --porcelain` `previous` header
+	readonly previousFilePath?: string; // File path in the parent commit (follows renames!)
 }
 
 /**
@@ -1820,6 +1822,26 @@ export interface ResponseViewFileAtRevision extends ResponseWithErrorInfo {
 	readonly command: 'viewFileAtRevision';
 }
 
+export interface CommitTreeFileEntry {
+	readonly name: string;
+	readonly path: string;
+	readonly isDirectory: boolean;
+	readonly size: number | null;
+	readonly isSymlink?: boolean;
+	readonly isSubmodule?: boolean;
+}
+export interface RequestLoadCommitTree extends RepoRequest {
+	readonly command: 'loadCommitTree';
+	readonly commitHash: string;
+	readonly subPath: string;
+}
+export interface ResponseLoadCommitTree extends ResponseWithErrorInfo {
+	readonly command: 'loadCommitTree';
+	readonly commitHash: string;
+	readonly subPath: string;
+	readonly entries: ReadonlyArray<CommitTreeFileEntry>;
+}
+
 export interface RequestViewScm extends BaseMessage {
 	readonly command: 'viewScm';
 }
@@ -2182,6 +2204,7 @@ export type RequestMessage =
 	| RequestViewDiff
 	| RequestViewDiffWithWorkingFile
 	| RequestViewFileAtRevision
+	| RequestLoadCommitTree
 	| RequestViewScm
 	| RequestCompareBranches
 	| RequestOpenAllChanges
@@ -2288,6 +2311,7 @@ export type ResponseMessage =
 	| ResponseViewDiff
 	| ResponseViewDiffWithWorkingFile
 	| ResponseViewFileAtRevision
+	| ResponseLoadCommitTree
 	| ResponseViewScm
 	| ResponseCompareBranches
 	| ResponseOpenAllChanges

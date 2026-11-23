@@ -1158,6 +1158,74 @@ body.vscode-light .gm-hm-cell.lv-4 { background: #166534; border-color: #14532d;
   color: #f59e0b;
 }
 
+/* ── Deleted Files & Folders Archaeology ── */
+.gm-del-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gm-del-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.gm-del-path-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 280px;
+}
+.gm-del-path {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12.5px;
+  word-break: break-all;
+}
+.gm-del-folder {
+  color: var(--vscode-descriptionForeground);
+}
+.gm-del-commit-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--vscode-descriptionForeground);
+  max-width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.gm-del-subj {
+  color: var(--vscode-foreground);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gm-del-who {
+  opacity: 0.85;
+  white-space: nowrap;
+}
+.gm-del-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+  border-top: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18));
+}
+.gm-del-sample-chip {
+  cursor: pointer;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  background: var(--vscode-editor-background);
+  color: var(--vscode-foreground);
+}
+.gm-del-sample-chip:hover {
+  border-color: var(--vscode-focusBorder);
+  color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+}
+
 @media (max-width: 780px) {
   .gm-dim-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .gm-launchpad-buckets { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -350,6 +350,18 @@ class ViewActions {
 			}
 		], [
 			{
+				id: 'browseFilesAtCommit',
+				title: t('Browse Files at Commit'),
+				icon: MENU_ICONS.files,
+				visible: true,
+				onClick: () => {
+					window.parent.postMessage({
+						type: 'gitmap-shell-action',
+						action: 'browse-commit-files',
+						commitHash: hash
+					}, window.location.origin || '*');
+				}
+			}, {
 				id: 'compareWithBranchCommit',
 				title: t('Compare with Branch / Commit') + ELLIPSIS,
 				icon: MENU_ICONS.compare,
