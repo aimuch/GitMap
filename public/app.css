@@ -2360,6 +2360,25 @@ body.vscode-light .hljs-deletion { color: #a31515; }
   background: color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 70%, transparent);
 }
 
+.fb-row.last-viewed {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 16%, transparent);
+  box-shadow: inset 3px 0 0 var(--vscode-focusBorder);
+}
+
+.fb-row.last-viewed .fb-name {
+  font-weight: 500;
+}
+
+.fb-row.gm-row-reveal-flash,
+.ctree-row.gm-row-reveal-flash {
+  animation: gmRowRevealFlash 1.4s ease-out 1;
+}
+
+@keyframes gmRowRevealFlash {
+  0% { background: color-mix(in srgb, var(--vscode-focusBorder) 46%, transparent); }
+  100% { background: color-mix(in srgb, var(--vscode-focusBorder) 16%, transparent); }
+}
+
 .fb-col-chk {
   display: inline-flex;
   justify-content: center;
@@ -2437,12 +2456,15 @@ body.vscode-light .hljs-deletion { color: #a31515; }
   letter-spacing: -0.2px;
 }
 
-body.vscode-light .fb-icon.is-dir { color: #b5853b; }
+body.vscode-light .fb-icon.is-dir,
+body.vscode-light .gm-ft-icon.is-dir,
+body.vscode-light .gm-ft-icon.is-glyph,
+body.vscode-light .fb-icon.is-glyph,
 body.vscode-light .gm-ft-icon.is-badge,
 body.vscode-light .fb-icon.is-badge,
 body.vscode-light .gm-ft-icon.is-sheet,
 body.vscode-light .fb-icon.is-sheet {
-  filter: brightness(0.74) saturate(1.25);
+  filter: brightness(0.76) saturate(1.22);
 }
 
 .fb-link {

@@ -1226,6 +1226,20 @@ body.freezeFooter #footer{
 .cdvAllFilesRow:hover{
 	background-color:var(--vscode-list-hoverBackground, rgba(128,128,128,0.14));
 }
+.cdvAllFilesRow.lastViewedFile{
+	background:color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
+	box-shadow:inset 3px 0 0 var(--vscode-focusBorder);
+}
+.cdvAllFilesRow.lastViewedFile .cdvAfName{
+	font-weight:500;
+	color:var(--vscode-foreground);
+}
+.cdvAllFilesRow.lastViewedFile:hover{
+	background:color-mix(in srgb, var(--vscode-focusBorder) 26%, var(--vscode-list-hoverBackground, rgba(128,128,128,0.14)));
+}
+.cdvAllFilesRow.cdvRevealFlash{
+	animation:cdvRevealFlash 1.4s ease-out 1;
+}
 .cdvAllFilesRow.isDeletedGhost{
 	opacity:0.65;
 	cursor:default;
@@ -4371,6 +4385,7 @@ button.operationBarBtn svg{
 }
 @media (prefers-reduced-motion: reduce){
 	.fileTreeFileRecord.cdvRevealFlash,
+	.cdvAllFilesRow.cdvRevealFlash,
 	.cdvReviewBar.reviewPulse{
 		animation:none;
 	}

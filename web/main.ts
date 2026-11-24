@@ -88,6 +88,7 @@ class GitGraphView {
 	private cdvTreeLoading: Set<string> = new Set();
 	private cdvTreeError: string | null = null;
 	private cdvTreeFilter: string = '';
+	private cdvTreeLastViewedPath: string | null = null;
 	private rowContext: RowRenderContext | null = null;
 	private renderedRows: { start: number, end: number } | null = null; // The rows rendered when they're virtualised (NULL => all rows are rendered)
 	private readonly pinnedRows: Set<number> = new Set(); // Rows rendered outside of the rendered range (e.g. to open the details of a commit)
@@ -333,11 +334,81 @@ class GitGraphView {
 				name: this.gitRepos[this.currentRepo].name || getRepoName(this.currentRepo)
 			}, t('Opening Terminal'));
 		});
-		// Back from a diff tab (the shell activates the Git Map again): expand collapsed ancestor folders if needed, then reveal the file
-		window.addEventListener('gitmap-reveal-last-viewed', () => {
+		// Back from a diff or file preview tab: return focus & highlight the opened file row (supports both All Files and Changed Files tabs)
+		window.addEventListener('gitmap-reveal-last-viewed', (ev: Event) => {
+			const detail = (<CustomEvent<{ filePath?: string }>>ev).detail;
+			const targetPath = detail && typeof detail.filePath === 'string' ? detail.filePath : '';
+
+			const findScrollParent = (el: HTMLElement): HTMLElement | null => {
+				let cur = el.parentElement;
+				while (cur && cur !== document.body && cur !== document.documentElement) {
+					const style = window.getComputedStyle(cur);
+					if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && cur.scrollHeight > cur.clientHeight + 2) {
+						return cur;
+					}
+					cur = cur.parentElement;
+				}
+				return null;
+			};
+
+			const scrollAndFlash = (el: HTMLElement) => {
+				requestAnimationFrame(() => {
+					if (!el.isConnected) return;
+					const rect = el.getBoundingClientRect();
+					const scrollParent = findScrollParent(el);
+					const pRect = scrollParent ? scrollParent.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+					const visTop = Math.max(pRect.top, 0);
+					const visBottom = Math.min(pRect.bottom, window.innerHeight);
+					const inView = rect.height > 0 && rect.top >= visTop + 8 && rect.bottom <= visBottom - 8;
+					if (!inView) {
+						el.scrollIntoView({ block: 'center' });
+					}
+					el.classList.remove('cdvRevealFlash');
+					void el.offsetWidth;
+					el.classList.add('cdvRevealFlash');
+				});
+			};
+
+			if (this.activeCdvTab === 'allFiles') {
+				const allHost = document.getElementById('cdvAllFilesView');
+				if (allHost === null) return;
+				const lookupPath = targetPath || this.cdvTreeLastViewedPath || '';
+				let row: HTMLElement | null = null;
+				if (lookupPath) {
+					const rows = allHost.querySelectorAll<HTMLElement>('.cdvAllFilesRow[data-path]');
+					for (let i = 0; i < rows.length; i++) {
+						if (rows[i].getAttribute('data-path') === lookupPath) {
+							row = rows[i];
+							break;
+						}
+					}
+				}
+				if (row === null) {
+					row = allHost.querySelector<HTMLElement>('.cdvAllFilesRow.lastViewedFile');
+				}
+				if (row === null) return;
+				if (lookupPath) this.cdvTreeLastViewedPath = lookupPath;
+				allHost.querySelectorAll<HTMLElement>('.cdvAllFilesRow.lastViewedFile').forEach((r) => r.classList.remove('lastViewedFile'));
+				row.classList.add('lastViewedFile');
+				scrollAndFlash(row);
+				return;
+			}
+
 			const fileView = getCdvFileViewElem();
-			const marker = fileView !== null ? <HTMLElement | null>fileView.querySelector('.fileTreeFileRecord.lastViewedFile') : null;
-			if (fileView === null || marker === null) return;
+			if (fileView === null) return;
+			let marker: HTMLElement | null = null;
+			if (targetPath && this.expandedCommit !== null && this.expandedCommit.fileChanges !== null) {
+				const matchIdx = this.expandedCommit.fileChanges.findIndex((fc) => fc.newFilePath === targetPath || fc.oldFilePath === targetPath);
+				if (matchIdx > -1) {
+					marker = fileView.querySelector<HTMLElement>('.fileTreeFileRecord[data-id="' + matchIdx + '"]');
+				}
+			}
+			if (marker === null) {
+				marker = fileView.querySelector<HTMLElement>('.fileTreeFileRecord.lastViewedFile');
+			}
+			if (marker === null) return;
+			fileView.querySelectorAll<HTMLElement>('.fileTreeFileRecord.lastViewedFile').forEach((r) => r.classList.remove('lastViewedFile'));
+			marker.classList.add('lastViewedFile');
 			// Expand any collapsed parent folders so scrollIntoView isn't a no-op on display:none ancestors
 			let ancestor: HTMLElement | null = marker.parentElement;
 			while (ancestor !== null && ancestor !== fileView) {
@@ -358,13 +429,7 @@ class GitGraphView {
 				}
 				ancestor = ancestor.parentElement;
 			}
-			requestAnimationFrame(() => {
-				if (!marker.isConnected) return;
-				marker.scrollIntoView({ block: 'nearest' });
-				marker.classList.remove('cdvRevealFlash');
-				void marker.offsetWidth;
-				marker.classList.add('cdvRevealFlash');
-			});
+			scrollAndFlash(marker);
 		});
 		window.addEventListener('gitmap-filter-by-file', (ev: Event) => {
 			const detail = (<CustomEvent<{ filePath?: string }>>ev).detail;
@@ -3592,6 +3657,7 @@ class GitGraphView {
 			this.cdvTreeLoading.clear();
 			this.cdvTreeError = null;
 			this.cdvTreeFilter = '';
+			this.cdvTreeLastViewedPath = null;
 		}
 		if (!this.cdvTreeCache.has('') && !this.cdvTreeLoading.has('')) {
 			this.cdvTreeLoading.add('');
@@ -3652,8 +3718,9 @@ class GitGraphView {
 					const entryIconHtml = ent.isDirectory
 						? fileIcons.getFolderIcon(ent.name, isExp)
 						: fileIcons.getFileIcon(ent.path);
+					const isLastViewed = !ent.isDirectory && this.cdvTreeLastViewedPath === ent.path;
 					rows.push(
-						'<div class="cdvAllFilesRow' + (ent.isDirectory ? ' isDir' : '') + '" style="padding-left:' + (8 + depth * 14) + 'px" data-path="' + escapeHtml(ent.path) + '" data-dir="' + (ent.isDirectory ? '1' : '0') + '">' +
+						'<div class="cdvAllFilesRow' + (ent.isDirectory ? ' isDir' : '') + (isLastViewed ? ' lastViewedFile' : '') + '" style="padding-left:' + (8 + depth * 14) + 'px" data-path="' + escapeHtml(ent.path) + '" data-dir="' + (ent.isDirectory ? '1' : '0') + '">' +
 						'<span class="cdvAfChev">' + (ent.isDirectory ? (isExp ? '▾' : '▸') : '') + '</span>' +
 						'<span class="cdvAfIcon">' + entryIconHtml + '</span>' +
 						'<span class="cdvAfName" title="' + escapeHtml(ent.path) + '">' + escapeHtml(ent.name) + '</span>' +
@@ -3724,11 +3791,17 @@ class GitGraphView {
 				commitHash: this.expandedCommit.commitHash
 			}, window.location.origin || '*');
 		});
+		const markAllFilesLastViewed = (filePath: string, rowEl: HTMLElement | null) => {
+			this.cdvTreeLastViewedPath = filePath;
+			host.querySelectorAll<HTMLElement>('.cdvAllFilesRow.lastViewedFile').forEach((r) => r.classList.remove('lastViewedFile'));
+			if (rowEl !== null) rowEl.classList.add('lastViewedFile');
+		};
 		host.querySelectorAll<HTMLElement>('.cdvAfDiffBtn').forEach((btn) => {
 			btn.addEventListener('click', (ev) => {
 				ev.stopPropagation();
 				const fp = btn.getAttribute('data-diff-path');
 				if (!fp || this.expandedCommit === null) return;
+				markAllFilesLastViewed(fp, btn.closest('.cdvAllFilesRow'));
 				sendMessage({ command: 'viewDiffWithWorkingFile', repo: this.currentRepo, hash: this.expandedCommit.commitHash, filePath: fp });
 			});
 		});
@@ -3750,6 +3823,7 @@ class GitGraphView {
 						this.renderCdvAllFilesView();
 					}
 				} else {
+					markAllFilesLastViewed(p, row);
 					sendMessage({ command: 'viewFileAtRevision', repo: this.currentRepo, hash: this.expandedCommit.commitHash, filePath: p });
 				}
 			});

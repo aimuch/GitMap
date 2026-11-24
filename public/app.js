@@ -973,17 +973,23 @@
         break;
       }
 
-      case 'tab:openDiff':
-        openDiffTab(msg.payload);
+      case 'tab:openDiff': {
+        const graphVisible = isSplitWorkspace() && (state.primaryPaneTabId === 'graph' || state.secondaryPaneTabId === 'graph');
+        const wsOrigin = graphVisible && isDiffOrViewerTabId(state.activeTabId) ? 'graph' : undefined;
+        openDiffTab(wsOrigin ? { ...msg.payload, returnToTabId: wsOrigin } : msg.payload);
         break;
+      }
 
       case 'tab:openMultiDiff':
         openMultiDiffTab(msg.payload);
         break;
 
-      case 'tab:openFile':
-        openFileTab(msg.payload);
+      case 'tab:openFile': {
+        const graphVisible = isSplitWorkspace() && (state.primaryPaneTabId === 'graph' || state.secondaryPaneTabId === 'graph');
+        const wsOrigin = graphVisible && isDiffOrViewerTabId(state.activeTabId) ? 'graph' : undefined;
+        openFileTab(wsOrigin ? { ...msg.payload, returnToTabId: wsOrigin } : msg.payload);
         break;
+      }
 
       case 'tab:openVfh':
         openVfhTab(msg.payload);
@@ -2412,19 +2418,44 @@
     return !!tabId && tabId !== 'graph' && tabId !== 'files';
   }
 
-  /** Coming back to the Git Map (e.g. after a diff tab): scroll the file opened last in the commit details into view. */
-  function revealLastViewedInGitMap() {
+  /** Coming back to the Git Map (e.g. after a diff or file preview tab): scroll & highlight the opened file row. */
+  function revealLastViewedInGitMap(filePath) {
     const iframe = document.getElementById('gitMapFrame');
-    if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage({ __gitmapRevealLastViewed: true }, window.location.origin || '*');
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage({ __gitmapRevealLastViewed: true, filePath: filePath || '' }, window.location.origin || '*');
+    }
+  }
+
+  function revealFileInOriginTab(targetTabId, filePath) {
+    if (!targetTabId) return;
+    if (targetTabId === 'graph') {
+      requestAnimationFrame(() => revealLastViewedInGitMap(filePath));
+      return;
+    }
+    if (targetTabId === 'files' && typeof repoFilesBrowser !== 'undefined' && repoFilesBrowser && typeof repoFilesBrowser.revealFileRow === 'function') {
+      requestAnimationFrame(() => repoFilesBrowser.revealFileRow(filePath));
+      return;
+    }
+    const targetPanelEl = document.getElementById('panel-' + targetTabId);
+    const targetContent = targetPanelEl ? (targetPanelEl.querySelector('.tab-panel-content') || targetPanelEl) : null;
+    if (targetContent && typeof targetContent.__revealFileRow === 'function') {
+      requestAnimationFrame(() => targetContent.__revealFileRow(filePath));
+    }
   }
 
   function activateTab(tabId, opts) {
     if (!tabById(tabId)) return;
     const prevTabId = state.activeTabId;
+    const prevTab = tabById(prevTabId);
+    const revealPath = opts && typeof opts.revealFilePath === 'string'
+      ? opts.revealFilePath
+      : (prevTab && prevTab.sourceFilePath) || '';
     if (!isSplitWorkspace()) {
       state.activeTabId = tabId;
       syncWorkspacePanels();
-      if (tabId === 'graph' && isDiffOrViewerTabId(prevTabId)) requestAnimationFrame(revealLastViewedInGitMap);
+      if (isDiffOrViewerTabId(prevTabId) && prevTabId !== tabId) {
+        revealFileInOriginTab(tabId, revealPath);
+      }
       return;
     }
     if (tabId === state.primaryPaneTabId) {
@@ -2563,47 +2594,85 @@
     }
     const latestIdx = state.tabs.findIndex((t) => t.id === tabId);
     if (latestIdx === -1) return true;
+    const closingTab = state.tabs[latestIdx];
+    const returnToTabId = closingTab && closingTab.returnToTabId && closingTab.returnToTabId !== tabId ? closingTab.returnToTabId : null;
+    const closedFilePath = (closingTab && closingTab.sourceFilePath) || '';
     state.tabs.splice(latestIdx, 1);
     if (tabId.startsWith('vfh-')) {
       sendWs({ type: 'panel:close', panelId: tabId.slice(4) });
     }
     if (panelEl) panelEl.remove();
 
+    const closedViewerTab = isDiffOrViewerTabId(tabId);
     if (isSplitWorkspace()) {
-      const closedViewerTab = isDiffOrViewerTabId(tabId);
+      const canRestoreReturn = (otherPaneId) =>
+        returnToTabId && returnToTabId !== otherPaneId && tabById(returnToTabId);
       if (state.primaryPaneTabId === tabId) {
-        state.primaryPaneTabId = pickCompanionTab(state.secondaryPaneTabId, 'graph');
+        state.primaryPaneTabId = canRestoreReturn(state.secondaryPaneTabId)
+          ? returnToTabId
+          : pickCompanionTab(state.secondaryPaneTabId, 'graph');
       }
       if (state.secondaryPaneTabId === tabId) {
-        state.secondaryPaneTabId = pickCompanionTab(state.primaryPaneTabId, 'files');
+        state.secondaryPaneTabId = canRestoreReturn(state.primaryPaneTabId)
+          ? returnToTabId
+          : pickCompanionTab(state.primaryPaneTabId, 'files');
       }
       if (state.activeTabId === tabId) {
-        state.activeTabId = state.focusedPane === 'primary' ? state.primaryPaneTabId : state.secondaryPaneTabId;
+        state.activeTabId = returnToTabId && (state.primaryPaneTabId === returnToTabId || state.secondaryPaneTabId === returnToTabId)
+          ? returnToTabId
+          : (state.focusedPane === 'primary' ? state.primaryPaneTabId : state.secondaryPaneTabId);
       }
       persistWorkspaceLayout();
       syncWorkspacePanels();
-      if (closedViewerTab && (state.primaryPaneTabId === 'graph' || state.secondaryPaneTabId === 'graph')) {
-        requestAnimationFrame(revealLastViewedInGitMap);
+      if (closedViewerTab) {
+        const visibleIds = [state.primaryPaneTabId, state.secondaryPaneTabId];
+        const isRevealableOrigin = (id) => id === 'graph' || id === 'files' || (typeof id === 'string' && id.startsWith('ctree-'));
+        const revealTarget = (returnToTabId && visibleIds.includes(returnToTabId) && isRevealableOrigin(returnToTabId))
+          ? returnToTabId
+          : (visibleIds.includes('graph') ? 'graph'
+            : (visibleIds.find((id) => isRevealableOrigin(id)) || state.activeTabId));
+        revealFileInOriginTab(revealTarget, closedFilePath);
       }
       return true;
     }
 
     if (state.activeTabId === tabId) {
-      const next = state.tabs[Math.max(0, latestIdx - 1)] || state.tabs[0];
-      activateTab(next.id);
+      const originTab = returnToTabId ? tabById(returnToTabId) : null;
+      const next = originTab || state.tabs[Math.max(0, latestIdx - 1)] || state.tabs[0];
+      if (next) {
+        state.activeTabId = next.id;
+        syncWorkspacePanels();
+        if (closedViewerTab) {
+          revealFileInOriginTab(next.id, closedFilePath);
+        }
+      }
     } else {
       renderTabBar();
     }
     return true;
   }
 
-  function createOrReplacePanelTab(tabId, title, iconSvg) {
+  function createOrReplacePanelTab(tabId, title, iconSvg, tabMeta) {
+    const explicitOrigin = tabMeta && typeof tabMeta.returnToTabId === 'string' && tabMeta.returnToTabId !== tabId
+      ? tabMeta.returnToTabId
+      : null;
+    const originTabId = explicitOrigin || (state.activeTabId && state.activeTabId !== tabId ? state.activeTabId : null);
+    const sourceFilePath = (tabMeta && typeof tabMeta.sourceFilePath === 'string') ? tabMeta.sourceFilePath : '';
     let existing = state.tabs.find((t) => t.id === tabId);
     if (!existing) {
-      state.tabs.push({ id: tabId, title, iconSvg: iconSvg || '', closable: true });
+      state.tabs.push({
+        id: tabId,
+        title,
+        iconSvg: iconSvg || '',
+        closable: true,
+        returnToTabId: originTabId || 'graph',
+        sourceFilePath
+      });
     } else {
       existing.title = title;
       if (iconSvg) existing.iconSvg = iconSvg;
+      if (originTabId) existing.returnToTabId = originTabId;
+      if (sourceFilePath) existing.sourceFilePath = sourceFilePath;
     }
     let panelEl = document.getElementById('panel-' + tabId);
     if (!panelEl) {
@@ -2645,7 +2714,10 @@
   /* ==================== Built-in Diff Viewer ==================== */
   async function openDiffTab(payload) {
     const tabId = hashTabKey('diff-', `${payload.repo}:${payload.fromHash}:${payload.toHash}:${payload.newFilePath}`);
-    const panel = createOrReplacePanelTab(tabId, payload.title, ICONS.diff);
+    const panel = createOrReplacePanelTab(tabId, payload.title, ICONS.diff, {
+      sourceFilePath: payload.newFilePath || payload.oldFilePath || '',
+      returnToTabId: payload.returnToTabId
+    });
     panel.innerHTML = `<div class="browser-empty-state"><span class="fb-spinner"></span>Loading diff…</div>`;
 
     try {
@@ -3334,7 +3406,10 @@
       ? 'inline-' + Date.now()
       : `${payload.repo}:${payload.commit || 'work'}:${payload.filePath}`;
     const tabId = hashTabKey('file-', keySource);
-    const panel = createOrReplacePanelTab(tabId, payload.title || payload.filePath, ICONS.fileCode);
+    const panel = createOrReplacePanelTab(tabId, payload.title || payload.filePath, ICONS.fileCode, {
+      sourceFilePath: payload.filePath || '',
+      returnToTabId: payload.returnToTabId
+    });
     await renderFileViewerInto(panel, payload, {});
   }
 
@@ -3580,6 +3655,25 @@
       }, { isInlinePreview: false });
     };
 
+    panel.__revealFileRow = (fp) => {
+      const target = fp || (selectedFile && selectedFile.path) || '';
+      if (!target) return;
+      const rows = treeScroll.querySelectorAll('.ctree-row[data-path], .ctree-row[data-ghost-path]');
+      let match = null;
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute('data-path') === target || rows[i].getAttribute('data-ghost-path') === target) {
+          match = rows[i];
+          break;
+        }
+      }
+      if (!match) match = treeScroll.querySelector('.ctree-row.active');
+      if (!match) return;
+      match.scrollIntoView({ block: 'nearest' });
+      match.classList.remove('gm-row-reveal-flash');
+      void match.offsetWidth;
+      match.classList.add('gm-row-reveal-flash');
+    };
+
     const scheduleKeyPreview = (ent, optsPreview) => {
       if (previewKeyTimer) clearTimeout(previewKeyTimer);
       previewKeyTimer = setTimeout(() => {
@@ -3641,7 +3735,7 @@
               ? `<span class="ctree-wt-tag">${escapeHtml(item.workingOnlyAdd ? (zh ? '仅工作区' : 'WT+') : '≠WT')}</span>`
               : (item.status ? `<span class="scm-status-badge st-${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>` : '');
             return `
-              <button type="button" class="ctree-row${isSel ? ' active' : ''}${item.isDeletedGhost ? ' is-deleted-ghost' : ''}" data-flat-idx="${idx}" title="${escapeHtml(ent.path)}">
+              <button type="button" class="ctree-row${isSel ? ' active' : ''}${item.isDeletedGhost ? ' is-deleted-ghost' : ''}" data-flat-idx="${idx}" data-path="${escapeHtml(ent.path)}" title="${escapeHtml(ent.path)}">
                 <span class="icon-slot">${iconForTreeEntry(ent)}</span>
                 <span class="ctree-row-name">${highlightQueryMatch(ent.path, searchQuery)}</span>
                 ${stBadge}
@@ -5048,63 +5142,124 @@
     return { short, full: date + ' ' + time + ':' + pad(d.getSeconds()) };
   }
 
-  const RICH_FOLDER_SVG_CLOSED = '<svg class="ui-icon" viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M1.8 3.2A1.3 1.3 0 0 1 3.1 2h3.1c.4 0 .78.18 1.03.5l.62.8h5.05A1.3 1.3 0 0 1 14.2 4.6v7.9a1.3 1.3 0 0 1-1.3 1.3H3.1a1.3 1.3 0 0 1-1.3-1.3V3.2z"/></svg>';
-  const RICH_FOLDER_SVG_OPEN = '<svg class="ui-icon" viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" fill-opacity="0.72" d="M1.8 3.4A1.3 1.3 0 0 1 3.1 2.1h3.1c.4 0 .78.18 1.03.5l.62.8h4.95a1.2 1.2 0 0 1 1.2 1.2v1.2H2.9a1.2 1.2 0 0 0-1.1.85V3.4z"/><path fill="currentColor" d="M1.6 7.1a1 1 0 0 1 .98-.8h11.34a.95.95 0 0 1 .93 1.16l-1.12 5.2a1.2 1.2 0 0 1-1.17.94H2.95a1.2 1.2 0 0 1-1.18-.98L1.6 7.1z"/></svg>';
-  const RICH_SHEET_SVG = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="1.6"/><path d="M2 6h12M2 10h12M6.5 6v8"/></svg>';
-  const RICH_MEDIA_SVG = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="11" rx="1.6"/><polygon points="6.6,5.5 11.2,8 6.6,10.5" fill="currentColor" stroke="none"/></svg>';
+  // Crisp 16x16 pure-vector icons inspired by https://github.com/file-icons (matching web/fileIcons.ts)
+  const FI_MARKDOWN = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15"><path fill="currentColor" fill-rule="evenodd" d="M1.5 3.2A1.2 1.2 0 0 1 2.7 2h10.6a1.2 1.2 0 0 1 1.2 1.2v9.6a1.2 1.2 0 0 1-1.2 1.2H2.7a1.2 1.2 0 0 1-1.2-1.2V3.2zm1.2.1v9.4h10.6V3.3H2.7z"/><path fill="currentColor" d="M3.7 10.8V5.2h1.35l1.45 2.05L7.95 5.2H9.3v5.6H8V7.25L6.5 9.3 5 7.25v3.55H3.7zm6.75-2.65h1.05V5.2h1.25v2.95h1.05L12.12 10.9 10.45 8.15z"/></svg>';
+  const FI_EXCEL = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15"><path fill="currentColor" fill-opacity="0.22" d="M2 2.5A1.5 1.5 0 0 1 3.5 1h9A1.5 1.5 0 0 1 14 2.5v11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 13.5v-11z"/><path fill="none" stroke="currentColor" stroke-width="1.25" d="M2.5 2.5h11v11h-11zM9.2 2.5v11M9.2 6.2h4.3M9.2 9.8h4.3"/><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M4.3 5.5l3.2 5M7.5 5.5l-3.2 5"/></svg>';
+  const FI_CSV = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.2" width="12" height="11.6" rx="1.4"/><path d="M2 5.8h12M2 9.8h12M6 5.8v8M10.2 5.8v8"/></svg>';
+  const FI_JSON = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M5.8 2.5c-1.3 0-1.8.6-1.8 1.8v2.1c0 .9-.5 1.6-1.4 1.6.9 0 1.4.7 1.4 1.6v2.1c0 1.2.5 1.8 1.8 1.8"/><path d="M10.2 2.5c1.3 0 1.8.6 1.8 1.8v2.1c0 .9.5 1.6 1.4 1.6-.9 0-1.4.7-1.4 1.6v2.1c0 1.2-.5 1.8-1.8 1.8"/></svg>';
+  const FI_JSONL = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 2.6c-1 0-1.4.5-1.4 1.4v2.6c0 .8-.4 1.4-1.1 1.4.7 0 1.1.6 1.1 1.4V12c0 .9.4 1.4 1.4 1.4"/><path d="M11.4 2.6c1 0 1.4.5 1.4 1.4v2.6c0 .8.4 1.4 1.1 1.4-.7 0-1.1.6-1.1 1.4V12c0 .9-.4 1.4-1.4 1.4"/><path d="M6 5.3h4M6 8h4M6 10.7h4"/></svg>';
+  const FI_WORD = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15"><path fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" d="M3 1.8h6.4L13 5.4V14.2H3z"/><path fill="none" stroke="currentColor" stroke-width="1.2" d="M9.2 1.8v3.6H13"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M5 7.4l1.1 4.4 1.3-3.2 1.3 3.2L9.8 7.4"/></svg>';
+  const FI_PPT = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="8.5" rx="1.2"/><path d="M8 11v3M5.5 14h5"/><circle cx="6.2" cy="6.8" r="2"/><path d="M6.2 4.8v2h2M10 5.8h2M10 8h1.5"/></svg>';
+  const FI_PDF = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 1.8h6.3L13 5.3v8.9H3.2z"/><path d="M9.3 1.8v3.6H13"/><path d="M5.5 11.4c1.3-2.6 2.1-4.8 2.4-6.3.3 1.9 1.4 3.8 3 4.8-1.8-.3-4.1.2-5.4 1.5z"/></svg>';
+  const FI_DIAGRAM = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="5.3" y="1.8" width="5.4" height="3.6" rx="0.9"/><rect x="1.6" y="10.4" width="4.8" height="3.6" rx="0.9"/><rect x="9.6" y="10.4" width="4.8" height="3.6" rx="0.9"/><path d="M8 5.4v2.4M4 10.4V7.8h8v2.6"/></svg>';
+  const FI_PYTHON = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15"><path fill="currentColor" d="M7.9 1.5c-2.6 0-2.5 1.1-2.5 1.1v1.2h2.6v.4H4.4S2 4 2 6.8c0 2.7 1.6 2.6 1.6 2.6h1V8.1s-.1-1.6 1.6-1.6h2.7s1.5 0 1.5-1.5V2.9s.2-1.4-2.5-1.4zM6.3 2.5a.55.55 0 1 1 0 1.1.55.55 0 0 1 0-1.1z"/><path fill="currentColor" fill-opacity="0.72" d="M8.1 14.5c2.6 0 2.5-1.1 2.5-1.1v-1.2H8v-.4h3.6s2.4.2 2.4-2.6c0-2.7-1.6-2.6-1.6-2.6h-1v1.3s.1 1.6-1.6 1.6H7.1s-1.5 0-1.5 1.5v2.1s-.2 1.4 2.5 1.4zm1.6-1a.55.55 0 1 1 0-1.1.55.55 0 0 1 0 1.1z"/></svg>';
+  const FI_JUPYTER = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M3 5.8C4.4 4.4 6.2 3.8 8 3.8s3.6.6 5 2"/><path d="M3 10.2c1.4 1.4 3.2 2 5 2s3.6-.6 5-2"/><circle cx="12.2" cy="3" r="1" fill="currentColor" stroke="none"/><circle cx="3.8" cy="13" r="1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/></svg>';
+  const FI_REACT = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.15"><circle cx="8" cy="8" r="1.35" fill="currentColor" stroke="none"/><ellipse cx="8" cy="8" rx="6.2" ry="2.5"/><ellipse cx="8" cy="8" rx="6.2" ry="2.5" transform="rotate(60 8 8)"/><ellipse cx="8" cy="8" rx="6.2" ry="2.5" transform="rotate(120 8 8)"/></svg>';
+  const FI_VUE = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15"><path fill="currentColor" d="M1.4 2.5h2.7L8 9.2l3.9-6.7h2.7L8 14 1.4 2.5z"/><path fill="currentColor" fill-opacity="0.5" d="M4.1 2.5h2.2L8 5.5l1.7-3h2.2L8 9.2 4.1 2.5z"/></svg>';
+  const FI_CODE_TAGS = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M5.4 4.2L1.8 8l3.6 3.8M10.6 4.2L14.2 8l-3.6 3.8M9 3L7 13"/></svg>';
+  const FI_HASH = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6.2 2.4L4.6 13.6M11.4 2.4L9.8 13.6M2.4 5.8h11.2M2 10.2h11.2"/></svg>';
+  const FI_SHELL = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="1.6"/><path d="M4.4 6.2L6.8 8.2 4.4 10.2M8.2 10.2h3.4"/></svg>';
+  const FI_GIT = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15"><path fill="currentColor" d="M14.7 7.3L8.7 1.3a1 1 0 0 0-1.4 0L5.9 2.7l1.6 1.6a1.2 1.2 0 0 1 1.5 1.5l1.5 1.5a1.2 1.2 0 1 1-.7.7L8.4 6.6v3.9a1.2 1.2 0 1 1-1 0V6.5a1.2 1.2 0 0 1-.6-1.6L5.2 3.3 1.3 7.3a1 1 0 0 0 0 1.4l6 6a1 1 0 0 0 1.4 0l6-6a1 1 0 0 0 0-1.4z"/></svg>';
+  const FI_DOCKER = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><rect x="2.6" y="6" width="2.1" height="1.9" rx="0.3"/><rect x="5.2" y="6" width="2.1" height="1.9" rx="0.3"/><rect x="7.8" y="6" width="2.1" height="1.9" rx="0.3"/><rect x="5.2" y="3.6" width="2.1" height="1.9" rx="0.3"/><rect x="7.8" y="3.6" width="2.1" height="1.9" rx="0.3"/><path d="M14.6 8.3c-.5-.3-1.4-.4-2-.2-.1-.7-.5-1.3-1.1-1.7l-.3-.2-.2.3c-.3.5-.4 1.3-.2 1.9-.3.2-.8.3-1.4.3H1.5c-.2 1.5.2 3.3 1.4 4.3 1.1.9 2.6 1.2 4.3 1.2 3.4 0 6-1.5 7.1-4.5.5 0 1.4 0 1.8-.9l.1-.2-.6-.3z"/></svg>';
+  const FI_CONFIG = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><circle cx="8" cy="8" r="2.4"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"/></svg>';
+  const FI_YAML = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.5 4h3.5M8.5 4H13.5M4.5 8H7.5M10 8h3.5M4.5 12H7.5M10 12h3.5"/><circle cx="7.2" cy="4" r="0.6" fill="currentColor" stroke="none"/><circle cx="8.8" cy="8" r="0.6" fill="currentColor" stroke="none"/><circle cx="8.8" cy="12" r="0.6" fill="currentColor" stroke="none"/></svg>';
+  const FI_KEY = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.2" cy="10.4" r="2.7"/><path d="M7.3 8.3L13.4 2.2M11.2 4.4l1.7 1.7M9.3 6.3l1.4 1.4"/></svg>';
+  const FI_PACKAGE = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.6L13.8 4.8v6.4L8 14.4 2.2 11.2V4.8z"/><path d="M2.2 4.8L8 8l5.8-3.2M8 8v6.4"/></svg>';
+  const FI_LOCK = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="7" width="9.6" height="7" rx="1.4"/><path d="M5.4 7V5a2.6 2.6 0 0 1 5.2 0v2"/></svg>';
+  const FI_DB = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="8" cy="3.8" rx="5.2" ry="2"/><path d="M2.8 3.8v8.4c0 1.1 2.3 2 5.2 2s5.2-.9 5.2-2V3.8"/><path d="M2.8 8c0 1.1 2.3 2 5.2 2s5.2-.9 5.2-2"/></svg>';
+  const FI_IMAGE = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="2.5" width="12.4" height="11" rx="1.5"/><circle cx="5.5" cy="5.9" r="1.15" fill="currentColor" stroke="none"/><path d="M2.4 11.8l3.1-3.1 2.3 2.1 2.1-2 3.7 3"/></svg>';
+  const FI_SVG_PEN = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13C3 7.5 7.5 3 13 3"/><circle cx="3" cy="13" r="1.4" fill="currentColor" stroke="none"/><circle cx="13" cy="3" r="1.4" fill="currentColor" stroke="none"/><rect x="6.6" y="6.6" width="2.8" height="2.8" rx="0.5"/><path d="M3 5.5h5M10.5 13V8"/></svg>';
+  const FI_AUDIO = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 12V4.2l7-1.7v7.8"/><circle cx="4.5" cy="12" r="1.7"/><circle cx="11.5" cy="10.3" r="1.7"/></svg>';
+  const FI_VIDEO = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="1.6"/><polygon points="6.6,5.5 11.3,8 6.6,10.5" fill="currentColor" stroke="none"/></svg>';
+  const FI_ARCHIVE = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="1.5"/><path d="M2.2 5.6h11.6M8 5.6v1.4M8 8.4v1.4M6.6 11.2h2.8"/></svg>';
+  const FI_LICENSE = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="6.2" r="3.6"/><path d="M5.8 9.2L4.6 14l3.4-1.5L11.4 14l-1.2-4.8"/></svg>';
+  const FI_RUBY = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><polygon points="4.5,2.5 11.5,2.5 14.2,6 8,13.6 1.8,6"/><path d="M1.8 6h12.4M4.5 2.5L6.2 6 8 13.6 9.8 6l1.7-3.5"/></svg>';
+  const FI_TEXT = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3.6 1.8h5.8L12.8 5.2v9H3.6z"/><path d="M9.2 1.8v3.5h3.5M5.6 8.2h4.8M5.6 10.8h3.5"/></svg>';
+  const FI_TS = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15"><rect x="1.8" y="1.8" width="12.4" height="12.4" rx="2" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M3.8 6.4h4M5.8 6.4v5.2M12.2 7.2c-.3-.6-1-.9-1.7-.8-.8.1-1.3.6-1.3 1.2 0 .7.6 1 1.5 1.2 1 .2 1.6.6 1.6 1.4 0 .8-.7 1.4-1.7 1.4-.9 0-1.5-.3-1.8-.9"/></svg>';
+  const FI_JS = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15"><rect x="1.8" y="1.8" width="12.4" height="12.4" rx="2" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M6.8 6.2v4c0 1-.6 1.5-1.5 1.5-.6 0-1.1-.3-1.3-.7M12.2 7.1c-.3-.6-.9-.9-1.6-.8-.8.1-1.3.6-1.3 1.2 0 .7.6 1 1.4 1.2 1 .2 1.6.6 1.6 1.4 0 .8-.7 1.4-1.7 1.4-.9 0-1.5-.3-1.8-.9"/></svg>';
+  const RICH_FOLDER_SVG_CLOSED = '<svg class="ui-icon" viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" fill-opacity="0.25" d="M1.8 3.2A1.2 1.2 0 0 1 3 2h3.1c.4 0 .76.18 1 .5l.6.8h5.2a1.2 1.2 0 0 1 1.2 1.2v8a1.2 1.2 0 0 1-1.2 1.2H3a1.2 1.2 0 0 1-1.2-1.2V3.2z"/><path fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" d="M2 3.3A1.1 1.1 0 0 1 3.1 2.2h3c.36 0 .7.17.92.46l.6.78h5.28A1.1 1.1 0 0 1 14 4.54v7.96a1.1 1.1 0 0 1-1.1 1.1H3.1A1.1 1.1 0 0 1 2 12.5V3.3z"/></svg>';
+  const RICH_FOLDER_SVG_OPEN = '<svg class="ui-icon" viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" fill-opacity="0.2" d="M2 3.4A1.1 1.1 0 0 1 3.1 2.3h3c.36 0 .7.17.92.46l.58.74h5.1a1.1 1.1 0 0 1 1.1 1.1v1.7H2V3.4z"/><path fill="currentColor" fill-opacity="0.32" d="M1.6 7.2a.9.9 0 0 1 .9-.8h11a.9.9 0 0 1 .88 1.1l-1 5.1a1.1 1.1 0 0 1-1.08.9H3.1a1.1 1.1 0 0 1-1.08-.9L1.6 7.2z"/><path fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" d="M2 6.3V3.4a1.1 1.1 0 0 1 1.1-1.1h3c.36 0 .7.17.92.46l.58.74h5.1a1.1 1.1 0 0 1 1.1 1.1v1.7M1.7 7.1a.85.85 0 0 1 .84-.7h10.92a.85.85 0 0 1 .83 1.04l-.98 5.1a1.1 1.1 0 0 1-1.08.9H3.15a1.1 1.1 0 0 1-1.08-.92L1.7 7.1z"/></svg>';
   const RICH_FOLDER_COLORS = {
-    src: '#eab308', apps: '#f59e0b', app: '#f59e0b', packages: '#f59e0b', lib: '#eab308',
-    docs: '#38bdf8', doc: '#38bdf8', data: '#34d399', datasets: '#34d399', db: '#34d399',
-    assets: '#c084fc', images: '#c084fc', media: '#c084fc', scripts: '#2dd4bf', bin: '#2dd4bf',
-    test: '#f472b6', tests: '#f472b6', eval: '#f472b6', prompts: '#a78bfa', config: '#fb923c',
-    '.github': '#818cf8', '.claude': '#a78bfa', '.vscode': '#38bdf8', '.git': '#f05032'
+    src: '#e2b93d', apps: '#e37933', app: '#e37933', packages: '#e37933', lib: '#e2b93d',
+    docs: '#519aba', doc: '#519aba', documentation: '#519aba', reference: '#519aba',
+    data: '#4ec9b0', datasets: '#4ec9b0', db: '#4ec9b0', assets: '#a074c4', images: '#a074c4', media: '#a074c4',
+    scripts: '#2dd4bf', bin: '#2dd4bf', tools: '#2dd4bf',
+    test: '#f55385', tests: '#f55385', __tests__: '#f55385', eval: '#f55385', spec: '#f55385',
+    prompts: '#a074c4', config: '#e37933', '.github': '#818cf8', '.claude': '#a074c4', '.vscode': '#519aba', '.git': '#f05032'
   };
-  const RICH_FILE_BADGES = {
-    md: { label: 'M↓', color: '#38bdf8', pill: true }, markdown: { label: 'M↓', color: '#38bdf8', pill: true }, mdx: { label: 'M↓', color: '#38bdf8', pill: true },
-    csv: { label: 'CSV', color: '#34d399', pill: true }, tsv: { label: 'TSV', color: '#34d399', pill: true },
-    pdf: { label: 'PDF', color: '#f87171', pill: true },
-    doc: { label: 'DOC', color: '#60a5fa', pill: true }, docx: { label: 'DOC', color: '#60a5fa', pill: true },
-    ppt: { label: 'PPT', color: '#fb923c', pill: true }, pptx: { label: 'PPT', color: '#fb923c', pill: true },
-    ts: { label: 'TS', color: '#3b82f6' }, tsx: { label: 'TX', color: '#38bdf8' }, mts: { label: 'TS', color: '#3b82f6' }, cts: { label: 'TS', color: '#3b82f6' },
-    js: { label: 'JS', color: '#eab308' }, jsx: { label: 'JX', color: '#facc15' }, mjs: { label: 'JS', color: '#eab308' }, cjs: { label: 'JS', color: '#eab308' },
-    json: { label: '{}', color: '#facc15' }, jsonc: { label: '{}', color: '#facc15' },
-    jsonl: { label: 'JL', color: '#f59e0b', pill: true }, ndjson: { label: 'JL', color: '#f59e0b', pill: true }, jsonlines: { label: 'JL', color: '#f59e0b', pill: true },
-    py: { label: 'PY', color: '#60a5fa' }, ipynb: { label: 'NB', color: '#fb923c' }, go: { label: 'GO', color: '#22d3ee' }, rs: { label: 'RS', color: '#fb923c' },
-    java: { label: 'JV', color: '#f87171' }, kt: { label: 'KT', color: '#a78bfa' }, rb: { label: 'RB', color: '#f43f5e' }, php: { label: 'PH', color: '#818cf8' },
-    c: { label: 'C', color: '#60a5fa' }, cpp: { label: 'C+', color: '#60a5fa' }, h: { label: 'H', color: '#c084fc' }, cs: { label: 'C#', color: '#4ade80' },
-    html: { label: '<>', color: '#fb923c' }, htm: { label: '<>', color: '#fb923c' }, xml: { label: '<>', color: '#fb923c' },
-    css: { label: '#', color: '#38bdf8' }, scss: { label: 'S#', color: '#f472b6' }, vue: { label: 'V', color: '#4ade80' }, svelte: { label: 'SV', color: '#fb923c' },
-    sh: { label: '$_', color: '#4ade80' }, bash: { label: '$_', color: '#4ade80' }, zsh: { label: '$_', color: '#4ade80' },
-    sql: { label: 'SQ', color: '#a78bfa' }, yml: { label: 'YM', color: '#c084fc' }, yaml: { label: 'YM', color: '#c084fc' }, toml: { label: 'TM', color: '#fbbf24' }
+  const RICH_FILE_BY_NAME = {
+    '.gitignore': { svg: FI_GIT, color: '#f05032' }, '.gitattributes': { svg: FI_GIT, color: '#f05032' },
+    '.gitmodules': { svg: FI_GIT, color: '#f05032' }, '.gitkeep': { svg: FI_GIT, color: '#f05032' },
+    dockerfile: { svg: FI_DOCKER, color: '#2496ed' }, '.dockerignore': { svg: FI_DOCKER, color: '#2496ed' },
+    'docker-compose.yml': { svg: FI_DOCKER, color: '#2496ed' }, 'docker-compose.yaml': { svg: FI_DOCKER, color: '#2496ed' },
+    makefile: { svg: FI_CONFIG, color: '#e37933' }, 'cmakelists.txt': { svg: FI_CONFIG, color: '#e37933' },
+    license: { svg: FI_LICENSE, color: '#cbcb41' }, 'license.md': { svg: FI_LICENSE, color: '#cbcb41' }, 'license.txt': { svg: FI_LICENSE, color: '#cbcb41' },
+    'package.json': { svg: FI_PACKAGE, color: '#8dc149' }, 'package-lock.json': { svg: FI_LOCK, color: '#8dc149' },
+    'pnpm-lock.yaml': { svg: FI_LOCK, color: '#e37933' }, 'yarn.lock': { svg: FI_LOCK, color: '#519aba' },
+    'uv.lock': { svg: FI_LOCK, color: '#a074c4' }, 'poetry.lock': { svg: FI_LOCK, color: '#519aba' },
+    'cargo.toml': { svg: FI_PACKAGE, color: '#e37933' }, 'pyproject.toml': { svg: FI_PACKAGE, color: '#519aba' },
+    'requirements.txt': { svg: FI_PYTHON, color: '#519aba' }, 'tsconfig.json': { svg: FI_TS, color: '#519aba' }
+  };
+  const RICH_FILE_BY_EXT = {
+    xlsx: { svg: FI_EXCEL, color: '#43a047' }, xls: { svg: FI_EXCEL, color: '#43a047' }, xlsm: { svg: FI_EXCEL, color: '#43a047' }, ods: { svg: FI_EXCEL, color: '#43a047' },
+    csv: { svg: FI_CSV, color: '#4ec9b0' }, tsv: { svg: FI_CSV, color: '#4ec9b0' },
+    md: { svg: FI_MARKDOWN, color: '#519aba' }, markdown: { svg: FI_MARKDOWN, color: '#519aba' }, mdx: { svg: FI_MARKDOWN, color: '#519aba' },
+    pdf: { svg: FI_PDF, color: '#e05555' },
+    doc: { svg: FI_WORD, color: '#42a5f5' }, docx: { svg: FI_WORD, color: '#42a5f5' }, rtf: { svg: FI_WORD, color: '#42a5f5' },
+    ppt: { svg: FI_PPT, color: '#e37933' }, pptx: { svg: FI_PPT, color: '#e37933' },
+    drawio: { svg: FI_DIAGRAM, color: '#f08705' }, dio: { svg: FI_DIAGRAM, color: '#f08705' },
+    excalidraw: { svg: FI_DIAGRAM, color: '#a074c4' }, mmd: { svg: FI_DIAGRAM, color: '#f55385' }, mermaid: { svg: FI_DIAGRAM, color: '#f55385' },
+    txt: { svg: FI_TEXT, color: '#94a3b8' }, log: { svg: FI_TEXT, color: '#94a3b8' }, rst: { svg: FI_TEXT, color: '#519aba' },
+    png: { svg: FI_IMAGE, color: '#a074c4' }, jpg: { svg: FI_IMAGE, color: '#a074c4' }, jpeg: { svg: FI_IMAGE, color: '#a074c4' },
+    gif: { svg: FI_IMAGE, color: '#a074c4' }, webp: { svg: FI_IMAGE, color: '#a074c4' }, ico: { svg: FI_IMAGE, color: '#a074c4' },
+    bmp: { svg: FI_IMAGE, color: '#a074c4' }, avif: { svg: FI_IMAGE, color: '#a074c4' }, svg: { svg: FI_SVG_PEN, color: '#e37933' },
+    mp3: { svg: FI_AUDIO, color: '#f55385' }, wav: { svg: FI_AUDIO, color: '#f55385' }, ogg: { svg: FI_AUDIO, color: '#f55385' }, m4a: { svg: FI_AUDIO, color: '#f55385' }, flac: { svg: FI_AUDIO, color: '#f55385' },
+    mp4: { svg: FI_VIDEO, color: '#f55385' }, webm: { svg: FI_VIDEO, color: '#f55385' }, mov: { svg: FI_VIDEO, color: '#f55385' }, mkv: { svg: FI_VIDEO, color: '#f55385' },
+    zip: { svg: FI_ARCHIVE, color: '#e37933' }, tar: { svg: FI_ARCHIVE, color: '#e37933' }, gz: { svg: FI_ARCHIVE, color: '#e37933' },
+    tgz: { svg: FI_ARCHIVE, color: '#e37933' }, '7z': { svg: FI_ARCHIVE, color: '#e37933' }, rar: { svg: FI_ARCHIVE, color: '#e37933' }, dmg: { svg: FI_ARCHIVE, color: '#e37933' },
+    vsix: { svg: FI_ARCHIVE, color: '#519aba' }, whl: { svg: FI_ARCHIVE, color: '#519aba' }, jar: { svg: FI_ARCHIVE, color: '#e05555' }, apk: { svg: FI_ARCHIVE, color: '#8dc149' }, nupkg: { svg: FI_ARCHIVE, color: '#519aba' }, epub: { svg: FI_ARCHIVE, color: '#8dc149' },
+    ts: { svg: FI_TS, color: '#519aba' }, mts: { svg: FI_TS, color: '#519aba' }, cts: { svg: FI_TS, color: '#519aba' },
+    tsx: { svg: FI_REACT, color: '#519aba' },
+    js: { svg: FI_JS, color: '#cbcb41' }, mjs: { svg: FI_JS, color: '#cbcb41' }, cjs: { svg: FI_JS, color: '#cbcb41' },
+    jsx: { svg: FI_REACT, color: '#61dafb' },
+    json: { svg: FI_JSON, color: '#cbcb41' }, jsonc: { svg: FI_JSON, color: '#cbcb41' }, json5: { svg: FI_JSON, color: '#cbcb41' },
+    jsonl: { svg: FI_JSONL, color: '#f59e0b' }, ndjson: { svg: FI_JSONL, color: '#f59e0b' }, jsonlines: { svg: FI_JSONL, color: '#f59e0b' },
+    css: { svg: FI_HASH, color: '#519aba' }, scss: { svg: FI_HASH, color: '#f55385' }, sass: { svg: FI_HASH, color: '#f55385' }, less: { svg: FI_HASH, color: '#519aba' },
+    html: { svg: FI_CODE_TAGS, color: '#e37933' }, htm: { svg: FI_CODE_TAGS, color: '#e37933' }, xml: { svg: FI_CODE_TAGS, color: '#e37933' }, plist: { svg: FI_CODE_TAGS, color: '#e37933' },
+    vue: { svg: FI_VUE, color: '#41b883' }, svelte: { svg: FI_CODE_TAGS, color: '#ff3e00' },
+    py: { svg: FI_PYTHON, color: '#519aba' }, pyw: { svg: FI_PYTHON, color: '#519aba' }, pyi: { svg: FI_PYTHON, color: '#a074c4' },
+    ipynb: { svg: FI_JUPYTER, color: '#f37626' }, rb: { svg: FI_RUBY, color: '#cc3e44' },
+    sh: { svg: FI_SHELL, color: '#8dc149' }, bash: { svg: FI_SHELL, color: '#8dc149' }, zsh: { svg: FI_SHELL, color: '#8dc149' }, fish: { svg: FI_SHELL, color: '#8dc149' }, ps1: { svg: FI_SHELL, color: '#519aba' }, bat: { svg: FI_SHELL, color: '#8dc149' },
+    sql: { svg: FI_DB, color: '#a074c4' }, db: { svg: FI_DB, color: '#a074c4' }, sqlite: { svg: FI_DB, color: '#519aba' }, sqlite3: { svg: FI_DB, color: '#519aba' }, parquet: { svg: FI_DB, color: '#4ec9b0' }, duckdb: { svg: FI_DB, color: '#cbcb41' },
+    yml: { svg: FI_YAML, color: '#a074c4' }, yaml: { svg: FI_YAML, color: '#a074c4' },
+    toml: { svg: FI_CONFIG, color: '#e37933' }, ini: { svg: FI_CONFIG, color: '#94a3b8' }, conf: { svg: FI_CONFIG, color: '#94a3b8' }, cfg: { svg: FI_CONFIG, color: '#94a3b8' },
+    env: { svg: FI_KEY, color: '#cbcb41' }, pem: { svg: FI_KEY, color: '#cbcb41' }, key: { svg: FI_KEY, color: '#cbcb41' }, lock: { svg: FI_LOCK, color: '#94a3b8' },
+    go: { label: 'GO', color: '#519aba' }, rs: { svg: FI_CONFIG, color: '#e37933' },
+    java: { label: 'JV', color: '#cc3e44' }, kt: { label: 'KT', color: '#a074c4' }, php: { label: 'PH', color: '#a074c4' }, swift: { label: 'SW', color: '#e37933' },
+    c: { label: 'C', color: '#519aba' }, cpp: { label: 'C+', color: '#519aba' }, h: { label: 'H', color: '#a074c4' }, cs: { label: 'C#', color: '#8dc149' }
   };
 
   function fileIconFor(entry) {
     if (entry.isGitRepo) return { svg: ICONS.gitRepo, cls: 'is-git', color: '#f05032' };
     if (entry.isDirectory) {
       const lowerDir = String(entry.name || '').toLowerCase();
-      const color = RICH_FOLDER_COLORS[lowerDir] || (entry.expanded ? '#f0c869' : '#dcb67a');
+      const color = RICH_FOLDER_COLORS[lowerDir] || (entry.expanded ? '#e5c07b' : '#dcb67a');
       return { svg: entry.expanded ? RICH_FOLDER_SVG_OPEN : RICH_FOLDER_SVG_CLOSED, cls: 'is-dir', color };
     }
-    if (entry.isSymlink) return { svg: ICONS.link, cls: 'is-link', color: '#38bdf8' };
+    if (entry.isSymlink) return { svg: ICONS.link, cls: 'is-link', color: '#519aba' };
     const lowerName = String(entry.name || '').toLowerCase();
-    if (/^\.git(ignore|attributes|modules|keep)$/.test(lowerName)) return { svg: ICONS.branch, cls: 'is-git', color: '#f05032' };
-    if (lowerName === 'dockerfile') return { svg: '<span class="gm-ft-pill">DK</span>', cls: 'is-badge', color: '#38bdf8' };
-    if (lowerName === 'makefile') return { svg: '<span class="gm-ft-pill">MK</span>', cls: 'is-badge', color: '#fb923c' };
-    if (lowerName.startsWith('.env')) return { svg: '<span class="gm-ft-text">ENV</span>', cls: 'is-badge', color: '#facc15' };
+    const byName = RICH_FILE_BY_NAME[lowerName];
+    if (byName) return { svg: byName.svg, cls: 'is-glyph', color: byName.color };
+    if (lowerName.startsWith('.env')) return { svg: FI_KEY, cls: 'is-glyph', color: '#cbcb41' };
     const dot = lowerName.lastIndexOf('.');
     const ext = dot > 0 ? lowerName.slice(dot + 1) : '';
-    if (/^(xlsx|xls|xlsm|ods)$/.test(ext)) return { svg: RICH_SHEET_SVG, cls: 'is-sheet', color: '#22c55e' };
-    if (/^(png|jpe?g|gif|webp|bmp|ico|tiff?|heic|avif)$/.test(ext)) return { svg: ICONS.fileImage, cls: 'is-image', color: '#c084fc' };
-    if (ext === 'svg') return { svg: ICONS.fileImage, cls: 'is-image', color: '#f59e0b' };
-    if (/^(mp3|wav|ogg|m4a|flac|mp4|webm|mov|mkv)$/.test(ext)) return { svg: RICH_MEDIA_SVG, cls: 'is-media', color: '#f472b6' };
-    if (/^(zip|tar|gz|tgz|bz2|xz|7z|rar|zst|jar|whl|vsix|apk|nupkg|epub|deb|rpm|dmg)$/.test(ext)) return { svg: ICONS.fileArchive, cls: 'is-archive', color: '#f59e0b' };
-    if (ext && RICH_FILE_BADGES[ext]) {
-      const b = RICH_FILE_BADGES[ext];
-      const tag = b.pill ? `<span class="gm-ft-pill">${b.label}</span>` : `<span class="gm-ft-text">${b.label}</span>`;
-      return { svg: tag, cls: 'is-badge', color: b.color };
+    const byExt = ext ? RICH_FILE_BY_EXT[ext] : null;
+    if (byExt) {
+      if (byExt.svg) return { svg: byExt.svg, cls: 'is-glyph', color: byExt.color };
+      return { svg: `<span class="gm-ft-text">${byExt.label}</span>`, cls: 'is-badge', color: byExt.color };
     }
-    if (window.GitMapSyntax && window.GitMapSyntax.languageForPath(entry.name)) return { svg: ICONS.fileCode, cls: 'is-code', color: '#519aba' };
-    return { svg: ICONS.file, cls: 'is-file', color: '#94a3b8' };
+    if (window.GitMapSyntax && window.GitMapSyntax.languageForPath(entry.name)) return { svg: FI_CODE_TAGS, cls: 'is-code', color: '#519aba' };
+    return { svg: FI_TEXT, cls: 'is-file', color: '#94a3b8' };
   }
 
   function joinPath(dir, name) {
@@ -5144,6 +5299,7 @@
       loadingDirs: new Set(),
       lastClicked: -1,
       focusIdx: -1,
+      lastViewedPath: null,
       visible: [],
       loadSeq: 0,
       suggest: { items: [], idx: -1, base: '' }
@@ -5609,7 +5765,7 @@
           ctxActions.push({
             icon: ICONS.layoutTabs,
             label: zh ? '在独立标签页中打开' : 'Open in Full Tab',
-            run: () => opts.onDoubleClickFile(entry)
+            run: () => { markLastViewedPath(entry.path); opts.onDoubleClickFile(entry); }
           });
         }
       }
@@ -5755,11 +5911,12 @@
           const icon = fileIconFor({ ...e, expanded: !!e._expanded });
           const m = formatMtime(e.mtime);
           const sel = fb.selected.has(e.path);
+          const isLastViewed = !e.isDirectory && fb.lastViewedPath === e.path;
           const deco = opts.decorate ? opts.decorate(e) : null;
           const idleAction = e.isGitRepo && opts.showOpenRepo !== false
             ? `<button type="button" class="mini-btn act-row-open-repo">${escapeHtml(tr('openRepoBtn'))}</button>`
             : '';
-          return `<div class="fb-row${e.isDirectory ? ' is-dir' : ''}${e.isGitRepo ? ' is-git' : ''}${sel ? ' selected' : ''}${idx === fb.focusIdx ? ' focused' : ''}${deco ? ' gs-' + deco.code : ''}" data-idx="${idx}" role="row" title="${escapeHtml(e.path)}">
+          return `<div class="fb-row${e.isDirectory ? ' is-dir' : ''}${e.isGitRepo ? ' is-git' : ''}${sel ? ' selected' : ''}${isLastViewed ? ' last-viewed' : ''}${idx === fb.focusIdx ? ' focused' : ''}${deco ? ' gs-' + deco.code : ''}" data-idx="${idx}" data-path="${escapeHtml(e.path)}" role="row" title="${escapeHtml(e.path)}">
             <span class="fb-col-chk"><input type="checkbox" class="fb-check" ${sel ? 'checked' : ''} tabindex="-1" /></span>
             <span class="fb-col-name">${guidesHtml}${twistyHtml}<span class="fb-icon ${icon.cls}"${icon.color ? ` style="color:${icon.color}"` : ''}>${icon.svg}</span><span class="fb-name">${escapeHtml(e.name)}</span>${e.isSymlink ? `<span class="fb-link" title="${escapeHtml(T('符号链接', 'Symbolic link'))}">${ICONS.link}</span>` : ''}${e.isGitRepo ? `<span class="branch-pill">${ICONS.branch}${escapeHtml(e.gitBranch || 'HEAD')}</span>` : ''}${deco ? `<span class="fb-git-badge" title="${escapeHtml(deco.title)}" aria-label="${escapeHtml(deco.title)}">${escapeHtml(deco.badge)}</span>` : ''}</span>
             <span class="fb-col-size">${e.isDirectory ? '—' : escapeHtml(formatBytes(e.size))}</span>
@@ -5987,10 +6144,59 @@
       return collectAllKnownEntries().filter((e) => fb.selected.has(e.path));
     }
 
+    function markLastViewedPath(filePath) {
+      fb.lastViewedPath = filePath || null;
+      body.querySelectorAll('.fb-row.last-viewed').forEach((el) => el.classList.remove('last-viewed'));
+      if (!fb.lastViewedPath) return;
+      const rows = body.querySelectorAll('.fb-row[data-path]');
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute('data-path') === fb.lastViewedPath) {
+          rows[i].classList.add('last-viewed');
+          break;
+        }
+      }
+    }
+
+    fb.revealFileRow = function (targetPath) {
+      const needle = String(targetPath || fb.lastViewedPath || '').replace(/\\/g, '/');
+      if (!needle) return;
+      const idx = fb.visible.findIndex((e) => {
+        if (e.isDirectory) return false;
+        const ep = String(e.path || '').replace(/\\/g, '/');
+        return ep === needle || ep.endsWith('/' + needle);
+      });
+      if (idx === -1) return;
+      const entry = fb.visible[idx];
+      fb.lastViewedPath = entry.path;
+      fb.focusIdx = idx;
+      if (fb.visible.length > 140) {
+        const VROW_H = 34;
+        const targetTop = Math.max(0, idx * VROW_H - Math.floor((body.clientHeight || 480) / 2));
+        body.scrollTop = targetTop;
+        body.dispatchEvent(new Event('scroll'));
+      }
+      requestAnimationFrame(() => {
+        markLastViewedPath(entry.path);
+        const row = body.querySelector(`.fb-row[data-idx="${idx}"]`);
+        if (!row) return;
+        const bRect = body.getBoundingClientRect();
+        const rRect = row.getBoundingClientRect();
+        if (rRect.top < bRect.top + 8 || rRect.bottom > bRect.bottom - 8) {
+          row.scrollIntoView({ block: 'center' });
+        }
+        row.classList.remove('gm-row-reveal-flash');
+        void row.offsetWidth;
+        row.classList.add('gm-row-reveal-flash');
+      });
+    };
+
     function openEntry(entry) {
       if (!entry) return;
       if (entry.isDirectory) fb.navigate(entry.path, { push: true });
-      else if (opts.onOpenFile) opts.onOpenFile(entry);
+      else {
+        markLastViewedPath(entry.path);
+        if (opts.onOpenFile) opts.onOpenFile(entry);
+      }
     }
 
     function setFocus(idx) {
@@ -6312,7 +6518,7 @@
       } else if (btn.classList.contains('act-row-enter')) {
         openEntry(entry);
       } else if (btn.classList.contains('act-row-open-file')) {
-        if (opts.onDoubleClickFile) opts.onDoubleClickFile(entry);
+        if (opts.onDoubleClickFile) { markLastViewedPath(entry.path); opts.onDoubleClickFile(entry); }
         else openEntry(entry);
       } else if (btn.classList.contains('act-row-new-file') && opts.createFile) {
         fb.expandedDirs.add(entry.path);
@@ -6420,6 +6626,7 @@
       if (entry.isDirectory) {
         fb.navigate(entry.path, { push: true });
       } else if (opts.onDoubleClickFile) {
+        markLastViewedPath(entry.path);
         opts.onDoubleClickFile(entry);
       } else {
         openEntry(entry);
@@ -7155,6 +7362,7 @@
         onClosePreview: () => {
           if (typeof previewPane.__disposeViewer === 'function') previewPane.__disposeViewer();
           previewPane.classList.add('hidden');
+          repoFilesBrowser?.revealFileRow?.(entryPath);
         }
       });
       return;
