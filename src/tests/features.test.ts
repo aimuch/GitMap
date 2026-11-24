@@ -1531,4 +1531,114 @@ describe('GitMap 11 Advanced Features End-to-End Suite', () => {
     const allDropped = [...page1.files, ...page2.files].map((f: any) => f.path).sort();
     assert.deepEqual(allDropped, ['drop-1.txt', 'drop-2.txt', 'drop-3.txt', 'drop-4.txt']);
   });
+
+  it('Rich File Previews: file:parsePreview & /api/file-raw support working tree AND historical commits (xlsx, docx, pptx, zip, svg)', async () => {
+    const repoDir = path.join(tmpRoot, 'repo-rich-preview');
+    fs.mkdirSync(repoDir, { recursive: true });
+    execGitSync(repoDir, ['init', '-b', 'main']);
+    execGitSync(repoDir, ['config', 'user.name', 'Andy']);
+    execGitSync(repoDir, ['config', 'user.email', 'andy@example.com']);
+
+    // Helper to write a minimal uncompressed ZIP archive
+    const makeStoreZip = (entries: Array<{ name: string; content: string }>): Buffer => {
+      const locals: Buffer[] = [];
+      const cds: Buffer[] = [];
+      let off = 0;
+      for (const e of entries) {
+        const nb = Buffer.from(e.name, 'utf8');
+        const body = Buffer.from(e.content, 'utf8');
+        const lfh = Buffer.alloc(30);
+        lfh.writeUInt32LE(0x04034b50, 0);
+        lfh.writeUInt16LE(20, 4);
+        lfh.writeUInt32LE(body.length, 18);
+        lfh.writeUInt32LE(body.length, 22);
+        lfh.writeUInt16LE(nb.length, 26);
+        locals.push(lfh, nb, body);
+
+        const cdh = Buffer.alloc(46);
+        cdh.writeUInt32LE(0x02014b50, 0);
+        cdh.writeUInt16LE(20, 4);
+        cdh.writeUInt16LE(20, 6);
+        cdh.writeUInt32LE(body.length, 20);
+        cdh.writeUInt32LE(body.length, 24);
+        cdh.writeUInt16LE(nb.length, 28);
+        cdh.writeUInt32LE(off, 42);
+        cds.push(cdh, nb);
+        off += lfh.length + nb.length + body.length;
+      }
+      const cdBuf = Buffer.concat(cds);
+      const eocd = Buffer.alloc(22);
+      eocd.writeUInt32LE(0x06054b50, 0);
+      eocd.writeUInt16LE(entries.length, 8);
+      eocd.writeUInt16LE(entries.length, 10);
+      eocd.writeUInt32LE(cdBuf.length, 12);
+      eocd.writeUInt32LE(off, 16);
+      return Buffer.concat([...locals, cdBuf, eocd]);
+    };
+
+    const xlsxV1 = makeStoreZip([
+      { name: 'xl/workbook.xml', content: '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>' },
+      { name: 'xl/_rels/workbook.xml.rels', content: '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>' },
+      { name: 'xl/worksheets/sheet1.xml', content: '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Version</t></is></c><c r="B1"><v>1</v></c></row></sheetData></worksheet>' }
+    ]);
+    const docxV1 = makeStoreZip([
+      { name: 'word/document.xml', content: '<w:document><w:body><w:p><w:r><w:t>Hello Word v1</w:t></w:r></w:p></w:body></w:document>' }
+    ]);
+    const svgV1 = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="6"/></svg>';
+
+    fs.writeFileSync(path.join(repoDir, 'metrics.xlsx'), xlsxV1);
+    fs.writeFileSync(path.join(repoDir, 'spec.docx'), docxV1);
+    fs.writeFileSync(path.join(repoDir, 'logo.svg'), svgV1);
+    execGitSync(repoDir, ['add', '.']);
+    execGitSync(repoDir, ['commit', '-m', 'feat: add v1 office docs and svg']);
+    const c1 = execGitSync(repoDir, ['rev-parse', 'HEAD']).trim();
+
+    // Commit 2: update metrics.xlsx to v2 and delete spec.docx & logo.svg
+    const xlsxV2 = makeStoreZip([
+      { name: 'xl/workbook.xml', content: '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>' },
+      { name: 'xl/_rels/workbook.xml.rels', content: '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>' },
+      { name: 'xl/worksheets/sheet1.xml', content: '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Version</t></is></c><c r="B1"><v>2</v></c></row></sheetData></worksheet>' }
+    ]);
+    fs.writeFileSync(path.join(repoDir, 'metrics.xlsx'), xlsxV2);
+    fs.rmSync(path.join(repoDir, 'spec.docx'));
+    fs.rmSync(path.join(repoDir, 'logo.svg'));
+    execGitSync(repoDir, ['add', '-A']);
+    execGitSync(repoDir, ['commit', '-m', 'chore: update xlsx to v2 and drop docx/svg']);
+
+    // 1. Working tree parsePreview reads v2
+    const wtXlsx = await rpc.call('file:parsePreview', { repo: repoDir, filePath: 'metrics.xlsx' });
+    assert.equal(wtXlsx.preview.kind, 'spreadsheet');
+    assert.deepEqual(wtXlsx.preview.sheets[0].rows[0], ['Version', '2']);
+
+    // 2. Historical commit parsePreview reads v1 even though HEAD updated/deleted files, and hits LRU cache on repeat!
+    const histXlsx = await rpc.call('file:parsePreview', { repo: repoDir, filePath: 'metrics.xlsx', commit: c1 });
+    assert.deepEqual(histXlsx.preview.sheets[0].rows[0], ['Version', '1']);
+    assert.equal(histXlsx.fromCache, false);
+    const histXlsxCached = await rpc.call('file:parsePreview', { repo: repoDir, filePath: 'metrics.xlsx', commit: c1 });
+    assert.equal(histXlsxCached.fromCache, true, 'repeated immutable commit parsePreview hits LRU cache');
+    assert.deepEqual(histXlsxCached.preview.sheets[0].rows[0], ['Version', '1']);
+
+    const histDocx = await rpc.call('file:parsePreview', { repo: repoDir, filePath: 'spec.docx', commit: c1 });
+    assert.equal(histDocx.preview.kind, 'docx');
+    assert.equal(histDocx.preview.blocks[0].text, 'Hello Word v1');
+
+    // 3. /api/file-raw with commit=c1 serves deleted SVG with strict CSP sandbox header
+    const svgResp = await fetch(
+      `${serverUrl}/api/file-raw?repo=${encodeURIComponent(repoDir)}&path=${encodeURIComponent('logo.svg')}&commit=${encodeURIComponent(c1)}`
+    );
+    assert.equal(svgResp.status, 200);
+    assert.equal(svgResp.headers.get('content-type'), 'image/svg+xml');
+    assert.equal(svgResp.headers.get('content-security-policy'), 'sandbox');
+    assert.ok((await svgResp.text()).includes('<circle'));
+
+    // 4. Repo boundary & relative path traversal guards block escapes in both parsePreview and /api/file-raw
+    await assert.rejects(
+      rpc.call('file:parsePreview', { repo: repoDir, filePath: '../outside.xlsx' }),
+      /Invalid relative file path/i
+    );
+    const escapeResp = await fetch(
+      `${serverUrl}/api/file-raw?repo=${encodeURIComponent(repoDir)}&path=${encodeURIComponent('../outside.svg')}`
+    );
+    assert.equal(escapeResp.status, 403);
+  });
 });

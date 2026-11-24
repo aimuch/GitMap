@@ -3433,12 +3433,14 @@
     };
 
     const iconForTreeEntry = (ent) => {
-      if (ent.isDirectory) return expandedDirs.has(ent.path) ? ICONS.folderOpen : ICONS.folder;
-      if (ent.isSubmodule) return ICONS.gitRepo;
-      if (ent.isSymlink) return ICONS.link;
-      if (/\.(png|jpe?g|gif|webp|svg|ico)$/i.test(ent.name)) return ICONS.fileImage;
-      if (/\.(zip|tar|gz|tgz|7z|rar)$/i.test(ent.name)) return ICONS.fileArchive;
-      return ICONS.fileCode;
+      const info = fileIconFor({
+        name: ent.name,
+        isDirectory: !!ent.isDirectory,
+        isGitRepo: !!ent.isSubmodule,
+        isSymlink: !!ent.isSymlink,
+        expanded: !!ent.isDirectory && expandedDirs.has(ent.path)
+      });
+      return `<span class="gm-ft-icon ${info.cls}"${info.color ? ` style="color:${info.color}"` : ''}>${info.svg}</span>`;
     };
 
     const renderHeader = () => {
@@ -4001,6 +4003,12 @@
     renderPreviewBarOnly(`<div class="browser-empty-state"><span class="fb-spinner"></span>Loading file…</div>`);
 
     try {
+      const previewApi = window.GitMapEditorPreview;
+      const initialPreviewKind = previewApi ? previewApi.getPreviewKind(payload.filePath) : null;
+      const skipReadForBinaryPreview =
+        typeof payload.inlineContent !== 'string' &&
+        !!(previewApi && previewApi.isBinaryPreviewKind && previewApi.isBinaryPreviewKind(initialPreviewKind));
+
       let fileRes;
       if (typeof payload.inlineContent === 'string') {
         fileRes = {
@@ -4009,6 +4017,18 @@
           commit: null,
           content: payload.inlineContent,
           isBinary: false,
+          error: null,
+          blame: null
+        };
+      } else if (skipReadForBinaryPreview) {
+        // Avoid redundant file:read / SFTP transfer for binary previewable formats (Excel, Word, PPTX, ZIP, Image, PDF, Media)
+        fileRes = {
+          repo: payload.repo || '',
+          filePath: payload.filePath,
+          commit: payload.commit || null,
+          sourceUri: payload.sourceUri || (payload.repo ? '' : payload.filePath),
+          content: '',
+          isBinary: true,
           error: null,
           blame: null
         };
@@ -4026,7 +4046,9 @@
         renderPreviewBarOnly(`<div class="browser-empty-state error-text">${escapeHtml(fileRes.error)}</div>`);
         return;
       }
-      if (fileRes.isBinary) {
+      const richPreviewKind = previewApi ? previewApi.getPreviewKind(fileRes.filePath || payload.filePath) : null;
+      const isBinaryPreviewable = !!(previewApi && previewApi.isBinaryPreviewKind && previewApi.isBinaryPreviewKind(richPreviewKind));
+      if (fileRes.isBinary && !isBinaryPreviewable) {
         renderPreviewBarOnly(`<div class="browser-empty-state">${escapeHtml(tr('binaryFileNotice'))}</div>`);
         return;
       }
@@ -4040,9 +4062,8 @@
       let selStart = payload.lines ? payload.lines.start : null;
       let selEnd = payload.lines ? payload.lines.end : null;
       let wrapLines = localStorage.getItem('gitmap.viewer.wrapLines') !== '0';
-      const richPreviewKind = window.GitMapEditorPreview ? window.GitMapEditorPreview.getPreviewKind(fileRes.filePath) : null;
-      let richPreviewActive = richPreviewKind === 'pdf' || richPreviewKind === 'audio' || richPreviewKind === 'video';
-      const canEdit = !fileRes.commit && !fileRes.truncated && !fileRes.notUtf8 && typeof payload.inlineContent !== 'string' && !!(fileRes.repo || fileRes.sourceUri || payload.filePath) && !['pdf', 'audio', 'video'].includes(richPreviewKind || '');
+      let richPreviewActive = isBinaryPreviewable || !!(previewApi && previewApi.shouldDefaultRichPreview && previewApi.shouldDefaultRichPreview(richPreviewKind));
+      const canEdit = !fileRes.isBinary && !isBinaryPreviewable && !fileRes.commit && !fileRes.truncated && !fileRes.notUtf8 && typeof payload.inlineContent !== 'string' && !!(fileRes.repo || fileRes.sourceUri || payload.filePath);
       let draftContent = typeof payload.initialDraft === 'string' ? payload.initialDraft : fileRes.content;
       const startInEdit = Boolean(canEdit && payload.startEditing);
       const initialEditorState = startInEdit
@@ -4151,11 +4172,17 @@
                      <button type="button" class="mini-btn act-cancel-edit">${escapeHtml(tr('cancel'))}</button>`
                   : `<button type="button" class="mini-btn act-edit-file">${ICONS.pencil}<span>${escapeHtml(zh ? '在线编辑' : 'Edit')}</span></button>`
               ) : ''}
-              ${!isEditing && richPreviewKind && !['pdf', 'audio', 'video'].includes(richPreviewKind) ? `<button type="button" class="mini-btn act-rich-preview ${richPreviewActive ? 'primary' : ''}">${escapeHtml(richPreviewKind === 'markdown' ? (zh ? (richPreviewActive ? '查看源码' : '渲染预览') : (richPreviewActive ? 'Source' : 'Preview')) : (zh ? (richPreviewActive ? '查看源码' : '表格视图') : (richPreviewActive ? 'Source' : 'Table')))}</button>` : ''}
-              ${!isEditing && !richPreviewActive ? `<label class="inline-check"><input type="checkbox" class="wrap-toggle" ${wrapLines ? 'checked' : ''} /> <span>${escapeHtml(tr('wrapLines'))}</span></label>` : ''}
+              ${!isEditing && richPreviewKind && !isBinaryPreviewable ? `<button type="button" class="mini-btn act-rich-preview ${richPreviewActive ? 'primary' : ''}">${escapeHtml(
+                richPreviewKind === 'jsonl'
+                  ? (zh ? (richPreviewActive ? '查看源码' : 'JSONL 视图') : (richPreviewActive ? 'Source' : 'JSONL View'))
+                  : ['markdown', 'html', 'svg'].includes(richPreviewKind)
+                    ? (zh ? (richPreviewActive ? '查看源码' : '渲染预览') : (richPreviewActive ? 'Source' : 'Preview'))
+                    : (zh ? (richPreviewActive ? '查看源码' : '表格视图') : (richPreviewActive ? 'Source' : 'Table'))
+              )}</button>` : ''}
+              ${!isEditing && !richPreviewActive && !fileRes.isBinary ? `<label class="inline-check"><input type="checkbox" class="wrap-toggle" ${wrapLines ? 'checked' : ''} /> <span>${escapeHtml(tr('wrapLines'))}</span></label>` : ''}
               ${hasRepo && !isEditing ? `
-                <button type="button" class="mini-btn act-blame ${showBlame ? 'primary' : ''}">${escapeHtml(tr('toggleBlame'))}</button>
-                <button type="button" class="mini-btn act-line-hist">${escapeHtml(tr('lineHistoryGraph'))}</button>
+                ${!isBinaryPreviewable && !richPreviewActive ? `<button type="button" class="mini-btn act-blame ${showBlame ? 'primary' : ''}">${escapeHtml(tr('toggleBlame'))}</button>
+                <button type="button" class="mini-btn act-line-hist">${escapeHtml(tr('lineHistoryGraph'))}</button>` : ''}
                 <button type="button" class="mini-btn act-file-hist">${escapeHtml(tr('fileHistoryGraph'))}</button>
                 ${opts.isInlinePreview ? '' : `<button type="button" class="mini-btn act-vfh">${escapeHtml(tr('visualHistory'))}</button>`}
                 <button type="button" class="mini-btn act-ftm" title="${escapeHtml(tr('timeMachine'))}">${ICONS.clock}<span>${escapeHtml(tr('timeMachine'))}</span></button>
@@ -4299,10 +4326,45 @@
             mountViewer();
           });
         }
+        if (hasRepo) {
+          panel.querySelector('.act-file-hist')?.addEventListener('click', async () => {
+            await rpc('file:viewHistoryInGraph', { repo: fileRes.repo, filePath: fileRes.filePath });
+            activateTab('graph');
+          });
+          panel.querySelector('.act-vfh')?.addEventListener('click', async () => {
+            await rpc('file:visualHistory', {
+              repo: fileRes.repo,
+              filePath: fileRes.filePath,
+              commitHash: fileRes.commit || undefined
+            });
+          });
+          panel.querySelector('.act-ftm')?.addEventListener('click', async () => {
+            await rpc('file:timeMachine', {
+              repo: fileRes.repo,
+              filePath: fileRes.filePath,
+              commitHash: fileRes.commit || undefined
+            });
+          });
+        }
+        // Cancel any stale async preview callbacks targeting scrollArea
+        scrollArea.__gmPreviewSeq = (scrollArea.__gmPreviewSeq || 0) + 1;
         if (richPreviewActive && window.GitMapEditorPreview) {
-          const rendered = window.GitMapEditorPreview.renderRichPreview(scrollArea, fileRes.filePath, fileRes.content, {
-            repo: fileRes.repo || '',
-            filePath: fileRes.filePath
+          const rendered = window.GitMapEditorPreview.renderRichPreview(scrollArea, fileRes.filePath || payload.filePath, fileRes.content, {
+            repo: fileRes.repo || payload.repo || '',
+            hostId: payload.hostId || '',
+            filePath: fileRes.filePath || payload.filePath || '',
+            commit: fileRes.commit || payload.commit || '',
+            sourceUri: fileRes.sourceUri || '',
+            onOpenRelativeFile: (relPath) => {
+              const targetRepo = fileRes.repo || payload.repo || '';
+              const targetCommit = fileRes.commit || payload.commit || undefined;
+              if (!relPath) return;
+              if (opts.isInlinePreview) {
+                renderFileViewerInto(panel, { ...payload, repo: targetRepo, filePath: relPath, commit: targetCommit, inlineContent: undefined, lines: undefined }, opts);
+              } else {
+                openFileTab({ repo: targetRepo, filePath: relPath, commit: targetCommit });
+              }
+            }
           });
           if (rendered) return;
         }
@@ -4562,28 +4624,10 @@
             try { localStorage.setItem('gitmap.blame.detectMoves', blameDetectMoves ? '1' : '0'); } catch (_) {}
             void reloadBlameFlags();
           });
-          panel.querySelector('.act-line-hist').addEventListener('click', async () => {
+          panel.querySelector('.act-line-hist')?.addEventListener('click', async () => {
             const range = selStart !== null ? { start: selStart, end: selEnd || selStart } : { start: 1, end: Math.min(20, lines.length) };
             await rpc('file:viewHistoryInGraph', { repo: fileRes.repo, filePath: fileRes.filePath, lineRange: range });
             activateTab('graph');
-          });
-          panel.querySelector('.act-file-hist').addEventListener('click', async () => {
-            await rpc('file:viewHistoryInGraph', { repo: fileRes.repo, filePath: fileRes.filePath });
-            activateTab('graph');
-          });
-          panel.querySelector('.act-vfh')?.addEventListener('click', async () => {
-            await rpc('file:visualHistory', {
-              repo: fileRes.repo,
-              filePath: fileRes.filePath,
-              commitHash: fileRes.commit || undefined
-            });
-          });
-          panel.querySelector('.act-ftm')?.addEventListener('click', async () => {
-            await rpc('file:timeMachine', {
-              repo: fileRes.repo,
-              filePath: fileRes.filePath,
-              commitHash: fileRes.commit || undefined
-            });
           });
         }
 
@@ -5004,14 +5048,63 @@
     return { short, full: date + ' ' + time + ':' + pad(d.getSeconds()) };
   }
 
+  const RICH_FOLDER_SVG_CLOSED = '<svg class="ui-icon" viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M1.8 3.2A1.3 1.3 0 0 1 3.1 2h3.1c.4 0 .78.18 1.03.5l.62.8h5.05A1.3 1.3 0 0 1 14.2 4.6v7.9a1.3 1.3 0 0 1-1.3 1.3H3.1a1.3 1.3 0 0 1-1.3-1.3V3.2z"/></svg>';
+  const RICH_FOLDER_SVG_OPEN = '<svg class="ui-icon" viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" fill-opacity="0.72" d="M1.8 3.4A1.3 1.3 0 0 1 3.1 2.1h3.1c.4 0 .78.18 1.03.5l.62.8h4.95a1.2 1.2 0 0 1 1.2 1.2v1.2H2.9a1.2 1.2 0 0 0-1.1.85V3.4z"/><path fill="currentColor" d="M1.6 7.1a1 1 0 0 1 .98-.8h11.34a.95.95 0 0 1 .93 1.16l-1.12 5.2a1.2 1.2 0 0 1-1.17.94H2.95a1.2 1.2 0 0 1-1.18-.98L1.6 7.1z"/></svg>';
+  const RICH_SHEET_SVG = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="1.6"/><path d="M2 6h12M2 10h12M6.5 6v8"/></svg>';
+  const RICH_MEDIA_SVG = '<svg class="ui-icon" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="11" rx="1.6"/><polygon points="6.6,5.5 11.2,8 6.6,10.5" fill="currentColor" stroke="none"/></svg>';
+  const RICH_FOLDER_COLORS = {
+    src: '#eab308', apps: '#f59e0b', app: '#f59e0b', packages: '#f59e0b', lib: '#eab308',
+    docs: '#38bdf8', doc: '#38bdf8', data: '#34d399', datasets: '#34d399', db: '#34d399',
+    assets: '#c084fc', images: '#c084fc', media: '#c084fc', scripts: '#2dd4bf', bin: '#2dd4bf',
+    test: '#f472b6', tests: '#f472b6', eval: '#f472b6', prompts: '#a78bfa', config: '#fb923c',
+    '.github': '#818cf8', '.claude': '#a78bfa', '.vscode': '#38bdf8', '.git': '#f05032'
+  };
+  const RICH_FILE_BADGES = {
+    md: { label: 'M↓', color: '#38bdf8', pill: true }, markdown: { label: 'M↓', color: '#38bdf8', pill: true }, mdx: { label: 'M↓', color: '#38bdf8', pill: true },
+    csv: { label: 'CSV', color: '#34d399', pill: true }, tsv: { label: 'TSV', color: '#34d399', pill: true },
+    pdf: { label: 'PDF', color: '#f87171', pill: true },
+    doc: { label: 'DOC', color: '#60a5fa', pill: true }, docx: { label: 'DOC', color: '#60a5fa', pill: true },
+    ppt: { label: 'PPT', color: '#fb923c', pill: true }, pptx: { label: 'PPT', color: '#fb923c', pill: true },
+    ts: { label: 'TS', color: '#3b82f6' }, tsx: { label: 'TX', color: '#38bdf8' }, mts: { label: 'TS', color: '#3b82f6' }, cts: { label: 'TS', color: '#3b82f6' },
+    js: { label: 'JS', color: '#eab308' }, jsx: { label: 'JX', color: '#facc15' }, mjs: { label: 'JS', color: '#eab308' }, cjs: { label: 'JS', color: '#eab308' },
+    json: { label: '{}', color: '#facc15' }, jsonc: { label: '{}', color: '#facc15' },
+    jsonl: { label: 'JL', color: '#f59e0b', pill: true }, ndjson: { label: 'JL', color: '#f59e0b', pill: true }, jsonlines: { label: 'JL', color: '#f59e0b', pill: true },
+    py: { label: 'PY', color: '#60a5fa' }, ipynb: { label: 'NB', color: '#fb923c' }, go: { label: 'GO', color: '#22d3ee' }, rs: { label: 'RS', color: '#fb923c' },
+    java: { label: 'JV', color: '#f87171' }, kt: { label: 'KT', color: '#a78bfa' }, rb: { label: 'RB', color: '#f43f5e' }, php: { label: 'PH', color: '#818cf8' },
+    c: { label: 'C', color: '#60a5fa' }, cpp: { label: 'C+', color: '#60a5fa' }, h: { label: 'H', color: '#c084fc' }, cs: { label: 'C#', color: '#4ade80' },
+    html: { label: '<>', color: '#fb923c' }, htm: { label: '<>', color: '#fb923c' }, xml: { label: '<>', color: '#fb923c' },
+    css: { label: '#', color: '#38bdf8' }, scss: { label: 'S#', color: '#f472b6' }, vue: { label: 'V', color: '#4ade80' }, svelte: { label: 'SV', color: '#fb923c' },
+    sh: { label: '$_', color: '#4ade80' }, bash: { label: '$_', color: '#4ade80' }, zsh: { label: '$_', color: '#4ade80' },
+    sql: { label: 'SQ', color: '#a78bfa' }, yml: { label: 'YM', color: '#c084fc' }, yaml: { label: 'YM', color: '#c084fc' }, toml: { label: 'TM', color: '#fbbf24' }
+  };
+
   function fileIconFor(entry) {
-    if (entry.isGitRepo) return { svg: ICONS.gitRepo, cls: 'is-git' };
-    if (entry.isDirectory) return { svg: ICONS.folder, cls: 'is-dir' };
-    const ext = (entry.name.split('.').pop() || '').toLowerCase();
-    if (/^(png|jpe?g|gif|webp|svg|bmp|ico|tiff?|heic)$/.test(ext)) return { svg: ICONS.fileImage, cls: 'is-image' };
-    if (/^(zip|tar|gz|tgz|bz2|xz|7z|rar|zst|jar|whl|deb|rpm|dmg)$/.test(ext)) return { svg: ICONS.fileArchive, cls: 'is-archive' };
-    if (window.GitMapSyntax && window.GitMapSyntax.languageForPath(entry.name)) return { svg: ICONS.fileCode, cls: 'is-code' };
-    return { svg: ICONS.file, cls: 'is-file' };
+    if (entry.isGitRepo) return { svg: ICONS.gitRepo, cls: 'is-git', color: '#f05032' };
+    if (entry.isDirectory) {
+      const lowerDir = String(entry.name || '').toLowerCase();
+      const color = RICH_FOLDER_COLORS[lowerDir] || (entry.expanded ? '#f0c869' : '#dcb67a');
+      return { svg: entry.expanded ? RICH_FOLDER_SVG_OPEN : RICH_FOLDER_SVG_CLOSED, cls: 'is-dir', color };
+    }
+    if (entry.isSymlink) return { svg: ICONS.link, cls: 'is-link', color: '#38bdf8' };
+    const lowerName = String(entry.name || '').toLowerCase();
+    if (/^\.git(ignore|attributes|modules|keep)$/.test(lowerName)) return { svg: ICONS.branch, cls: 'is-git', color: '#f05032' };
+    if (lowerName === 'dockerfile') return { svg: '<span class="gm-ft-pill">DK</span>', cls: 'is-badge', color: '#38bdf8' };
+    if (lowerName === 'makefile') return { svg: '<span class="gm-ft-pill">MK</span>', cls: 'is-badge', color: '#fb923c' };
+    if (lowerName.startsWith('.env')) return { svg: '<span class="gm-ft-text">ENV</span>', cls: 'is-badge', color: '#facc15' };
+    const dot = lowerName.lastIndexOf('.');
+    const ext = dot > 0 ? lowerName.slice(dot + 1) : '';
+    if (/^(xlsx|xls|xlsm|ods)$/.test(ext)) return { svg: RICH_SHEET_SVG, cls: 'is-sheet', color: '#22c55e' };
+    if (/^(png|jpe?g|gif|webp|bmp|ico|tiff?|heic|avif)$/.test(ext)) return { svg: ICONS.fileImage, cls: 'is-image', color: '#c084fc' };
+    if (ext === 'svg') return { svg: ICONS.fileImage, cls: 'is-image', color: '#f59e0b' };
+    if (/^(mp3|wav|ogg|m4a|flac|mp4|webm|mov|mkv)$/.test(ext)) return { svg: RICH_MEDIA_SVG, cls: 'is-media', color: '#f472b6' };
+    if (/^(zip|tar|gz|tgz|bz2|xz|7z|rar|zst|jar|whl|vsix|apk|nupkg|epub|deb|rpm|dmg)$/.test(ext)) return { svg: ICONS.fileArchive, cls: 'is-archive', color: '#f59e0b' };
+    if (ext && RICH_FILE_BADGES[ext]) {
+      const b = RICH_FILE_BADGES[ext];
+      const tag = b.pill ? `<span class="gm-ft-pill">${b.label}</span>` : `<span class="gm-ft-text">${b.label}</span>`;
+      return { svg: tag, cls: 'is-badge', color: b.color };
+    }
+    if (window.GitMapSyntax && window.GitMapSyntax.languageForPath(entry.name)) return { svg: ICONS.fileCode, cls: 'is-code', color: '#519aba' };
+    return { svg: ICONS.file, cls: 'is-file', color: '#94a3b8' };
   }
 
   function joinPath(dir, name) {
@@ -5659,9 +5752,7 @@
           const twistyHtml = e.isDirectory
             ? `<button type="button" class="fb-tree-twisty${e._expanded ? ' expanded' : ''}" title="${escapeHtml(e._expanded ? T('收起文件夹', 'Collapse folder') : T('展开文件夹', 'Expand folder'))}" aria-expanded="${e._expanded ? 'true' : 'false'}">${e._loading ? '<span class="fb-mini-spinner"></span>' : (e._expanded ? ICONS.chevronDown : ICONS.chevronRight)}</button>`
             : `<span class="fb-tree-spacer"></span>`;
-          const icon = e.isDirectory && e._expanded && !e.isGitRepo
-            ? { svg: ICONS.folderOpen, cls: 'is-dir' }
-            : fileIconFor(e);
+          const icon = fileIconFor({ ...e, expanded: !!e._expanded });
           const m = formatMtime(e.mtime);
           const sel = fb.selected.has(e.path);
           const deco = opts.decorate ? opts.decorate(e) : null;
@@ -5670,7 +5761,7 @@
             : '';
           return `<div class="fb-row${e.isDirectory ? ' is-dir' : ''}${e.isGitRepo ? ' is-git' : ''}${sel ? ' selected' : ''}${idx === fb.focusIdx ? ' focused' : ''}${deco ? ' gs-' + deco.code : ''}" data-idx="${idx}" role="row" title="${escapeHtml(e.path)}">
             <span class="fb-col-chk"><input type="checkbox" class="fb-check" ${sel ? 'checked' : ''} tabindex="-1" /></span>
-            <span class="fb-col-name">${guidesHtml}${twistyHtml}<span class="fb-icon ${icon.cls}">${icon.svg}</span><span class="fb-name">${escapeHtml(e.name)}</span>${e.isSymlink ? `<span class="fb-link" title="${escapeHtml(T('符号链接', 'Symbolic link'))}">${ICONS.link}</span>` : ''}${e.isGitRepo ? `<span class="branch-pill">${ICONS.branch}${escapeHtml(e.gitBranch || 'HEAD')}</span>` : ''}${deco ? `<span class="fb-git-badge" title="${escapeHtml(deco.title)}" aria-label="${escapeHtml(deco.title)}">${escapeHtml(deco.badge)}</span>` : ''}</span>
+            <span class="fb-col-name">${guidesHtml}${twistyHtml}<span class="fb-icon ${icon.cls}"${icon.color ? ` style="color:${icon.color}"` : ''}>${icon.svg}</span><span class="fb-name">${escapeHtml(e.name)}</span>${e.isSymlink ? `<span class="fb-link" title="${escapeHtml(T('符号链接', 'Symbolic link'))}">${ICONS.link}</span>` : ''}${e.isGitRepo ? `<span class="branch-pill">${ICONS.branch}${escapeHtml(e.gitBranch || 'HEAD')}</span>` : ''}${deco ? `<span class="fb-git-badge" title="${escapeHtml(deco.title)}" aria-label="${escapeHtml(deco.title)}">${escapeHtml(deco.badge)}</span>` : ''}</span>
             <span class="fb-col-size">${e.isDirectory ? '—' : escapeHtml(formatBytes(e.size))}</span>
             <span class="fb-col-mtime" title="${escapeHtml(m.full)}">${escapeHtml(m.short)}</span>
             <span class="fb-col-actions">${idleAction}</span>

@@ -66,6 +66,7 @@ import {
   resolveSafeViewEncoding
 } from './diffService';
 import { EnhancementsService } from './enhancementsService';
+import { OfficePreviewResult, parseOfficePreviewBuffer } from './officePreviewService';
 import { buildPartialHunkPatch, GitWorkflowService } from './gitWorkflowService';
 import { HostingProviderKind, HostingService } from './hostingService';
 import { LauncherSettings, listLaunchers, openInEditor, openInTerminal } from './launchers';
@@ -144,6 +145,13 @@ function parseCookies(cookieHeader: string | undefined): { [name: string]: strin
   return out;
 }
 
+function isSafeRelativeCommitPath(relPath: string): boolean {
+  if (!relPath || relPath.includes('\0')) return false;
+  const segs = relPath.replace(/\\/g, '/').replace(/^\/+/, '').split('/');
+  if (segs.length === 0) return false;
+  return segs.every((s) => s.length > 0 && s !== '.' && s !== '..');
+}
+
 export class GitMapServer {
   private readonly rootDir: string;
   private readonly dataDir: string;
@@ -154,6 +162,7 @@ export class GitMapServer {
   private readonly authToken: string;
   private readonly sessionSecret: string;
   private pkgVersion: string = '1.0.0';
+  private readonly officePreviewCache = new Map<string, { preview: OfficePreviewResult; bytes: number }>();
 
   private server!: http.Server;
   private wss!: WebSocketServer;
@@ -2101,6 +2110,80 @@ export class GitMapServer {
         return { ok: true };
       }
 
+      case 'file:parsePreview': {
+        let repo = String(params.repo || '');
+        let filePath = String(params.filePath || '');
+        const commit: string | null = params.commit ? String(params.commit).trim() : null;
+        if (!filePath) throw new Error('filePath is required.');
+        const MAX_OFFICE_BYTES = 25 * 1024 * 1024;
+
+        if (!repo && filePath && !isRemoteRepo(filePath)) {
+          const found = await this.repoManager.getRepoAndPathOfFile(filePath.replace(/\\/g, '/'));
+          if (found) {
+            repo = found.repo;
+            filePath = found.path;
+          }
+        }
+
+        // Immutable LRU cache hit for committed historical snapshots (full 40-char SHA)
+        const isImmutableCommit = !!(repo && commit && /^[0-9a-f]{40}$/i.test(commit));
+        const cacheKey = isImmutableCommit ? `${repo}\0${commit}\0${filePath.replace(/\\/g, '/').replace(/^\/+/, '')}` : '';
+        if (cacheKey && this.officePreviewCache.has(cacheKey)) {
+          const cached = this.officePreviewCache.get(cacheKey)!;
+          this.officePreviewCache.delete(cacheKey);
+          this.officePreviewCache.set(cacheKey, cached);
+          return { preview: cached.preview, bytes: cached.bytes, fromCache: true };
+        }
+
+        let buf: Buffer | null = null;
+        if (repo && commit && commit !== '*') {
+          const cleanRel = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+          if (!isSafeRelativeCommitPath(cleanRel)) {
+            throw new Error('Invalid relative file path.');
+          }
+          const res = await this.dataSource.getCommitFileBuffer(repo, commit, cleanRel, MAX_OFFICE_BYTES + 1);
+          buf = res.buffer;
+        } else if (repo) {
+          if (!isRemoteRepo(repo)) {
+            const cleanRel = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+            if (!isSafeRelativeCommitPath(cleanRel)) {
+              throw new Error('Invalid relative file path.');
+            }
+            const fullLocal = path.resolve(repo, cleanRel);
+            const relCheck = path.relative(path.resolve(repo), fullLocal);
+            if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
+              throw new Error('Access denied: path escapes repository boundary.');
+            }
+            this.assertAllowedLocalPath(fullLocal);
+          }
+          buf = await readRepoFileBuffer(repo, filePath, MAX_OFFICE_BYTES + 1);
+        } else if (isRemoteRepo(filePath)) {
+          const parsed = parseRemoteRepo(filePath)!;
+          buf = await sshManager.readRemoteFile(parsed.hostId, parsed.remotePath, MAX_OFFICE_BYTES + 1);
+        } else {
+          const resolvedFile = this.assertAllowedLocalPath(filePath);
+          const st = await fs.promises.stat(resolvedFile);
+          if (!st.isFile() || st.size > MAX_OFFICE_BYTES) {
+            throw new Error('File is too large for inline Office preview (max 25 MB).');
+          }
+          buf = await fs.promises.readFile(resolvedFile);
+        }
+
+        if (!buf) throw new Error('File not found.');
+        if (buf.length > MAX_OFFICE_BYTES) {
+          throw new Error('File is too large for inline Office preview (max 25 MB).');
+        }
+        const preview = parseOfficePreviewBuffer(filePath, buf);
+        if (cacheKey) {
+          this.officePreviewCache.set(cacheKey, { preview, bytes: buf.length });
+          if (this.officePreviewCache.size > 24) {
+            const oldestKey = this.officePreviewCache.keys().next().value;
+            if (oldestKey !== undefined) this.officePreviewCache.delete(oldestKey);
+          }
+        }
+        return { preview, bytes: buf.length, fromCache: false };
+      }
+
       case 'file:blame': {
         const repo = String(params.repo || '');
         const filePath = String(params.filePath || '');
@@ -2778,13 +2861,18 @@ export class GitMapServer {
       '.jpg': 'image/jpeg',
       '.jpeg': 'image/jpeg',
       '.gif': 'image/gif',
-      '.webp': 'image/webp'
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+      '.ico': 'image/x-icon',
+      '.bmp': 'image/bmp',
+      '.avif': 'image/avif'
     };
     const MAX_PREVIEW_BYTES = 50 * 1024 * 1024;
     try {
       const repo = parsedUrl.searchParams.get('repo') || '';
       const hostIdParam = parsedUrl.searchParams.get('hostId') || '';
       const filePathParam = parsedUrl.searchParams.get('path') || '';
+      const commitParam = (parsedUrl.searchParams.get('commit') || '').trim();
       if (!filePathParam) {
         res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('Missing path parameter');
@@ -2798,20 +2886,47 @@ export class GitMapServer {
         return;
       }
 
+      const extraSecurityHeaders: Record<string, string> = ext === '.svg'
+        ? { 'Content-Security-Policy': 'sandbox' }
+        : {};
+
+      // Historical commit blob preview (works for both local & Remote-SSH repositories via DataSource)
+      if (repo && commitParam && commitParam !== '*') {
+        const cleanRel = filePathParam.replace(/\\/g, '/').replace(/^\/+/, '');
+        if (!isSafeRelativeCommitPath(cleanRel)) {
+          res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('Invalid relative path');
+          return;
+        }
+        const { buffer } = await this.dataSource.getCommitFileBuffer(repo, commitParam, cleanRel, MAX_PREVIEW_BYTES);
+        res.writeHead(200, {
+          'Content-Type': mime,
+          'Content-Length': String(buffer.length),
+          'Cache-Control': 'private, max-age=300',
+          'X-Content-Type-Options': 'nosniff',
+          ...extraSecurityHeaders
+        });
+        res.end(buffer);
+        return;
+      }
+
       const remoteInfo = hostIdParam
         ? { hostId: hostIdParam, remotePath: filePathParam }
-        : (repo ? parseRemoteRepo(repo) : null);
+        : (repo ? parseRemoteRepo(repo) : (isRemoteRepo(filePathParam) ? parseRemoteRepo(filePathParam) : null));
 
       if (remoteInfo) {
         const targetRemote = hostIdParam
           ? filePathParam
-          : (filePathParam.startsWith('/') ? filePathParam : path.posix.join(remoteInfo.remotePath, filePathParam));
+          : (isRemoteRepo(filePathParam)
+              ? remoteInfo.remotePath
+              : (filePathParam.startsWith('/') ? filePathParam : path.posix.join(remoteInfo.remotePath, filePathParam)));
         const buf = await sshManager.readRemoteFile(remoteInfo.hostId, targetRemote, MAX_PREVIEW_BYTES);
         res.writeHead(200, {
           'Content-Type': mime,
           'Content-Length': String(buf.length),
           'Cache-Control': 'no-store',
-          'X-Content-Type-Options': 'nosniff'
+          'X-Content-Type-Options': 'nosniff',
+          ...extraSecurityHeaders
         });
         res.end(buf);
         return;
@@ -2820,6 +2935,14 @@ export class GitMapServer {
       const fullLocal = repo && !path.isAbsolute(filePathParam)
         ? path.resolve(repo, filePathParam)
         : path.resolve(filePathParam);
+      if (repo) {
+        const relCheck = path.relative(path.resolve(repo), fullLocal);
+        if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
+          res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('Access denied: path escapes repository boundary');
+          return;
+        }
+      }
       this.assertAllowedLocalPath(fullLocal);
       const st = await fs.promises.stat(fullLocal);
       if (!st.isFile() || st.size > MAX_PREVIEW_BYTES) {
@@ -2831,7 +2954,8 @@ export class GitMapServer {
         'Content-Type': mime,
         'Content-Length': String(st.size),
         'Cache-Control': 'no-store',
-        'X-Content-Type-Options': 'nosniff'
+        'X-Content-Type-Options': 'nosniff',
+        ...extraSecurityHeaders
       });
       await pipeline(fs.createReadStream(fullLocal), res);
     } catch (err: any) {

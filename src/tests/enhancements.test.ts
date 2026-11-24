@@ -485,4 +485,234 @@ describe('GitMap Enhancements Suite', () => {
     assert.ok(html.includes('id="ftmRestoreBtn"'), 'Restore Version button present');
     assert.ok(html.includes('loadCompare'), 'Cross-revision compare command wired');
   });
+
+  it('parses zero-dependency Office & Archive buffers (.xlsx, .ods, .docx, .pptx, .zip)', async () => {
+    const zlib = await import('zlib');
+    const {
+      parseXlsxBuffer,
+      parseOdsBuffer,
+      parseDocxBuffer,
+      parsePptxBuffer,
+      parseZipListingBuffer,
+      parseOfficePreviewBuffer,
+      isSupportedOfficePreviewPath
+    } = await import('../server/officePreviewService');
+
+    // Minimal valid ZIP builder (supports both STORE=0 and DEFLATE=8)
+    const buildZip = (files: Array<{ name: string; content: string | Buffer; deflate?: boolean }>): Buffer => {
+      const localParts: Buffer[] = [];
+      const cdParts: Buffer[] = [];
+      let offset = 0;
+      for (const f of files) {
+        const nameBuf = Buffer.from(f.name, 'utf8');
+        const raw = Buffer.isBuffer(f.content) ? f.content : Buffer.from(f.content, 'utf8');
+        const method = f.deflate ? 8 : 0;
+        const body = f.deflate ? zlib.deflateRawSync(raw) : raw;
+        const lfh = Buffer.alloc(30);
+        lfh.writeUInt32LE(0x04034b50, 0);
+        lfh.writeUInt16LE(20, 4);
+        lfh.writeUInt16LE(method, 8);
+        lfh.writeUInt32LE(body.length, 18);
+        lfh.writeUInt32LE(raw.length, 22);
+        lfh.writeUInt16LE(nameBuf.length, 26);
+        localParts.push(lfh, nameBuf, body);
+
+        const cdh = Buffer.alloc(46);
+        cdh.writeUInt32LE(0x02014b50, 0);
+        cdh.writeUInt16LE(20, 4);
+        cdh.writeUInt16LE(20, 6);
+        cdh.writeUInt16LE(method, 10);
+        cdh.writeUInt32LE(body.length, 20);
+        cdh.writeUInt32LE(raw.length, 24);
+        cdh.writeUInt16LE(nameBuf.length, 28);
+        cdh.writeUInt32LE(offset, 42);
+        cdParts.push(cdh, nameBuf);
+
+        offset += lfh.length + nameBuf.length + body.length;
+      }
+      const cdBuf = Buffer.concat(cdParts);
+      const eocd = Buffer.alloc(22);
+      eocd.writeUInt32LE(0x06054b50, 0);
+      eocd.writeUInt16LE(files.length, 8);
+      eocd.writeUInt16LE(files.length, 10);
+      eocd.writeUInt32LE(cdBuf.length, 12);
+      eocd.writeUInt32LE(offset, 16);
+      return Buffer.concat([...localParts, cdBuf, eocd]);
+    };
+
+    // 1. XLSX: 2 sheets, sharedStrings (with ruby <rPh> stripped), Excel date serial (45292 -> 2024-01-01), sparse col C1
+    const xlsxBuf = buildZip([
+      {
+        name: 'xl/workbook.xml',
+        deflate: true,
+        content:
+          '<workbook><sheets>' +
+          '<sheet name="Metrics" sheetId="1" r:id="rId1"/>' +
+          '<sheet name="Notes" sheetId="2" r:id="rId2"/>' +
+          '</sheets></workbook>'
+      },
+      {
+        name: 'xl/_rels/workbook.xml.rels',
+        content:
+          '<Relationships>' +
+          '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/>' +
+          '<Relationship Id="rId2" Target="worksheets/sheet2.xml"/>' +
+          '</Relationships>'
+      },
+      {
+        name: 'xl/sharedStrings.xml',
+        deflate: true,
+        content:
+          '<sst>' +
+          '<si><t>Model</t></si>' +
+          '<si><t>Score</t></si>' +
+          '<si><t>Date</t></si>' +
+          '<si><t>GPT-5</t><rPh sb="0" eb="1"><t>ignored</t></rPh></si>' +
+          '</sst>'
+      },
+      {
+        name: 'xl/styles.xml',
+        content:
+          '<styleSheet><cellXfs count="2">' +
+          '<xf numFmtId="0"/>' +
+          '<xf numFmtId="14"/>' +
+          '</cellXfs></styleSheet>'
+      },
+      {
+        name: 'xl/worksheets/sheet1.xml',
+        deflate: true,
+        content:
+          '<worksheet><sheetData>' +
+          '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c></row>' +
+          '<row r="2"><c r="A2" t="s"><v>3</v></c><c r="B2"><v>98.5</v></c><c r="C2" s="1"><v>45292</v></c></row>' +
+          '</sheetData></worksheet>'
+      },
+      {
+        name: 'xl/worksheets/sheet2.xml',
+        content:
+          '<worksheet><sheetData>' +
+          '<row r="1"><c r="A1" t="inlineStr"><is><t>Hello</t></is></c><c r="C1" t="b"><v>1</v></c></row>' +
+          '</sheetData></worksheet>'
+      }
+    ]);
+    const xlsx = parseXlsxBuffer(xlsxBuf);
+    assert.strictEqual(xlsx.kind, 'spreadsheet');
+    assert.strictEqual(xlsx.sheets.length, 2);
+    assert.strictEqual(xlsx.sheets[0].name, 'Metrics');
+    assert.deepStrictEqual(xlsx.sheets[0].rows[0], ['Model', 'Score', 'Date']);
+    assert.deepStrictEqual(xlsx.sheets[0].rows[1], ['GPT-5', '98.5', '2024-01-01']);
+    assert.deepStrictEqual(xlsx.sheets[1].rows[0], ['Hello', '', 'TRUE']);
+
+    // 2. ODS with repeated columns
+    const odsBuf = buildZip([
+      {
+        name: 'content.xml',
+        deflate: true,
+        content:
+          '<office:document-content><office:body><office:spreadsheet>' +
+          '<table:table table:name="SheetA">' +
+          '<table:table-row><table:table-cell><text:p>Key</text:p></table:table-cell><table:table-cell table:number-columns-repeated="2"><text:p>Val</text:p></table:table-cell></table:table-row>' +
+          '</table:table></office:spreadsheet></office:body></office:document-content>'
+      }
+    ]);
+    const ods = parseOdsBuffer(odsBuf);
+    assert.strictEqual(ods.format, 'ods');
+    assert.deepStrictEqual(ods.sheets[0].rows[0], ['Key', 'Val', 'Val']);
+
+    // 3. DOCX with heading, bullet list, and table
+    const docxBuf = buildZip([
+      {
+        name: 'word/document.xml',
+        deflate: true,
+        content:
+          '<w:document><w:body>' +
+          '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Spec Overview</w:t></w:r></w:p>' +
+          '<w:p><w:pPr><w:numPr/></w:pPr><w:r><w:t>First item</w:t></w:r></w:p>' +
+          '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>ColA</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>ColB</w:t></w:r></w:p></w:tc></w:tr></w:tbl>' +
+          '</w:body></w:document>'
+      }
+    ]);
+    const docx = parseDocxBuffer(docxBuf);
+    assert.strictEqual(docx.kind, 'docx');
+    assert.strictEqual(docx.blocks.length, 3);
+    assert.deepStrictEqual(docx.blocks[0], { type: 'heading', level: 1, text: 'Spec Overview' });
+    assert.deepStrictEqual(docx.blocks[1], { type: 'paragraph', text: 'First item', isList: true });
+    assert.deepStrictEqual(docx.blocks[2], { type: 'table', rows: [['ColA', 'ColB']] });
+
+    // 4. PPTX with 2 slides, table, and speaker notes
+    const pptxBuf = buildZip([
+      {
+        name: 'ppt/slides/slide1.xml',
+        deflate: true,
+        content: '<p:sld><a:p><a:r><a:t>Architecture Deck</a:t></a:r></a:p><a:p><a:r><a:t>Zero deps</a:t></a:r></a:p></p:sld>'
+      },
+      {
+        name: 'ppt/slides/slide2.xml',
+        content:
+          '<p:sld><a:p><a:r><a:t>Benchmarks</a:t></a:r></a:p>' +
+          '<a:tbl><a:tr><a:tc><a:p><a:t>Suite</a:t></a:p></a:tc><a:tc><a:p><a:t>Pass</a:t></a:p></a:tc></a:tr></a:tbl></p:sld>'
+      },
+      {
+        name: 'ppt/notesSlides/notesSlide1.xml',
+        content: '<p:notes><a:p><a:r><a:t>Introduce the team</a:t></a:r></a:p><a:p><a:r><a:t>1</a:t></a:r></a:p></p:notes>'
+      }
+    ]);
+    const pptx = parsePptxBuffer(pptxBuf);
+    assert.strictEqual(pptx.kind, 'pptx');
+    assert.strictEqual(pptx.slides.length, 2);
+    assert.strictEqual(pptx.slides[0].title, 'Architecture Deck');
+    assert.deepStrictEqual(pptx.slides[0].paragraphs, ['Zero deps']);
+    assert.strictEqual(pptx.slides[0].notes, 'Introduce the team');
+    assert.deepStrictEqual(pptx.slides[1].tables[0], [['Suite', 'Pass']]);
+
+    // 5. ZIP listing inspector (zero-decompress)
+    const zipListing = parseZipListingBuffer(pptxBuf);
+    assert.strictEqual(zipListing.kind, 'archive');
+    assert.strictEqual(zipListing.totalFiles, 3);
+    assert.ok(zipListing.entries.some((e) => e.path === 'ppt/slides/slide1.xml' && e.method === 'DEFLATE'));
+
+    // Unified dispatcher checks
+    assert.strictEqual(isSupportedOfficePreviewPath('report.xlsx'), true);
+    assert.strictEqual(isSupportedOfficePreviewPath('deck.pptx'), true);
+    assert.strictEqual(isSupportedOfficePreviewPath('ext.vsix'), true);
+    assert.strictEqual(parseOfficePreviewBuffer('bundle.vsix', pptxBuf).kind, 'archive');
+
+    // 6. Hardening edge cases: Excel 1904 dates, ../ rels Target, self-closing <row/>, invalid XML entities, corrupt .xls shift
+    const { parseXlsBuffer } = await import('../server/officePreviewService');
+    const edgeXlsxBuf = buildZip([
+      {
+        name: 'xl/workbook.xml',
+        content: '<workbook><workbookPr date1904="1"/><sheets><sheet name="Mac1904" sheetId="1" r:id="rId1"/></sheets></workbook>'
+      },
+      {
+        name: 'xl/_rels/workbook.xml.rels',
+        content: '<Relationships><Relationship Id="rId1" Target="../xl/worksheets/sheet1.xml"/></Relationships>'
+      },
+      {
+        name: 'xl/styles.xml',
+        content: '<styleSheet><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14"><alignment/></xf></cellXfs></styleSheet>'
+      },
+      {
+        name: 'xl/worksheets/sheet1.xml',
+        content:
+          '<worksheet><sheetData>' +
+          '<row r="1"><c r="A1" s="0"/><c r="B1" s="1"><v>0</v></c><c r="C1" t="inlineStr"><is><t>ok&#x110000;&#xD800;!</t></is></c></row>' +
+          '<row r="2"/>' +
+          '<row r="3"><c r="A3" t="inlineStr"><is><t>after-empty</t></is></c></row>' +
+          '</sheetData></worksheet>'
+      }
+    ]);
+    const edgeXlsx = parseXlsxBuffer(edgeXlsxBuf);
+    assert.strictEqual(edgeXlsx.sheets[0].rows[0][0], '', 'self-closing empty <c/> stays empty and does not swallow next cell');
+    assert.strictEqual(edgeXlsx.sheets[0].rows[0][1], '1904-01-01', 'Mac Excel 1904 serial 0 + mixed self-closing/paired <xf> -> 1904-01-01');
+    assert.strictEqual(edgeXlsx.sheets[0].rows[0][2], 'ok!', 'out-of-range & surrogate XML entities safely ignored');
+    assert.deepStrictEqual(edgeXlsx.sheets[0].rows[2], ['after-empty'], 'self-closing <row/> preserved cleanly');
+
+    const badXls = Buffer.alloc(512);
+    badXls.writeUInt32BE(0xd0cf11e0, 0);
+    badXls.writeUInt32BE(0xa1b11ae1, 4);
+    badXls.writeUInt16LE(30, 30); // bogus sectorShift
+    badXls.writeUInt16LE(6, 32);
+    assert.throws(() => parseXlsBuffer(badXls), /Corrupted legacy Excel/);
+  });
 });

@@ -3649,10 +3649,13 @@ class GitGraphView {
 				const hasDirChange = ent.isDirectory && changedDirs.has(ent.path);
 				const matchesFilter = !q || ent.path.toLowerCase().includes(q) || ent.isDirectory;
 				if (matchesFilter) {
+					const entryIconHtml = ent.isDirectory
+						? fileIcons.getFolderIcon(ent.name, isExp)
+						: fileIcons.getFileIcon(ent.path);
 					rows.push(
 						'<div class="cdvAllFilesRow' + (ent.isDirectory ? ' isDir' : '') + '" style="padding-left:' + (8 + depth * 14) + 'px" data-path="' + escapeHtml(ent.path) + '" data-dir="' + (ent.isDirectory ? '1' : '0') + '">' +
 						'<span class="cdvAfChev">' + (ent.isDirectory ? (isExp ? '▾' : '▸') : '') + '</span>' +
-						'<span class="cdvAfIcon">' + (ent.isDirectory ? SVG_ICONS.fileTree : MENU_ICONS.files) + '</span>' +
+						'<span class="cdvAfIcon">' + entryIconHtml + '</span>' +
 						'<span class="cdvAfName" title="' + escapeHtml(ent.path) + '">' + escapeHtml(ent.name) + '</span>' +
 						(hasDirChange ? '<span class="cdvAfDirDot" title="' + escapeHtml(t('Changed Files')) + '"></span>' : '') +
 						(st !== '' ? '<span class="cdvAfBadge st-' + escapeHtml(st) + '">' + escapeHtml(st) + '</span>' : '') +
@@ -3675,7 +3678,7 @@ class GitGraphView {
 				rows.push(
 					'<div class="cdvAllFilesRow isDeletedGhost" style="padding-left:' + (8 + depth * 14) + 'px" title="' + escapeHtml(dp) + '">' +
 					'<span class="cdvAfChev"></span>' +
-					'<span class="cdvAfIcon">' + MENU_ICONS.files + '</span>' +
+					'<span class="cdvAfIcon">' + fileIcons.getFileIcon(dp) + '</span>' +
 					'<span class="cdvAfName">' + escapeHtml(name) + '</span>' +
 					'<span class="cdvAfBadge st-D">D</span>' +
 					'</div>'

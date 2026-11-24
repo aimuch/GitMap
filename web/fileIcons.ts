@@ -1,17 +1,81 @@
 /**
- * Built-in icons of common file types, used when Visual Studio Code doesn't use a file icon theme (or it couldn't be read).
+ * High-contrast color-coded icons for common file types & folders (clearly distinguishable in both dark & light themes).
  */
-const FALLBACK_FILE_ICONS: { readonly [extension: string]: { readonly text: string, readonly colour: string } } = {
-	'ts': { text: 'TS', colour: '#519aba' }, 'tsx': { text: 'TS', colour: '#519aba' }, 'mts': { text: 'TS', colour: '#519aba' }, 'cts': { text: 'TS', colour: '#519aba' },
-	'js': { text: 'JS', colour: '#cbcb41' }, 'jsx': { text: 'JS', colour: '#cbcb41' }, 'mjs': { text: 'JS', colour: '#cbcb41' }, 'cjs': { text: 'JS', colour: '#cbcb41' },
-	'json': { text: '{}', colour: '#cbcb41' }, 'jsonc': { text: '{}', colour: '#cbcb41' },
-	'css': { text: '#', colour: '#519aba' }, 'scss': { text: '#', colour: '#f55385' }, 'less': { text: '#', colour: '#519aba' },
-	'html': { text: '<>', colour: '#e37933' }, 'htm': { text: '<>', colour: '#e37933' }, 'xml': { text: '<>', colour: '#e37933' }, 'vue': { text: 'V', colour: '#8dc149' },
-	'md': { text: 'M↓', colour: '#519aba' }, 'markdown': { text: 'M↓', colour: '#519aba' },
-	'py': { text: 'PY', colour: '#519aba' }, 'go': { text: 'GO', colour: '#519aba' }, 'rs': { text: 'RS', colour: '#e37933' }, 'java': { text: 'J', colour: '#cc3e44' },
-	'c': { text: 'C', colour: '#519aba' }, 'h': { text: 'H', colour: '#a074c4' }, 'cpp': { text: 'C+', colour: '#519aba' }, 'cs': { text: 'C#', colour: '#519aba' },
-	'sh': { text: '$', colour: '#4d5a5e' }, 'yml': { text: '≡', colour: '#a074c4' }, 'yaml': { text: '≡', colour: '#a074c4' }, 'toml': { text: '≡', colour: '#6d8086' },
-	'svg': { text: '◆', colour: '#a074c4' }, 'png': { text: '▣', colour: '#a074c4' }, 'jpg': { text: '▣', colour: '#a074c4' }, 'jpeg': { text: '▣', colour: '#a074c4' }, 'gif': { text: '▣', colour: '#a074c4' }
+interface FallbackFileIconDef {
+	readonly text?: string;
+	readonly svg?: string;
+	readonly colour: string;
+	readonly pill?: boolean;
+}
+
+const ICON_SVG_SHEET = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="1.6"/><path d="M2 6h12M2 10h12M6.5 6v8"/></svg>';
+const ICON_SVG_IMAGE = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="11" rx="1.6"/><circle cx="5.7" cy="6" r="1.1" fill="currentColor" stroke="none"/><path d="M2.5 11.8l3.2-3.2 2.4 2.2 2-1.8 3.4 2.8"/></svg>';
+const ICON_SVG_MEDIA = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="11" rx="1.6"/><polygon points="6.6,5.5 11.2,8 6.6,10.5" fill="currentColor" stroke="none"/></svg>';
+const ICON_SVG_ARCHIVE = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="2.2" y="2.5" width="11.6" height="11" rx="1.6"/><path d="M2.2 6h11.6M8 6v4.5M6.6 8.2h2.8"/></svg>';
+const ICON_SVG_GIT = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="4.2" r="1.4"/><circle cx="5" cy="11.8" r="1.4"/><circle cx="11.2" cy="6.2" r="1.4"/><path d="M5 5.6v4.8M11.2 7.6c0 2.6-6.2 1.4-6.2 2.8"/></svg>';
+const ICON_SVG_DOC = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h5.2L12.5 5.3V14H4z"/><path d="M9.2 2v3.3h3.3M5.8 8.2h4.4M5.8 10.8h3.4"/></svg>';
+const ICON_SVG_FOLDER_CLOSED = '<svg viewBox="0 0 16 16" width="15" height="15"><path fill="currentColor" d="M1.8 3.2A1.3 1.3 0 0 1 3.1 2h3.1c.4 0 .78.18 1.03.5l.62.8h5.05A1.3 1.3 0 0 1 14.2 4.6v7.9a1.3 1.3 0 0 1-1.3 1.3H3.1a1.3 1.3 0 0 1-1.3-1.3V3.2z"/></svg>';
+const ICON_SVG_FOLDER_OPEN = '<svg viewBox="0 0 16 16" width="15" height="15"><path fill="currentColor" fill-opacity="0.72" d="M1.8 3.4A1.3 1.3 0 0 1 3.1 2.1h3.1c.4 0 .78.18 1.03.5l.62.8h4.95a1.2 1.2 0 0 1 1.2 1.2v1.2H2.9a1.2 1.2 0 0 0-1.1.85V3.4z"/><path fill="currentColor" d="M1.6 7.1a1 1 0 0 1 .98-.8h11.34a.95.95 0 0 1 .93 1.16l-1.12 5.2a1.2 1.2 0 0 1-1.17.94H2.95a1.2 1.2 0 0 1-1.18-.98L1.6 7.1z"/></svg>';
+
+const FOLDER_COLOURS: { readonly [folderName: string]: string } = {
+	'src': '#eab308', 'apps': '#f59e0b', 'app': '#f59e0b', 'packages': '#f59e0b', 'lib': '#eab308',
+	'docs': '#38bdf8', 'doc': '#38bdf8', 'documentation': '#38bdf8',
+	'data': '#34d399', 'datasets': '#34d399', 'db': '#34d399', 'assets': '#c084fc', 'images': '#c084fc', 'media': '#c084fc',
+	'scripts': '#2dd4bf', 'bin': '#2dd4bf', 'tools': '#2dd4bf',
+	'test': '#f472b6', 'tests': '#f472b6', '__tests__': '#f472b6', 'eval': '#f472b6', 'spec': '#f472b6',
+	'prompts': '#a78bfa', 'config': '#fb923c', '.github': '#818cf8', '.claude': '#a78bfa', '.vscode': '#38bdf8', '.git': '#f05032'
+};
+
+const FALLBACK_FILE_NAMES: { readonly [fileName: string]: FallbackFileIconDef } = {
+	'.gitignore': { svg: ICON_SVG_GIT, colour: '#f05032' },
+	'.gitattributes': { svg: ICON_SVG_GIT, colour: '#f05032' },
+	'.gitmodules': { svg: ICON_SVG_GIT, colour: '#f05032' },
+	'.gitkeep': { svg: ICON_SVG_GIT, colour: '#f05032' },
+	'dockerfile': { text: 'DK', colour: '#38bdf8', pill: true },
+	'makefile': { text: 'MK', colour: '#fb923c', pill: true },
+	'license': { text: 'LIC', colour: '#fbbf24' },
+	'license.md': { text: 'LIC', colour: '#fbbf24' },
+	'package.json': { text: '{}', colour: '#4ade80' },
+	'tsconfig.json': { text: 'TS', colour: '#38bdf8' },
+	'.env': { text: 'ENV', colour: '#facc15' },
+	'.env.local': { text: 'ENV', colour: '#facc15' },
+	'.env.example': { text: 'ENV', colour: '#facc15' }
+};
+
+const FALLBACK_FILE_ICONS: { readonly [extension: string]: FallbackFileIconDef } = {
+	// Spreadsheets & Data
+	'xlsx': { svg: ICON_SVG_SHEET, colour: '#22c55e' }, 'xls': { svg: ICON_SVG_SHEET, colour: '#22c55e' },
+	'xlsm': { svg: ICON_SVG_SHEET, colour: '#22c55e' }, 'ods': { svg: ICON_SVG_SHEET, colour: '#22c55e' },
+	'csv': { text: 'CSV', colour: '#34d399', pill: true }, 'tsv': { text: 'TSV', colour: '#34d399', pill: true },
+	// Docs & Office
+	'md': { text: 'M↓', colour: '#38bdf8', pill: true }, 'markdown': { text: 'M↓', colour: '#38bdf8', pill: true }, 'mdx': { text: 'M↓', colour: '#38bdf8', pill: true },
+	'pdf': { text: 'PDF', colour: '#f87171', pill: true },
+	'doc': { text: 'DOC', colour: '#60a5fa', pill: true }, 'docx': { text: 'DOC', colour: '#60a5fa', pill: true }, 'rtf': { text: 'RTF', colour: '#60a5fa' },
+	'ppt': { text: 'PPT', colour: '#fb923c', pill: true }, 'pptx': { text: 'PPT', colour: '#fb923c', pill: true },
+	'txt': { svg: ICON_SVG_DOC, colour: '#94a3b8' }, 'log': { svg: ICON_SVG_DOC, colour: '#94a3b8' }, 'rst': { svg: ICON_SVG_DOC, colour: '#38bdf8' },
+	// Images & Media
+	'png': { svg: ICON_SVG_IMAGE, colour: '#c084fc' }, 'jpg': { svg: ICON_SVG_IMAGE, colour: '#c084fc' }, 'jpeg': { svg: ICON_SVG_IMAGE, colour: '#c084fc' },
+	'gif': { svg: ICON_SVG_IMAGE, colour: '#c084fc' }, 'webp': { svg: ICON_SVG_IMAGE, colour: '#c084fc' }, 'ico': { svg: ICON_SVG_IMAGE, colour: '#c084fc' },
+	'bmp': { svg: ICON_SVG_IMAGE, colour: '#c084fc' }, 'avif': { svg: ICON_SVG_IMAGE, colour: '#c084fc' }, 'svg': { svg: ICON_SVG_IMAGE, colour: '#f59e0b' },
+	'mp3': { svg: ICON_SVG_MEDIA, colour: '#f472b6' }, 'wav': { svg: ICON_SVG_MEDIA, colour: '#f472b6' }, 'ogg': { svg: ICON_SVG_MEDIA, colour: '#f472b6' }, 'm4a': { svg: ICON_SVG_MEDIA, colour: '#f472b6' }, 'flac': { svg: ICON_SVG_MEDIA, colour: '#f472b6' },
+	'mp4': { svg: ICON_SVG_MEDIA, colour: '#ec4899' }, 'webm': { svg: ICON_SVG_MEDIA, colour: '#ec4899' }, 'mov': { svg: ICON_SVG_MEDIA, colour: '#ec4899' }, 'mkv': { svg: ICON_SVG_MEDIA, colour: '#ec4899' },
+	// Archives
+	'zip': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' }, 'tar': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' }, 'gz': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' },
+	'tgz': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' }, '7z': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' }, 'rar': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' }, 'dmg': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' },
+	'vsix': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' }, 'whl': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' }, 'jar': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' }, 'apk': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' }, 'nupkg': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' }, 'epub': { svg: ICON_SVG_ARCHIVE, colour: '#f59e0b' },
+	// Code & Config
+	'ts': { text: 'TS', colour: '#3b82f6' }, 'tsx': { text: 'TX', colour: '#38bdf8' }, 'mts': { text: 'TS', colour: '#3b82f6' }, 'cts': { text: 'TS', colour: '#3b82f6' },
+	'js': { text: 'JS', colour: '#eab308' }, 'jsx': { text: 'JX', colour: '#facc15' }, 'mjs': { text: 'JS', colour: '#eab308' }, 'cjs': { text: 'JS', colour: '#eab308' },
+	'json': { text: '{}', colour: '#facc15' }, 'jsonc': { text: '{}', colour: '#facc15' },
+	'jsonl': { text: 'JL', colour: '#f59e0b', pill: true }, 'ndjson': { text: 'JL', colour: '#f59e0b', pill: true }, 'jsonlines': { text: 'JL', colour: '#f59e0b', pill: true },
+	'css': { text: '#', colour: '#38bdf8' }, 'scss': { text: 'S#', colour: '#f472b6' }, 'less': { text: '#', colour: '#60a5fa' },
+	'html': { text: '<>', colour: '#fb923c' }, 'htm': { text: '<>', colour: '#fb923c' }, 'xml': { text: '<>', colour: '#fb923c' }, 'vue': { text: 'V', colour: '#4ade80' }, 'svelte': { text: 'SV', colour: '#fb923c' },
+	'py': { text: 'PY', colour: '#60a5fa' }, 'ipynb': { text: 'NB', colour: '#fb923c' }, 'go': { text: 'GO', colour: '#22d3ee' }, 'rs': { text: 'RS', colour: '#fb923c' },
+	'java': { text: 'JV', colour: '#f87171' }, 'kt': { text: 'KT', colour: '#a78bfa' }, 'rb': { text: 'RB', colour: '#f43f5e' }, 'php': { text: 'PH', colour: '#818cf8' }, 'swift': { text: 'SW', colour: '#fb923c' },
+	'c': { text: 'C', colour: '#60a5fa' }, 'h': { text: 'H', colour: '#c084fc' }, 'cpp': { text: 'C+', colour: '#60a5fa' }, 'hpp': { text: 'H+', colour: '#c084fc' }, 'cs': { text: 'C#', colour: '#4ade80' },
+	'sh': { text: '$_', colour: '#4ade80' }, 'bash': { text: '$_', colour: '#4ade80' }, 'zsh': { text: '$_', colour: '#4ade80' }, 'ps1': { text: 'PS', colour: '#38bdf8' },
+	'sql': { text: 'SQ', colour: '#a78bfa' }, 'db': { text: 'DB', colour: '#a78bfa' }, 'sqlite': { text: 'DB', colour: '#a78bfa' },
+	'yml': { text: 'YM', colour: '#c084fc' }, 'yaml': { text: 'YM', colour: '#c084fc' }, 'toml': { text: 'TM', colour: '#fbbf24' }, 'ini': { text: 'IN', colour: '#94a3b8' }, 'conf': { text: 'CF', colour: '#94a3b8' }, 'env': { text: 'EV', colour: '#facc15' }
 };
 
 /**
@@ -62,10 +126,16 @@ class FileIcons {
 			const html = typeof definition !== 'undefined' ? this.getDefinitionHtml(this.theme, definition) : null;
 			if (html !== null) return html;
 		}
-		const extension = name.substring(name.lastIndexOf('.') + 1), fallback = name.includes('.') ? FALLBACK_FILE_ICONS[extension] : undefined;
-		return typeof fallback !== 'undefined'
-			? '<span class="fileTypeIcon text" style="color:' + fallback.colour + '">' + escapeHtml(fallback.text) + '</span>'
-			: '<span class="fileTypeIcon svg">' + SVG_ICONS.file + '</span>';
+		const byName = FALLBACK_FILE_NAMES[name];
+		const extension = name.substring(name.lastIndexOf('.') + 1);
+		const fallback = byName || (name.includes('.') ? FALLBACK_FILE_ICONS[extension] : undefined);
+		if (typeof fallback !== 'undefined') {
+			if (fallback.svg) {
+				return '<span class="fileTypeIcon glyph" style="color:' + fallback.colour + '">' + fallback.svg + '</span>';
+			}
+			return '<span class="fileTypeIcon text' + (fallback.pill ? ' pill' : '') + '" style="color:' + fallback.colour + '">' + escapeHtml(fallback.text || '') + '</span>';
+		}
+		return '<span class="fileTypeIcon glyph" style="color:#94a3b8">' + ICON_SVG_DOC + '</span>';
 	}
 
 	/**
@@ -82,7 +152,9 @@ class FileIcons {
 			const html = typeof definition !== 'undefined' ? this.getDefinitionHtml(this.theme, definition) : null;
 			if (html !== null) return html;
 		}
-		return '<span class="fileTypeIcon svg">' + (open ? SVG_ICONS.openFolder : SVG_ICONS.closedFolder) + '</span>';
+		const baseName = name.substring(name.lastIndexOf('/') + 1).toLowerCase();
+		const colour = FOLDER_COLOURS[baseName] || (open ? '#f0c869' : '#dcb67a');
+		return '<span class="fileTypeIcon folderGlyph" style="color:' + colour + '">' + (open ? ICON_SVG_FOLDER_OPEN : ICON_SVG_FOLDER_CLOSED) + '</span>';
 	}
 
 	/**
