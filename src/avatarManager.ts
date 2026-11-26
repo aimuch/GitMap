@@ -1,9 +1,12 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as http from 'http';
 import * as https from 'https';
+import { getConfig } from './config';
 import { DataSource } from './dataSource';
 import { ExtensionState } from './extensionState';
 import { Logger } from './logger';
+import { resolveCustomRemoteAvatarUrl } from './remoteLinks';
 import { Disposable, toDisposable } from './utils/disposable';
 import { EventEmitter } from './utils/event';
 
@@ -26,12 +29,6 @@ export class AvatarManager extends Disposable {
 	private githubTimeout: number = 0;
 	private gitLabTimeout: number = 0;
 
-	/**
-	 * Creates the Git Map Avatar Manager.
-	 * @param dataSource The Git Map DataSource instance.
-	 * @param extensionState The Git Map ExtensionState instance.
-	 * @param logger The Git Map Logger instance.
-	 */
 	constructor(dataSource: DataSource, extensionState: ExtensionState, logger: Logger) {
 		super();
 		this.dataSource = dataSource;
@@ -43,26 +40,19 @@ export class AvatarManager extends Disposable {
 		this.queue = new AvatarRequestQueue(() => {
 			if (this.interval !== null) return;
 			this.interval = setInterval(() => {
-				// Fetch avatars every 10 seconds
 				this.fetchAvatarsInterval();
 			}, 10000);
 			this.fetchAvatarsInterval();
 		});
 
 		this.registerDisposables(
-			// Stop fetching avatars when disposed
 			toDisposable(() => {
 				this.stopInterval();
 			}),
-
-			// Dispose the avatar event emitter
 			this.avatarEventEmitter
 		);
 	}
 
-	/**
-	 * Stops the interval used to fetch avatars.
-	 */
 	private stopInterval() {
 		if (this.interval !== null) {
 			clearInterval(this.interval);
@@ -71,38 +61,22 @@ export class AvatarManager extends Disposable {
 		}
 	}
 
-	/**
-	 * Fetch an avatar, either from the cache if it already exists, or queue it to be fetched.
-	 * @param email The email address identifying the avatar.
-	 * @param repo The repository that the avatar is used in.
-	 * @param remote The remote that the avatar can be fetched from.
-	 * @param commits The commits that reference the avatar.
-	 */
 	public fetchAvatarImage(email: string, repo: string, remote: string | null, commits: string[]) {
 		if (typeof this.avatars[email] !== 'undefined') {
-			// Avatar exists in the cache
 			let t = (new Date()).getTime();
 			if (this.avatars[email].timestamp < t - 1209600000 || (this.avatars[email].identicon && this.avatars[email].timestamp < t - 345600000)) {
-				// Refresh avatar after 14 days, or if an avatar couldn't previously be found after 4 days
 				this.queue.add(email, repo, remote, commits, false);
 			}
 
 			this.emitAvatar(email).catch(() => {
-				// Avatar couldn't be found, request it again
 				this.removeAvatarFromCache(email);
 				this.queue.add(email, repo, remote, commits, true);
 			});
 		} else {
-			// Avatar not in the cache, request it
 			this.queue.add(email, repo, remote, commits, true);
 		}
 	}
 
-	/**
-	 * Get the image data of an avatar.
-	 * @param email The email address identifying the avatar.
-	 * @returns A base64 encoded data URI if the avatar exists, otherwise NULL.
-	 */
 	public getAvatarImage(email: string) {
 		return new Promise<string | null>((resolve) => {
 			if (typeof this.avatars[email] !== 'undefined' && this.avatars[email].image !== null) {
@@ -130,43 +104,28 @@ export class AvatarManager extends Disposable {
 		});
 	}
 
-	/**
-	 * Get the Event that can be used to subscribe to receive requested avatars.
-	 * @returns The Event.
-	 */
 	get onAvatar() {
 		return this.avatarEventEmitter.subscribe;
 	}
 
-	/**
-	 * Remove an avatar from the cache.
-	 * @param email The email address identifying the avatar.
-	 */
 	private removeAvatarFromCache(email: string) {
 		delete this.avatars[email];
 		this.imageDataCache.delete(email);
 		this.extensionState.removeAvatarFromCache(email);
 	}
 
-	/**
-	 * Remove all avatars from the cache.
-	 * @returns A Thenable resolving to the ErrorInfo that resulted from executing this method.
-	 */
 	public clearCache() {
 		this.avatars = {};
 		this.imageDataCache.clear();
 		return this.extensionState.clearAvatarCache();
 	}
 
-	/**
-	 * Triggered by an interval to fetch avatars from Github, GitLab and Gravatar.
-	 */
 	private async fetchAvatarsInterval() {
 		if (this.queue.hasItems()) {
 			let avatarRequest = this.queue.takeItem();
-			if (avatarRequest === null) return; // No avatar can be checked at the current time
+			if (avatarRequest === null) return;
 
-			let remoteSource = await this.getRemoteSource(avatarRequest); // Fetch the remote source of the avatar
+			let remoteSource = await this.getRemoteSource(avatarRequest);
 			switch (remoteSource.type) {
 				case 'github':
 					this.fetchFromGithub(avatarRequest, remoteSource.owner, remoteSource.repo);
@@ -174,54 +133,46 @@ export class AvatarManager extends Disposable {
 				case 'gitlab':
 					this.fetchFromGitLab(avatarRequest);
 					break;
+				case 'custom':
+					this.fetchFromCustomRemote(avatarRequest, remoteSource.remoteUrl);
+					break;
 				default:
 					this.fetchFromGravatar(avatarRequest);
 			}
 		} else {
-			// Stop the interval if there are no items remaining in the queue
 			this.stopInterval();
 		}
 	}
 
-	/**
-	 * Get the remote source of an avatar request.
-	 * @param avatarRequest The avatar request.
-	 * @returns The remote source.
-	 */
 	private async getRemoteSource(avatarRequest: AvatarRequestItem) {
 		if (typeof this.remoteSourceCache[avatarRequest.repo] === 'object') {
-			// If the repo exists in the cache of remote sources
 			return this.remoteSourceCache[avatarRequest.repo];
 		} else {
-			// Fetch the remote repo source
 			let remoteSource: RemoteSource = { type: 'gravatar' };
 			if (avatarRequest.remote !== null) {
 				let remoteUrl = await this.dataSource.getRemoteUrl(avatarRequest.repo, avatarRequest.remote);
 				if (remoteUrl !== null) {
-					// Depending on the domain of the remote repo source, determine the type of source it is
-					let match;
-					if ((match = remoteUrl.match(/^(https:\/\/github\.com\/|git@github\.com:)([^\/]+)\/(.+?)(\.git)?\/?$/)) !== null) {
-						remoteSource = { type: 'github', owner: match[2], repo: match[3] };
-					} else if (remoteUrl.startsWith('https://gitlab.com/') || remoteUrl.startsWith('git@gitlab.com:')) {
-						remoteSource = { type: 'gitlab' };
+					const customAvatarUrl = resolveCustomRemoteAvatarUrl(remoteUrl, avatarRequest.email, '', getConfig(avatarRequest.repo).customRemotes);
+					if (customAvatarUrl !== null) {
+						remoteSource = { type: 'custom', remoteUrl: remoteUrl };
+					} else {
+						let match;
+						if ((match = remoteUrl.match(/^(https:\/\/github\.com\/|git@github\.com:)([^\/]+)\/(.+?)(\.git)?\/?$/)) !== null) {
+							remoteSource = { type: 'github', owner: match[2], repo: match[3] };
+						} else if (remoteUrl.startsWith('https://gitlab.com/') || remoteUrl.startsWith('git@gitlab.com:')) {
+							remoteSource = { type: 'gitlab' };
+						}
 					}
 				}
 			}
-			this.remoteSourceCache[avatarRequest.repo] = remoteSource; // Add the remote source to the cache for future use
+			this.remoteSourceCache[avatarRequest.repo] = remoteSource;
 			return remoteSource;
 		}
 	}
 
-	/**
-	 * Fetch an avatar from Github.
-	 * @param avatarRequest The avatar request to fetch.
-	 * @param owner The owner of the repository.
-	 * @param repo The repository that the avatar is used in.
-	 */
 	private fetchFromGithub(avatarRequest: AvatarRequestItem, owner: string, repo: string) {
 		let t = (new Date()).getTime();
 		if (t < this.githubTimeout) {
-			// Defer request until after timeout
 			this.queue.addItem(avatarRequest, this.githubTimeout, false);
 			this.fetchAvatarsInterval();
 			return;
@@ -236,7 +187,6 @@ export class AvatarManager extends Disposable {
 		let triggeredOnError = false;
 		const onError = () => {
 			if (!triggeredOnError) {
-				// If an error occurs, try again after 5 minutes
 				triggeredOnError = true;
 				this.githubTimeout = t + 300000;
 				this.queue.addItem(avatarRequest, this.githubTimeout, false);
@@ -252,14 +202,13 @@ export class AvatarManager extends Disposable {
 			res.on('data', (chunk: Buffer) => { respBody += chunk; });
 			res.on('end', async () => {
 				if (res.headers['x-ratelimit-remaining'] === '0') {
-					// If the GitHub Api rate limit was reached, store the github timeout to prevent subsequent requests
 					this.githubTimeout = parseInt(<string>res.headers['x-ratelimit-reset']) * 1000;
 					this.logger.log('GitHub API Rate Limit Reached - Paused fetching from GitHub until the Rate Limit is reset');
 				}
 
-				if (res.statusCode === 200) { // Success
+				if (res.statusCode === 200) {
 					let commit: any = JSON.parse(respBody);
-					if (commit.author && commit.author.avatar_url) { // Avatar url found
+					if (commit.author && commit.author.avatar_url) {
 						let img = await this.downloadAvatarImage(avatarRequest.email, commit.author.avatar_url + (commit.author.avatar_url.includes('?') ? '&' : '?') + 'size=162');
 						if (img !== null) {
 							this.saveAvatar(avatarRequest.email, img, false);
@@ -269,7 +218,6 @@ export class AvatarManager extends Disposable {
 						return;
 					}
 				} else if (res.statusCode === 403 || res.statusCode === 429) {
-					// Rate limit or forbidden response: ensure a non-zero cooldown and cap retries to avoid tight loops
 					if (this.githubTimeout <= t) {
 						this.githubTimeout = t + 300000;
 					}
@@ -278,16 +226,14 @@ export class AvatarManager extends Disposable {
 						return;
 					}
 				} else if (res.statusCode === 422 && avatarRequest.commits.length > avatarRequest.attempts + 1 && avatarRequest.attempts < 4) {
-					// Commit not found on remote, try again with the next commit if less than 5 attempts have been made
 					this.queue.addItem(avatarRequest, 0, true);
 					return;
 				} else if (res.statusCode! >= 500) {
-					// If server error, try again after 10 minutes
 					this.githubTimeout = t + 600000;
 					this.queue.addItem(avatarRequest, this.githubTimeout, false);
 					return;
 				}
-				this.fetchFromGravatar(avatarRequest); // Fallback to Gravatar
+				this.fetchFromGravatar(avatarRequest);
 			});
 			res.on('error', onError);
 		});
@@ -298,14 +244,9 @@ export class AvatarManager extends Disposable {
 		});
 	}
 
-	/**
-	 * Fetch an avatar from GitLab.
-	 * @param avatarRequest The avatar request to fetch.
-	 */
 	private fetchFromGitLab(avatarRequest: AvatarRequestItem) {
 		let t = (new Date()).getTime();
 		if (t < this.gitLabTimeout) {
-			// Defer request until after timeout
 			this.queue.addItem(avatarRequest, this.gitLabTimeout, false);
 			this.fetchAvatarsInterval();
 			return;
@@ -316,14 +257,12 @@ export class AvatarManager extends Disposable {
 		let triggeredOnError = false;
 		const onError = () => {
 			if (!triggeredOnError) {
-				// If an error occurs, try again after 5 minutes
 				triggeredOnError = true;
 				this.gitLabTimeout = t + 300000;
 				this.queue.addItem(avatarRequest, this.gitLabTimeout, false);
 			}
 		};
 
-		// GitLab's Avatar API doesn't require authentication. The email address is encoded (e.g. it may contain "+" or "&").
 		const req = https.get({
 			hostname: 'gitlab.com', path: '/api/v4/avatar?email=' + encodeURIComponent(avatarRequest.email).replace(/%40/g, '@') + '&size=162',
 			headers: { 'User-Agent': 'vscode-git-graph' },
@@ -333,20 +272,17 @@ export class AvatarManager extends Disposable {
 			res.on('data', (chunk: Buffer) => { respBody += chunk; });
 			res.on('end', async () => {
 				if (res.headers['ratelimit-remaining'] === '0') {
-					// If the GitLab Api rate limit was reached, store the gitlab timeout to prevent subsequent requests
 					this.gitLabTimeout = parseInt(<string>res.headers['ratelimit-reset']) * 1000;
 					this.logger.log('GitLab API Rate Limit Reached - Paused fetching from GitLab until the Rate Limit is reset');
 				}
 
-				if (res.statusCode === 200) { // Success
+				if (res.statusCode === 200) {
 					let avatarUrl: string | null = null;
 					try {
 						const response: any = JSON.parse(respBody);
 						if (typeof response === 'object' && response !== null && typeof response.avatar_url === 'string') avatarUrl = response.avatar_url;
 					} catch (_) { }
-					// If GitLab doesn't have an avatar for the email address, it returns the URL of an external avatar service (Gravatar),
-					// which is fetched by the fallback below instead (so that an identicon is only used if there isn't an avatar)
-					if (avatarUrl !== null && !/^https?:\/\/([^/]+\.)?(gravatar|libravatar)\.(com|org)\//.test(avatarUrl)) { // Avatar url found
+					if (avatarUrl !== null && !/^https?:\/\/([^/]+\.)?(gravatar|libravatar)\.(com|org)\//.test(avatarUrl)) {
 						let img = await this.downloadAvatarImage(avatarRequest.email, avatarUrl);
 						if (img !== null) {
 							this.saveAvatar(avatarRequest.email, img, false);
@@ -356,16 +292,14 @@ export class AvatarManager extends Disposable {
 						return;
 					}
 				} else if (res.statusCode === 429) {
-					// Rate limit reached, try again after timeout
 					this.queue.addItem(avatarRequest, this.gitLabTimeout, false);
 					return;
 				} else if (res.statusCode! >= 500) {
-					// If server error, try again after 10 minutes
 					this.gitLabTimeout = t + 600000;
 					this.queue.addItem(avatarRequest, this.gitLabTimeout, false);
 					return;
 				}
-				this.fetchFromGravatar(avatarRequest); // Fallback to Gravatar
+				this.fetchFromGravatar(avatarRequest);
 			});
 			res.on('error', onError);
 		});
@@ -376,10 +310,18 @@ export class AvatarManager extends Disposable {
 		});
 	}
 
-	/**
-	 * Fetch an avatar from Gravatar.
-	 * @param avatarRequest The avatar request to fetch.
-	 */
+	private async fetchFromCustomRemote(avatarRequest: AvatarRequestItem, remoteUrl: string) {
+		const url = resolveCustomRemoteAvatarUrl(remoteUrl, avatarRequest.email, '', getConfig(avatarRequest.repo).customRemotes);
+		if (url !== null) {
+			const img = await this.downloadAvatarImage(avatarRequest.email, url);
+			if (img !== null) {
+				this.saveAvatar(avatarRequest.email, img, false);
+				return;
+			}
+		}
+		this.fetchFromGravatar(avatarRequest);
+	}
+
 	private async fetchFromGravatar(avatarRequest: AvatarRequestItem) {
 		this.logger.log('Requesting Avatar for ' + maskEmail(avatarRequest.email) + ' from Gravatar');
 		const hash: string = crypto.createHash('md5').update(avatarRequest.email.trim().toLowerCase()).digest('hex');
@@ -397,12 +339,6 @@ export class AvatarManager extends Disposable {
 		}
 	}
 
-	/**
-	 * Download and save an avatar image.
-	 * @param email The email address identifying the avatar.
-	 * @param imageUrl The URL the avatar can be downloaded from.
-	 * @returns A promise that resolves to the image name of the avatar on disk, or NULL if downloading failed.
-	 */
 	private downloadAvatarImage(email: string, imageUrl: string) {
 		return (new Promise<string | null>((resolve) => {
 			const hash = crypto.createHash('md5').update(email).digest('hex');
@@ -416,17 +352,19 @@ export class AvatarManager extends Disposable {
 				}
 			};
 
-			const req = https.get({
-				hostname: imgUrl.hostname, path: imgUrl.pathname + imgUrl.search,
+			const client = imgUrl.protocol === 'http:' ? http : https;
+			const req = client.get({
+				hostname: imgUrl.hostname,
+				port: imgUrl.port || undefined,
+				path: imgUrl.pathname + imgUrl.search,
 				headers: { 'User-Agent': 'vscode-git-graph' },
 				agent: false, timeout: 15000
 			}, (res) => {
 				let imageBufferArray: Buffer[] = [];
 				res.on('data', (chunk: Buffer) => { imageBufferArray.push(chunk); });
 				res.on('end', () => {
-					// The format of the image is part of the name of its file (and of its data URI), so only the type of an image is accepted
 					const contentType = /^image\/([A-Za-z0-9.+-]+)/.exec(res.headers['content-type'] || '');
-					if (res.statusCode === 200 && contentType !== null) { // If success response, save the image to the avatar folder
+					if (res.statusCode === 200 && contentType !== null) {
 						let format = contentType[1];
 						fs.writeFile(this.avatarStorageFolder + '/' + hash + '.' + format, Buffer.concat(imageBufferArray), err => {
 							complete(err ? null : hash + '.' + format);
@@ -445,11 +383,6 @@ export class AvatarManager extends Disposable {
 		})).catch(() => null);
 	}
 
-	/**
-	 * Emit an AvatarEvent to any listeners.
-	 * @param email The email address identifying the avatar.
-	 * @returns A promise indicating if the event was emitted successfully.
-	 */
 	private emitAvatar(email: string) {
 		return new Promise<boolean>((resolve, reject) => {
 			if (this.avatarEventEmitter.hasSubscribers()) {
@@ -470,12 +403,6 @@ export class AvatarManager extends Disposable {
 		});
 	}
 
-	/**
-	 * Save an avatar in the cache.
-	 * @param email The email address identifying the avatar.
-	 * @param image The image name of the avatar on disk.
-	 * @param identicon Whether this avatar is an identicon.
-	 */
 	private saveAvatar(email: string, image: string, identicon: boolean) {
 		this.imageDataCache.delete(email);
 		if (typeof this.avatars[email] !== 'undefined') {
@@ -499,29 +426,14 @@ export class AvatarManager extends Disposable {
 	}
 }
 
-/**
- * Represents a queue of avatar requests, ordered by their `checkAfter` value.
- */
 class AvatarRequestQueue {
 	private queue: AvatarRequestItem[] = [];
 	private itemsAvailableCallback: () => void;
 
-	/**
-	 * Create an Avatar Request Queue.
-	 * @param itemsAvailableCallback A callback that is invoked when the queue transitions from having no items, to having at least one item.
-	 */
 	constructor(itemsAvailableCallback: () => void) {
 		this.itemsAvailableCallback = itemsAvailableCallback;
 	}
 
-	/**
-	 * Create and add a new avatar request to the queue.
-	 * @param email The email address identifying the avatar.
-	 * @param repo The repository that the avatar is used in.
-	 * @param remote The remote that the avatar can be fetched from.
-	 * @param commits The commits that reference the avatar.
-	 * @param immediate Whether the avatar should be fetched immediately.
-	 */
 	public add(email: string, repo: string, remote: string | null, commits: string[], immediate: boolean) {
 		const existingRequest = this.queue.find((request) => request.email === email && request.repo === repo);
 		if (existingRequest) {
@@ -544,39 +456,21 @@ class AvatarRequestQueue {
 		}
 	}
 
-	/**
-	 * Add an existing avatar request item back onto the queue.
-	 * @param item The avatar request item.
-	 * @param checkAfter The earliest time the avatar should be requested.
-	 * @param failedAttempt Did the fetch attempt fail.
-	 */
 	public addItem(item: AvatarRequestItem, checkAfter: number, failedAttempt: boolean) {
 		item.checkAfter = checkAfter;
 		if (failedAttempt) item.attempts++;
 		this.insertItem(item);
 	}
 
-	/**
-	 * Check if there are items in the queue.
-	 * @returns TRUE => Items in the queue, FALSE => Queue is empty.
-	 */
 	public hasItems() {
 		return this.queue.length > 0;
 	}
 
-	/**
-	 * Take the next item from the queue if an item is available.
-	 * @returns An avatar request item, or NULL if no item is available.
-	 */
 	public takeItem() {
 		if (this.queue.length > 0 && this.queue[0].checkAfter < (new Date()).getTime()) return this.queue.shift()!;
 		return null;
 	}
 
-	/**
-	 * Insert an avatar request item into the queue.
-	 * @param item The avatar request item.
-	 */
 	private insertItem(item: AvatarRequestItem) {
 		let l = 0, r = this.queue.length - 1, c, prevLength = this.queue.length;
 		while (l <= r) {
@@ -592,11 +486,6 @@ class AvatarRequestQueue {
 	}
 }
 
-/**
- * Mask an email address for logging.
- * @param email The string containing the email address.
- * @returns The masked email address.
- */
 function maskEmail(email: string) {
 	return email.substring(0, email.indexOf('@')) + '@*****';
 }
@@ -629,6 +518,11 @@ export interface AvatarEvent {
 	image: string;
 }
 
+interface CustomRemoteSource {
+	readonly type: 'custom';
+	readonly remoteUrl: string;
+}
+
 interface GitLabRemoteSource {
 	readonly type: 'gitlab';
 }
@@ -637,4 +531,4 @@ interface GravatarRemoteSource {
 	readonly type: 'gravatar';
 }
 
-type RemoteSource = GitHubRemoteSource | GitLabRemoteSource | GravatarRemoteSource;
+type RemoteSource = GitHubRemoteSource | CustomRemoteSource | GitLabRemoteSource | GravatarRemoteSource;

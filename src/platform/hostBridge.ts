@@ -106,6 +106,7 @@ export interface HostBridgeHandlers {
   onOpenTerminal?: (payload: TerminalOpenPayload) => void;
   onOpenSettingsUi?: (query?: string) => void;
   onOpenScm?: (draftMessage?: string) => void;
+  onOpenCompanionFeature?: (payload: Record<string, unknown>) => void;
   onSettingsChanged?: (settings: { [key: string]: any }) => void;
   onClipboardWrite?: (text: string) => Promise<boolean>;
   onOpenExternal?: (url: string) => Promise<boolean>;

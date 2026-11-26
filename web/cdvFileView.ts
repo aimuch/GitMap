@@ -4,32 +4,23 @@
  */
 class CdvFileView {
 	private readonly view: GitGraphView;
+	private selectedFileIndices: Set<number> = new Set();
+	private selectionAnchor: number | null = null;
 
-	/**
-	 * Construct a new CdvFileView instance.
-	 * @param view The Git Map View.
-	 */
 	constructor(view: GitGraphView) {
 		this.view = view;
 	}
 
-	/**
-	 * Updates the state of a file in the Commit Details View.
-	 * @param file The file that was affected.
-	 * @param fileElem The HTML Element of the file.
-	 * @param isReviewed TRUE/FALSE => Set the files reviewed state accordingly, NULL => Don't update the files reviewed state.
-	 * @param fileWasViewed Was the file viewed - if so, set it to be the last viewed file.
-	 */
 	private cdvUpdateFileState(file: GG.GitFileChange, fileElem: HTMLElement, isReviewed: boolean | null, fileWasViewed: boolean) {
 		const expandedCommit = this.view.expandedCommit, filesElem = getCdvFileViewElem(), filePath = file.newFilePath;
 		if (expandedCommit === null || expandedCommit.fileTree === null || filesElem === null) return;
 
 		if (fileWasViewed) {
 			expandedCommit.lastViewedFile = filePath;
-			// Highlight it (not just the small eye icon) and mark it viewed, so it's easy to find on returning from the diff
 			markCdvFileViewed(filePath);
+			alterClassOfCollection(<HTMLCollectionOf<HTMLElement>>filesElem.getElementsByClassName(CLASS_LAST_VIEWED_FILE), CLASS_LAST_VIEWED_FILE, false);
 			filesElem.querySelectorAll('.fileTreeFileRecord.lastViewedFile').forEach((el) => el.classList.remove('lastViewedFile'));
-			fileElem.classList.add('lastViewedFile', 'viewedFile');
+			fileElem.classList.add(CLASS_LAST_VIEWED_FILE, 'lastViewedFile', 'viewedFile');
 			if (isCdvSinkViewedEnabled()) fileElem.classList.add('sinkViewed');
 			const checkBtn = fileElem.querySelector('.cdvViewedCheck');
 			if (checkBtn !== null) {
@@ -44,6 +35,10 @@ class CdvFileView {
 			lastViewedElem.title = t('Last File Viewed');
 			lastViewedElem.innerHTML = SVG_ICONS.eyeOpen;
 			insertBeforeFirstChildWithClass(lastViewedElem, fileElem, 'fileTreeFileAction');
+			const scrollElem = document.getElementById('cdvFiles') || document.getElementById('cdvContent');
+			if (scrollElem !== null) {
+				expandedCommit.scrollTop.fileView = scrollElem.scrollTop;
+			}
 			this.updateCdvReviewBar();
 		}
 
@@ -73,10 +68,13 @@ class CdvFileView {
 			}
 		}
 
-		this.view.saveState();
-		if (fileWasViewed && isCdvSinkViewedEnabled()) {
-			// Re-order after marking viewed so viewed items sink to bottom cleanly
-			this.changeFileViewType(this.getFileViewType(), true);
+		if (fileWasViewed) {
+			this.view.saveStateNow();
+			if (isCdvSinkViewedEnabled()) {
+				this.changeFileViewType(this.getFileViewType(), true);
+			}
+		} else {
+			this.view.saveState();
 		}
 	}
 
@@ -106,7 +104,6 @@ class CdvFileView {
 		const changes = expandedCommit.fileChanges;
 		if (changes.length === 0) return;
 
-		// Build ordered diffable indices following current visible order in DOM
 		const records = Array.from(filesElem.querySelectorAll('.fileTreeFileRecord[data-index]')) as HTMLElement[];
 		const orderedIndices: number[] = [];
 		for (let i = 0; i < records.length; i++) {
@@ -135,7 +132,6 @@ class CdvFileView {
 		}
 
 		if (targetIdx === -1) {
-			// All diffable files have been viewed! Pulse the review bar to celebrate completion.
 			const bar = document.getElementById('cdvReviewBar');
 			if (bar !== null) {
 				bar.classList.remove('reviewPulse');
@@ -148,7 +144,6 @@ class CdvFileView {
 		const targetElem = <HTMLElement | null>filesElem.querySelector('.fileTreeFileRecord[data-index="' + targetIdx + '"]');
 		if (targetElem === null) return;
 
-		// Auto-expand any collapsed ancestor folders in tree view so the jumped-to file is visible
 		let ancestor: HTMLElement | null = targetElem.parentElement;
 		while (ancestor !== null && ancestor !== filesElem) {
 			if (ancestor.tagName === 'UL' && ancestor.classList.contains('fileTreeFolderContents') && ancestor.classList.contains('hidden')) {
@@ -188,9 +183,6 @@ class CdvFileView {
 		this.view.saveRepoState();
 	}
 
-	/**
-	 * Re-render the file view of the Commit Details View (if it's open), e.g. after the file icon theme has changed.
-	 */
 	public refreshCdvFileView() {
 		if (this.view.expandedCommit !== null && this.view.expandedCommit.fileTree !== null && !this.view.expandedCommit.loading) {
 			this.changeFileViewType(this.getFileViewType(), true);
@@ -210,14 +202,114 @@ class CdvFileView {
 	}
 
 	public makeCdvFileViewInteractive() {
+		this.selectedFileIndices.clear();
+		this.selectionAnchor = null;
 		const getFileElemOfEventTarget = (target: EventTarget) => <HTMLElement>(<Element>target).closest('.fileTreeFileRecord');
 		const getFileOfFileElem = (fileChanges: ReadonlyArray<GG.GitFileChange>, fileElem: HTMLElement) => fileChanges[parseInt(fileElem.dataset.index!)];
+
+		const updateBulkSelectionUi = () => {
+			const filesElem = getCdvFileViewElem(), expandedCommit = this.view.expandedCommit;
+			if (filesElem === null || expandedCommit === null || expandedCommit.fileChanges === null) return;
+			filesElem.querySelectorAll<HTMLElement>('.fileTreeFileRecord').forEach((rec) => {
+				const idx = parseInt(rec.dataset.index!);
+				alterClass(rec, 'cdvFileMultiSelected', this.selectedFileIndices.has(idx));
+			});
+			let bar = document.getElementById('cdvFileBulkBar');
+			if (this.selectedFileIndices.size < 2) {
+				if (bar !== null) bar.remove();
+				return;
+			}
+			if (bar === null) {
+				bar = document.createElement('div');
+				bar.id = 'cdvFileBulkBar';
+				bar.className = 'cdvFileBulkBar';
+				filesElem.insertBefore(bar, filesElem.firstChild);
+			}
+			const commitOrder = this.view.getCommitOrder(expandedCommit.commitHash, expandedCommit.compareWithHash === null ? expandedCommit.commitHash : expandedCommit.compareWithHash);
+			const isUncommitted = commitOrder.to === UNCOMMITTED;
+			const count = this.selectedFileIndices.size;
+			bar.innerHTML =
+				'<span class="cdvBulkCount">' + t('{0} files selected', String(count)) + '</span>' +
+				'<button type="button" class="cdvMiniBtn primary" data-bulk="openDiffs">' + t('Open Diffs') + '</button>' +
+				(isUncommitted
+					? '<button type="button" class="cdvMiniBtn" data-bulk="stage">' + t('Stage') + '</button>' +
+						'<button type="button" class="cdvMiniBtn" data-bulk="unstage">' + t('Unstage') + '</button>' +
+						'<button type="button" class="cdvMiniBtn danger" data-bulk="discard">' + t('Discard') + ELLIPSIS + '</button>'
+					: '<button type="button" class="cdvMiniBtn" data-bulk="restore">' + t('Restore') + ELLIPSIS + '</button>') +
+				'<button type="button" class="cdvMiniBtn" data-bulk="copyPaths">' + t('Copy Paths') + '</button>' +
+				'<button type="button" class="cdvMiniBtn" data-bulk="clear">' + t('Clear') + '</button>';
+
+			bar.onclick = (ev: MouseEvent) => {
+				const btn = ev.target instanceof Element ? <HTMLElement | null>ev.target.closest('[data-bulk]') : null;
+				if (btn === null || this.view.expandedCommit === null || this.view.expandedCommit.fileChanges === null) return;
+				const files = Array.from(this.selectedFileIndices)
+					.sort((a, b) => a - b)
+					.map((idx) => this.view.expandedCommit!.fileChanges![idx])
+					.filter((f): f is GG.GitFileChange => typeof f !== 'undefined');
+				const paths = files.map((f) => f.newFilePath);
+				switch (btn.dataset.bulk) {
+					case 'clear':
+						this.selectedFileIndices.clear();
+						this.selectionAnchor = null;
+						updateBulkSelectionUi();
+						break;
+					case 'copyPaths':
+						sendMessage({ command: 'copyToClipboard', type: t('File Paths'), data: paths.join('\n') });
+						break;
+					case 'openDiffs': {
+						const ord = this.view.getCommitOrder(this.view.expandedCommit.commitHash, this.view.expandedCommit.compareWithHash === null ? this.view.expandedCommit.commitHash : this.view.expandedCommit.compareWithHash);
+						const fromH = this.view.expandedCommit.compareWithHash !== null ? ord.from : (this.view.expandedCommit.commitHash === UNCOMMITTED ? 'HEAD' : this.view.expandedCommit.commitHash + '^');
+						const toH = this.view.expandedCommit.compareWithHash !== null ? ord.to : this.view.expandedCommit.commitHash;
+						sendMessage({
+							command: 'openAllChanges',
+							repo: this.view.currentRepo,
+							fromHash: fromH,
+							toHash: toH,
+							title: t('{0} Selected Files', String(files.length)),
+							fileChanges: files
+						});
+						break;
+					}
+					case 'stage':
+						sendMessage({ command: 'stageFiles', repo: this.view.currentRepo, paths: paths });
+						this.selectedFileIndices.clear();
+						updateBulkSelectionUi();
+						break;
+					case 'unstage':
+						sendMessage({ command: 'unstageFiles', repo: this.view.currentRepo, paths: paths });
+						this.selectedFileIndices.clear();
+						updateBulkSelectionUi();
+						break;
+					case 'discard': {
+						const trackedPaths = files.filter((f) => f.type !== GG.GitFileStatus.Untracked).map((f) => f.newFilePath);
+						const untrackedPaths = files.filter((f) => f.type === GG.GitFileStatus.Untracked).map((f) => f.newFilePath);
+						dialog.asDangerous().showConfirmation(t('Are you sure you want to discard uncommitted changes in <b>{0} selected files</b>? This cannot be undone.', String(paths.length)), t('Yes, discard'), () => {
+							sendMessage({ command: 'discardWorkingChanges', repo: this.view.currentRepo, trackedPaths: trackedPaths, untrackedPaths: untrackedPaths });
+							this.selectedFileIndices.clear();
+							updateBulkSelectionUi();
+						}, null);
+						break;
+					}
+					case 'restore': {
+						const targetHash = this.view.expandedCommit.compareWithHash !== null
+							? this.view.getCommitOrder(this.view.expandedCommit.commitHash, this.view.expandedCommit.compareWithHash).to
+							: this.view.expandedCommit.commitHash;
+						dialog.asDangerous().showConfirmation(t('Are you sure you want to restore <b>{0} selected files</b> to their state at commit <b><i>{1}</i></b>?', String(paths.length), abbrevCommit(targetHash)), t('Yes, restore'), () => {
+							runAction({ command: 'restoreFilesFromCommit', repo: this.view.currentRepo, commitHash: targetHash, filePaths: paths }, t('Restoring files'));
+							this.selectedFileIndices.clear();
+							updateBulkSelectionUi();
+						}, null);
+						break;
+					}
+				}
+			};
+		};
 
 		const getCommitHashForFile = (file: GG.GitFileChange, expandedCommit: ExpandedCommit) => {
 			const commit = this.view.commits[this.view.commitLookup[expandedCommit.commitHash]];
 			if (expandedCommit.compareWithHash !== null) {
 				return this.view.getCommitOrder(expandedCommit.commitHash, expandedCommit.compareWithHash).to;
-			} else if (commit.stash !== null && file.type === GG.GitFileStatus.Untracked) {
+			} else if (typeof commit !== 'undefined' && commit.stash !== null && file.type === GG.GitFileStatus.Untracked) {
 				return commit.stash.untrackedFilesHash!;
 			} else {
 				return expandedCommit.commitHash;
@@ -230,12 +322,10 @@ class CdvFileView {
 
 			let commit = this.view.commits[this.view.commitLookup[expandedCommit.commitHash]], fromHash: string, toHash: string, fileStatus = file.type;
 			if (expandedCommit.compareWithHash !== null) {
-				// Commit Comparison
 				const commitOrder = this.view.getCommitOrder(expandedCommit.commitHash, expandedCommit.compareWithHash);
 				fromHash = commitOrder.from;
 				toHash = commitOrder.to;
-			} else if (commit.stash !== null) {
-				// Stash Commit
+			} else if (typeof commit !== 'undefined' && commit.stash !== null) {
 				if (fileStatus === GG.GitFileStatus.Untracked) {
 					fromHash = commit.stash.untrackedFilesHash!;
 					toHash = commit.stash.untrackedFilesHash!;
@@ -245,7 +335,6 @@ class CdvFileView {
 					toHash = expandedCommit.commitHash;
 				}
 			} else {
-				// Single Commit
 				fromHash = expandedCommit.commitHash;
 				toHash = expandedCommit.commitHash;
 			}
@@ -372,6 +461,37 @@ class CdvFileView {
 			if (expandedCommit === null || expandedCommit.fileChanges === null || e.target === null) return;
 
 			const sourceElem = <HTMLElement>(<Element>e.target).closest('.fileTreeFile'), fileElem = getFileElemOfEventTarget(e.target);
+			const mouseEv = <MouseEvent>e;
+			const clickedIndex = parseInt(fileElem.dataset.index!);
+			if (mouseEv.shiftKey || mouseEv.ctrlKey || mouseEv.metaKey) {
+				handledEvent(e);
+				const filesElem = getCdvFileViewElem();
+				const orderedIndices = filesElem !== null
+					? Array.from(filesElem.querySelectorAll<HTMLElement>('.fileTreeFileRecord')).map((el) => parseInt(el.dataset.index!))
+					: [];
+				if (mouseEv.shiftKey && this.selectionAnchor !== null && orderedIndices.length > 0) {
+					const aPos = orderedIndices.indexOf(this.selectionAnchor);
+					const bPos = orderedIndices.indexOf(clickedIndex);
+					if (aPos !== -1 && bPos !== -1) {
+						if (!mouseEv.ctrlKey && !mouseEv.metaKey) this.selectedFileIndices.clear();
+						const [lo, hi] = aPos <= bPos ? [aPos, bPos] : [bPos, aPos];
+						for (let k = lo; k <= hi; k++) this.selectedFileIndices.add(orderedIndices[k]);
+					} else {
+						this.selectedFileIndices.add(clickedIndex);
+					}
+				} else {
+					if (this.selectedFileIndices.has(clickedIndex)) this.selectedFileIndices.delete(clickedIndex);
+					else this.selectedFileIndices.add(clickedIndex);
+					this.selectionAnchor = clickedIndex;
+				}
+				updateBulkSelectionUi();
+				return;
+			}
+			if (this.selectedFileIndices.size > 0) {
+				this.selectedFileIndices.clear();
+				updateBulkSelectionUi();
+			}
+			this.selectionAnchor = clickedIndex;
 			if (!sourceElem.classList.contains('gitDiffPossible')) return;
 			triggerViewFileDiff(getFileOfFileElem(expandedCommit.fileChanges, fileElem), fileElem);
 		});
@@ -400,7 +520,7 @@ class CdvFileView {
 			triggerOpenFile(getFileOfFileElem(expandedCommit.fileChanges, fileElem), fileElem);
 		});
 
-		// Mouse-following floating action pill for Changed Files in Commit Details View
+		// Pointer-following floating action pill for Changed Files in Commit Details View
 		const filesElem = getCdvFileViewElem();
 		if (filesElem !== null) {
 			filesElem.classList.add('hasFloatingFileBar');
@@ -417,6 +537,7 @@ class CdvFileView {
 			const hideBar = () => {
 				if (currentRecord !== null) currentRecord.classList.remove('rowActionsTarget');
 				currentRecord = null;
+				barElem!.classList.remove('gliding', 'tip-below');
 				barElem!.classList.add('hidden');
 			};
 			const placeBar = (clientX: number, updateVertical: boolean) => {
@@ -442,7 +563,7 @@ class CdvFileView {
 				barElem!.style.left = Math.round(left + filesElem.scrollLeft) + 'px';
 			};
 			filesElem.onmousemove = (ev: MouseEvent) => {
-				if (ev.altKey || contextMenu.isOpen()) {
+				if (ev.altKey || contextMenu.isOpen() || dialog.isOpen()) {
 					hideBar();
 					return;
 				}
@@ -488,25 +609,32 @@ class CdvFileView {
 			filesElem.onmouseleave = () => hideBar();
 			filesElem.onscroll = () => hideBar();
 			const cdvContentElem = document.getElementById('cdvContent');
-			if (cdvContentElem !== null) cdvContentElem.onscroll = () => hideBar();
+			if (cdvContentElem !== null) cdvContentElem.addEventListener('scroll', () => hideBar(), { passive: true });
 			barElem.onclick = (ev: MouseEvent) => {
 				handledEvent(ev);
 				const btn = ev.target instanceof Element ? <HTMLElement | null>ev.target.closest('[data-cdv-act]') : null;
 				const expandedCommit = this.view.expandedCommit;
 				if (btn === null || currentRecord === null || expandedCommit === null || expandedCommit.fileChanges === null) return;
 				const file = getFileOfFileElem(expandedCommit.fileChanges, currentRecord);
-				const act = btn.dataset.cdvAct;
-				if (act === 'copy') triggerCopyFilePath(file, true);
-				else if (act === 'rev') triggerViewFileAtRevision(file, currentRecord);
-				else if (act === 'open') triggerOpenFile(file, currentRecord);
-				else if (act === 'locate') {
-					if (window.parent && window.parent !== window) {
-						window.parent.postMessage({
-							type: 'gitmap-shell-action',
-							action: 'locate-repo-file',
-							filePath: file.newFilePath || file.oldFilePath
-						}, window.location.origin || '*');
-					}
+				switch (btn.dataset.cdvAct) {
+					case 'copy':
+						triggerCopyFilePath(file, true);
+						break;
+					case 'rev':
+						triggerViewFileAtRevision(file, currentRecord);
+						break;
+					case 'open':
+						triggerOpenFile(file, currentRecord);
+						break;
+					case 'locate':
+						if (window.parent && window.parent !== window) {
+							window.parent.postMessage({
+								type: 'gitmap-shell-action',
+								action: 'locate-repo-file',
+								filePath: file.newFilePath || file.oldFilePath
+							}, window.location.origin || '*');
+						}
+						break;
 				}
 			};
 		}
@@ -521,7 +649,8 @@ class CdvFileView {
 			const isUncommitted = commitOrder.to === UNCOMMITTED;
 
 			GitGraphView.closeCdvContextMenuIfOpen(expandedCommit);
-			expandedCommit.contextMenuOpen.fileView = parseInt(fileElem.dataset.index!);
+			const clickedIdx = parseInt(fileElem.dataset.index!);
+			expandedCommit.contextMenuOpen.fileView = clickedIdx;
 
 			const target: ContextMenuTarget & CommitTarget = {
 				type: TargetType.CommitDetailsView,
@@ -529,6 +658,102 @@ class CdvFileView {
 				index: this.view.commitLookup[expandedCommit.commitHash],
 				elem: fileElem
 			};
+			if (this.selectedFileIndices.size >= 2 && this.selectedFileIndices.has(clickedIdx)) {
+				const selFiles = Array.from(this.selectedFileIndices)
+					.sort((a, b) => a - b)
+					.map((idx) => expandedCommit.fileChanges![idx])
+					.filter((f): f is GG.GitFileChange => typeof f !== 'undefined');
+				const selPaths = selFiles.map((f) => f.newFilePath);
+				const countStr = String(selFiles.length);
+				contextMenu.show([
+					[
+						{
+							title: t('Open {0} Selected Diffs', countStr),
+							icon: MENU_ICONS.diff,
+							visible: true,
+							onClick: () => {
+								const fromH = expandedCommit.compareWithHash !== null ? commitOrder.from : (expandedCommit.commitHash === UNCOMMITTED ? 'HEAD' : expandedCommit.commitHash + '^');
+								const toH = expandedCommit.compareWithHash !== null ? commitOrder.to : expandedCommit.commitHash;
+								sendMessage({ command: 'openAllChanges', repo: this.view.currentRepo, fromHash: fromH, toHash: toH, title: t('{0} Selected Files', countStr), fileChanges: selFiles });
+							}
+						},
+						{
+							title: t('Copy {0} File Paths', countStr),
+							icon: MENU_ICONS.copy,
+							visible: true,
+							onClick: () => sendMessage({ command: 'copyToClipboard', type: t('File Paths'), data: selPaths.join('\n') })
+						}
+					],
+					isUncommitted
+						? [
+							{
+								title: t('Stage {0} Selected Files', countStr),
+								icon: MENU_ICONS.fixup,
+								visible: true,
+								onClick: () => {
+									sendMessage({ command: 'stageFiles', repo: this.view.currentRepo, paths: selPaths });
+									this.selectedFileIndices.clear();
+									updateBulkSelectionUi();
+								}
+							},
+							{
+								title: t('Unstage {0} Selected Files', countStr),
+								icon: MENU_ICONS.revert,
+								visible: true,
+								onClick: () => {
+									sendMessage({ command: 'unstageFiles', repo: this.view.currentRepo, paths: selPaths });
+									this.selectedFileIndices.clear();
+									updateBulkSelectionUi();
+								}
+							},
+							{
+								title: t('Discard {0} Selected Files', countStr) + ELLIPSIS,
+								icon: MENU_ICONS.trash,
+								visible: true,
+								onClick: () => {
+									const trackedPaths = selFiles.filter((f) => f.type !== GG.GitFileStatus.Untracked).map((f) => f.newFilePath);
+									const untrackedPaths = selFiles.filter((f) => f.type === GG.GitFileStatus.Untracked).map((f) => f.newFilePath);
+									dialog.asDangerous().showConfirmation(t('Are you sure you want to discard uncommitted changes in <b>{0} selected files</b>? This cannot be undone.', countStr), t('Yes, discard'), () => {
+										sendMessage({ command: 'discardWorkingChanges', repo: this.view.currentRepo, trackedPaths: trackedPaths, untrackedPaths: untrackedPaths });
+										this.selectedFileIndices.clear();
+										updateBulkSelectionUi();
+									}, null);
+								}
+							}
+						]
+						: [
+							{
+								title: t('Restore {0} Selected Files to this Revision', countStr) + ELLIPSIS,
+								icon: MENU_ICONS.reset,
+								visible: true,
+								onClick: () => {
+									const targetHash = expandedCommit.compareWithHash !== null ? commitOrder.to : expandedCommit.commitHash;
+									dialog.asDangerous().showConfirmation(t('Are you sure you want to restore <b>{0} selected files</b> to their state at commit <b><i>{1}</i></b>?', countStr, abbrevCommit(targetHash)), t('Yes, restore'), () => {
+										runAction({ command: 'restoreFilesFromCommit', repo: this.view.currentRepo, commitHash: targetHash, filePaths: selPaths }, t('Restoring files'));
+										this.selectedFileIndices.clear();
+										updateBulkSelectionUi();
+									}, null);
+								}
+							}
+						],
+					[
+						{
+							title: t('Clear Selection'),
+							icon: MENU_ICONS.clear,
+							visible: true,
+							onClick: () => {
+								this.selectedFileIndices.clear();
+								this.selectionAnchor = null;
+								updateBulkSelectionUi();
+							}
+						}
+					]
+				], false, target, <MouseEvent>e, this.view.isCdvDocked() ? document.body : this.view.viewElem, () => {
+					if (this.view.expandedCommit !== null) this.view.expandedCommit.contextMenuOpen.fileView = -1;
+				});
+				return;
+			}
+
 			const diffPossible = file.type === GG.GitFileStatus.Untracked || (file.additions !== null && file.deletions !== null);
 			const fileExistsAtThisRevision = file.type !== GG.GitFileStatus.Deleted && !isUncommitted;
 			const fileExistsAtThisRevisionAndDiffPossible = fileExistsAtThisRevision && diffPossible;
@@ -616,6 +841,48 @@ class CdvFileView {
 						onClick: () => triggerResetFileToRevision(file, fileElem)
 					},
 					{
+						title: t('Stage File'),
+						icon: MENU_ICONS.plus,
+						visible: isUncommitted && expandedCommit.compareWithHash === null,
+						onClick: () => runAction({ command: 'stageFiles', repo: this.view.currentRepo, paths: [file.newFilePath] }, t('Staging File'))
+					},
+					{
+						title: t('Unstage File'),
+						icon: MENU_ICONS.revert,
+						visible: isUncommitted && expandedCommit.compareWithHash === null && file.type !== GG.GitFileStatus.Untracked,
+						onClick: () => runAction({ command: 'unstageFiles', repo: this.view.currentRepo, paths: [file.newFilePath] }, t('Unstaging File'))
+					},
+					{
+						title: t('Stage / Unstage Hunks') + ELLIPSIS,
+						icon: MENU_ICONS.diff,
+						visible: isUncommitted && expandedCommit.compareWithHash === null && file.type !== GG.GitFileStatus.Untracked,
+						onClick: () => this.view.openHunkStagingModal(file.newFilePath, false)
+					},
+					{
+						title: t('Add to .gitignore'),
+						icon: MENU_ICONS.clear,
+						visible: isUncommitted && expandedCommit.compareWithHash === null && file.type === GG.GitFileStatus.Untracked,
+						onClick: () => runAction({ command: 'addToGitignore', repo: this.view.currentRepo, paths: [file.newFilePath] }, t('Adding to .gitignore'))
+					},
+					{
+						title: t('Discard File Changes') + ELLIPSIS,
+						icon: MENU_ICONS.trash,
+						visible: isUncommitted && expandedCommit.compareWithHash === null,
+						onClick: () => {
+							dialog.asDangerous().showConfirmation(
+								t('Are you sure you want to permanently discard uncommitted changes to <b><i>{0}</i></b>?', escapeHtml(file.newFilePath)),
+								t('Yes, discard'),
+								() => runAction({
+									command: 'discardWorkingChanges',
+									repo: this.view.currentRepo,
+									trackedPaths: file.type === GG.GitFileStatus.Untracked ? [] : [file.newFilePath],
+									untrackedPaths: file.type === GG.GitFileStatus.Untracked ? [file.newFilePath] : []
+								}, t('Discarding Changes')),
+								target
+							);
+						}
+					},
+					{
 						title: t('Stash this File') + ELLIPSIS,
 						icon: MENU_ICONS.stash,
 						visible: visibility.stashFile && isUncommitted && expandedCommit.compareWithHash === null,
@@ -631,7 +898,6 @@ class CdvFileView {
 						}
 					},
 					{
-						// The extension shows what removing the file will do, and asks for confirmation (also removing its previous name, if it was renamed)
 						title: t('Remove File from History') + ELLIPSIS,
 						icon: MENU_ICONS.trash,
 						visible: visibility.removeFromHistory && file.type !== GG.GitFileStatus.Untracked,

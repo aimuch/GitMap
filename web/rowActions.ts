@@ -89,7 +89,7 @@ class RowActions {
 		const actions = this.view.actions.getCommitContextMenuActions(target);
 		const actionMap = new Map<string, ContextMenuAction>();
 		actions.forEach((group) => group.forEach((action) => {
-			if (typeof action.id === 'string') actionMap.set(action.id, action);
+			if (typeof action.id === 'string' && (action.visible || !actionMap.has(action.id))) actionMap.set(action.id, action);
 		}));
 		const shown = this.view.getRowActionsConfig().actions.map((id) => actionMap.get(id)).filter((action): action is ContextMenuAction => typeof action !== 'undefined' && action.visible);
 		this.target = target;

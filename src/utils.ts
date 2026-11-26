@@ -373,10 +373,16 @@ const UPDATABLE_EXTENSION_SETTINGS: { readonly [key: string]: ReadonlyArray<stri
 	'diff.hideUnchangedRegions': [true, false],
 	'graph.colourPreset': GRAPH_COLOUR_PRESET_NAMES,
 	'graph.density': ['Comfortable', 'Compact'],
+	'graph.followTerminal': [true, false],
 	'graph.freezeColumnHeaders': [true, false],
 	'graph.freezeFooter': [true, false],
+	'graph.multiselect': [true, false],
 	'graph.nodeStyle': ['Dot', 'Avatar'],
+	'graph.overviewBar.enabled': [true, false],
+	'graph.scrollMarkers': [true, false],
+	'graph.showGhostRefsOnRowHover': [true, false],
 	'graph.style': ['rounded', 'angular'],
+	'integrations.pullRequestStatus.enabled': [true, false],
 	'language': ['Auto', 'English', 'Simplified Chinese'],
 	'statusBarItemDisplay': ['Icon & Text', 'Icon', 'Text']
 };

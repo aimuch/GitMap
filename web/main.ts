@@ -42,7 +42,7 @@ class GitGraphView {
 	private commitStats: { [hash: string]: GG.GitCommitStats | null } = {}; // The files & lines changed by the loaded commits (shown in the Changes column)
 	private readonly commitStatsRequested: Set<string> = new Set();
 	private cdvFileDiff: { key: string, diff: string | null, error: GG.ErrorInfo } | null = null;
-	private commitHead: string | null = null;
+	public commitHead: string | null = null;
 	public commitLookup: { [hash: string]: number } = {};
 	public onlyFollowFirstParent: boolean = false;
 	private avatars: AvatarImageCollection = {};
@@ -116,6 +116,12 @@ class GitGraphView {
 	public readonly branchCompare: BranchCompare;
 	public readonly branchCleanup: BranchCleanup;
 	public readonly commitExplainer: CommitExplainer;
+	public readonly hunkModal: HunkStagingModal;
+	public readonly branchCommitCompareModal: BranchCommitCompareModal;
+	public readonly graphSidebar: GraphSidebar;
+	public readonly reviewSessionModal: ReviewSessionModal;
+	public readonly commandPalette: GraphCommandPalette;
+	private readonly dragDrop: GraphDragDropController;
 	private readonly operationBar: OperationBar;
 	private readonly rowActions: RowActions;
 	private readonly findWidget: FindWidget;
@@ -140,6 +146,21 @@ class GitGraphView {
 	private saveStatePending: boolean = false; // Is the state saved when the code that's running finishes
 	private saveAvatarsTimeout: number | null = null;
 	private readonly scrollShadowElem: HTMLElement;
+	private pullRequestBadges: { [branch: string]: GG.PullRequestBadgeInfo } = {};
+	private readonly inlineCommitBox: InlineCommitBox;
+	private readonly prPopover: PullRequestPopover;
+	private cdvNoteText: string | null = null;
+	private cdvSigDetails: GG.CommitSignatureDetails | null = null;
+	private repoMetadataLoadedFor: string | null = null;
+	private scrollJumpPillElem: HTMLElement | null = null;
+	private scrollJumpMenuOpen: boolean = false;
+	private cdvHistory: string[] = [];
+	private cdvHistoryIndex: number = -1;
+	private navigatingCdvHistory: boolean = false;
+	private readonly expandedRefCommits: Set<string> = new Set();
+	private soloRef: string | null = null;
+	private preSoloBranches: string[] | null = null;
+	private shortcutsModalElem: HTMLElement | null = null;
 
 	constructor(viewElem: HTMLElement, prevState: WebViewState | null) {
 		this.gitRepos = initialState.repos;
@@ -157,6 +178,14 @@ class GitGraphView {
 		this.branchCompare = new BranchCompare(this);
 		this.branchCleanup = new BranchCleanup(this);
 		this.commitExplainer = new CommitExplainer(this);
+		this.hunkModal = new HunkStagingModal(this);
+		this.commandPalette = new GraphCommandPalette(this);
+		this.branchCommitCompareModal = new BranchCommitCompareModal(this);
+		this.graphSidebar = new GraphSidebar(this);
+		this.reviewSessionModal = new ReviewSessionModal(this);
+		this.inlineCommitBox = new InlineCommitBox(this);
+		this.prPopover = new PullRequestPopover(this);
+		this.dragDrop = new GraphDragDropController(this);
 		this.currentRepoRefreshState = {
 			inProgress: false,
 			hard: true,
@@ -169,6 +198,15 @@ class GitGraphView {
 		};
 
 		this.controlsElem = document.getElementById('controls')!;
+		const sidebarToggleBtn = document.createElement('button');
+		sidebarToggleBtn.type = 'button';
+		sidebarToggleBtn.id = 'sidebarToggleBtn';
+		sidebarToggleBtn.className = 'toolbarBtn';
+		sidebarToggleBtn.title = t('Toggle Repository Navigator Sidebar');
+		sidebarToggleBtn.setAttribute('aria-label', t('Toggle Repository Navigator Sidebar'));
+		sidebarToggleBtn.innerHTML = '<svg class="toolbarIcon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>';
+		sidebarToggleBtn.addEventListener('click', () => this.toggleGraphSidebar());
+		this.controlsElem.insertBefore(sidebarToggleBtn, this.controlsElem.firstChild);
 		this.tableElem = document.getElementById('commitTable')!;
 		this.footerElem = document.getElementById('footer')!;
 		this.scrollShadowElem = <HTMLInputElement>document.getElementById('scrollShadow')!;
@@ -232,6 +270,9 @@ class GitGraphView {
 			if (e.target.closest('.undoToastAction, .undoToastClose') !== null) this.hideUndoToast();
 		});
 
+		this.findWidget = new FindWidget(this);
+		this.settingsWidget = new SettingsWidget(this);
+
 		this.refreshBtnElem = document.getElementById('refreshBtn')!;
 		this.refreshBtnElem.addEventListener('click', () => {
 			if (!this.refreshBtnElem.classList.contains(CLASS_REFRESHING)) {
@@ -239,9 +280,6 @@ class GitGraphView {
 			}
 		});
 		this.renderRefreshButton();
-
-		this.findWidget = new FindWidget(this);
-		this.settingsWidget = new SettingsWidget(this);
 		this.observeOverviews();
 
 		alterClass(document.body, CLASS_BRANCH_LABELS_ALIGNED_TO_GRAPH, this.config.referenceLabels.branchLabelsAlignedToGraph);
@@ -263,6 +301,14 @@ class GitGraphView {
 			const commits = this.getSelectedCommits();
 			if (actionElem.dataset.action === 'cherrypick') {
 				this.actions.cherrypickCommitsAction(commits, null);
+			} else if (actionElem.dataset.action === 'squash') {
+				this.actions.batchSquashCommitsAction(commits, null);
+			} else if (actionElem.dataset.action === 'drop') {
+				this.actions.batchDropCommitsAction(commits, null);
+			} else if (actionElem.dataset.action === 'changelog' && commits.length >= 2) {
+				const oldest = commits[0], newest = commits[commits.length - 1];
+				const baseRef = oldest.parents.length > 0 ? oldest.parents[0] : oldest.hash;
+				sendMessage({ command: 'aiChangelogFromCommits', repo: this.currentRepo, fromRef: baseRef, toRef: newest.hash, label: abbrevCommit(oldest.hash) + ' → ' + abbrevCommit(newest.hash) });
 			} else if (actionElem.dataset.action === 'copyHashes') {
 				this.actions.copyCommitsToClipboard(commits, false);
 			} else {
@@ -326,6 +372,39 @@ class GitGraphView {
 		scrollToHeadBtn.addEventListener('click', () => this.scrollToHead());
 		settingsBtn.innerHTML = SVG_ICONS.gear;
 		settingsBtn.addEventListener('click', () => this.settingsWidget.show(this.currentRepo));
+		const toolsBtn = document.getElementById('toolsMenuBtn');
+		if (toolsBtn !== null) {
+			toolsBtn.innerHTML = SVG_ICONS.compass;
+			toolsBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				this.showToolsMenu(toolsBtn, e);
+			});
+		}
+		const overviewBarElem = document.getElementById('graphOverviewBar');
+		if (overviewBarElem !== null) {
+			overviewBarElem.addEventListener('click', (e) => {
+				const targetEl = e.target instanceof Element ? <HTMLElement | null>e.target.closest('[data-gob-act]') : null;
+				if (targetEl === null) return;
+				handledEvent(e);
+				const act = targetEl.dataset.gobAct;
+				if (act === 'head') {
+					this.scrollToHead();
+				} else if (act === 'wip') {
+					this.scrollToCommit(UNCOMMITTED, true, true);
+				} else if (act === 'wt') {
+					const wtPath = targetEl.dataset.gobWt || '';
+					const wt = this.worktreeList.getWorktrees().find((w) => w.path === wtPath);
+					if (typeof wt !== 'undefined') {
+						if ((wt.dirtyCount || 0) > 0) this.openWorktreeWipInspector(wt);
+						else if (wt.branch !== null) this.focusBranchOrRef(wt.branch, false);
+					}
+				} else if (act === 'exitSolo') {
+					this.exitSolo();
+				} else if (act === 'shortcuts') {
+					this.toggleShortcutsModal();
+				}
+			});
+		}
 		terminalBtn.innerHTML = SVG_ICONS.terminal;
 		terminalBtn.addEventListener('click', () => {
 			runAction({
@@ -334,6 +413,7 @@ class GitGraphView {
 				name: this.gitRepos[this.currentRepo].name || getRepoName(this.currentRepo)
 			}, t('Opening Terminal'));
 		});
+
 		// Back from a diff or file preview tab: return focus & highlight the opened file row (supports both All Files and Changed Files tabs)
 		window.addEventListener('gitmap-reveal-last-viewed', (ev: Event) => {
 			const detail = (<CustomEvent<{ filePath?: string }>>ev).detail;
@@ -409,7 +489,6 @@ class GitGraphView {
 			if (marker === null) return;
 			fileView.querySelectorAll<HTMLElement>('.fileTreeFileRecord.lastViewedFile').forEach((r) => r.classList.remove('lastViewedFile'));
 			marker.classList.add('lastViewedFile');
-			// Expand any collapsed parent folders so scrollIntoView isn't a no-op on display:none ancestors
 			let ancestor: HTMLElement | null = marker.parentElement;
 			while (ancestor !== null && ancestor !== fileView) {
 				if (ancestor.tagName === 'UL' && ancestor.classList.contains('fileTreeFolderContents') && ancestor.classList.contains('hidden')) {
@@ -513,6 +592,9 @@ class GitGraphView {
 		this.hideUndoToast();
 		this.selectedCommits = new Set();
 		this.selectionAnchor = null;
+		this.expandedRefCommits.clear();
+		this.soloRef = null;
+		this.preSoloBranches = null;
 		this.currentRepo = repo;
 		this.currentRepoLoading = true;
 		this.scrollToHeadPending = false;
@@ -522,6 +604,9 @@ class GitGraphView {
 		this.gitRemotes = [];
 		this.gitStashes = [];
 		this.gitUpstreams = {};
+		this.pullRequestBadges = {};
+		this.inlineCommitBox.resetStatus();
+		this.closeHunkModal();
 		this.stashStats = {};
 		this.commitStats = {};
 		this.commitStatsRequested.clear();
@@ -548,7 +633,16 @@ class GitGraphView {
 		this.gitUpstreams = upstreams;
 		this.stashList.renderStashButton();
 		if (stashes.length === 0) this.stashList.closeStashList(); else this.stashList.renderStashList();
-		if (isRepo) this.renderSyncButtons(branchHead);
+		if (isRepo) {
+			this.renderSyncButtons(branchHead);
+			if (remotes.length > 0 && this.currentRepo !== '' && this.config.pullRequestStatusEnabled) {
+				sendMessage({ command: 'loadPullRequestBadges', repo: this.currentRepo });
+			}
+			if (this.graphSidebar.isOpen() && this.currentRepo !== '') {
+				sendMessage({ command: 'loadRepoMetadata', repo: this.currentRepo });
+			}
+		}
+		this.graphSidebar.refresh();
 
 		if (!isRepo || (!this.currentRepoRefreshState.hard && arraysStrictlyEqual(this.gitBranches, branchOptions) && this.gitBranchHead === branchHead && arraysStrictlyEqual(this.gitRemotes, remotes))) {
 			this.saveState();
@@ -712,7 +806,7 @@ class GitGraphView {
 			}
 		}
 
-		if (this.expandedCommit !== null && (!expandedCommitVisible || (this.expandedCommit.compareWithHash !== null && !expandedCompareWithCommitVisible))) {
+		if (this.expandedCommit !== null && !this.expandedCommit.customCompareLabels && (!expandedCommitVisible || (this.expandedCommit.compareWithHash !== null && !expandedCompareWithCommitVisible))) {
 			this.closeCommitDetails(false);
 		}
 
@@ -884,6 +978,46 @@ class GitGraphView {
 						this.branchCleanup.show();
 						break;
 				}
+			} else if (typeof this.loadViewTo.authorFilter === 'string' && this.loadViewTo.authorFilter !== '') {
+				const targetAuthor = this.loadViewTo.authorFilter;
+				this.loadViewTo = null;
+				this.currentAuthors = [targetAuthor];
+				this.maxCommits = this.config.initialLoadCommits;
+				this.saveState();
+				this.clearCommits();
+				this.requestLoadRepoInfoAndCommits(true, true);
+				return;
+			} else if (this.loadViewTo.dateRange) {
+				const range = this.loadViewTo.dateRange;
+				this.loadViewTo = null;
+				this.findWidget.searchDateRange(range.after, range.before);
+			} else if (this.loadViewTo.compareBranches) {
+				const cmp = this.loadViewTo.compareBranches;
+				this.loadViewTo = null;
+				this.branchCompare.start(cmp.left, cmp.right);
+			} else if (typeof this.loadViewTo.ref === 'string' && this.loadViewTo.ref !== '') {
+				const ref = this.loadViewTo.ref;
+				this.loadViewTo = null;
+				const matched = this.commits.find((c) =>
+					c.hash.startsWith(ref) ||
+					c.heads.includes(ref) ||
+					c.remotes.some((r) => r.name === ref) ||
+					c.tags.some((tg) => tg.name === ref)
+				);
+				if (typeof matched !== 'undefined') {
+					this.scrollToCommit(matched.hash, true, true);
+				} else {
+					this.focusBranchOrRef(ref, false);
+				}
+			} else if (typeof this.loadViewTo.worktreePath === 'string' && this.loadViewTo.worktreePath !== '') {
+				const wtPath = this.loadViewTo.worktreePath;
+				this.loadViewTo = null;
+				const matchedWt = this.worktreeList.getWorktrees().find((w) => w.path === wtPath);
+				if (typeof matchedWt !== 'undefined') {
+					if (matchedWt.branch !== null) {
+						this.focusBranchOrRef(matchedWt.branch, false);
+					}
+				}
 			}
 		}
 		if (!keepLoadViewTo) this.loadViewTo = null;
@@ -901,11 +1035,14 @@ class GitGraphView {
 		this.commitHead = null;
 		this.commitLookup = {};
 		this.renderedGitBranchHead = null;
+		this.cdvHistory = [];
+		this.cdvHistoryIndex = -1;
 		this.closeCommitDetails(false);
 		this.saveState();
 		this.graph.loadCommits(this.commits, this.commitHead, this.commitLookup, this.onlyFollowFirstParent);
 		this.tableElem.innerHTML = '';
 		this.footerElem.innerHTML = '';
+		this.renderOverviewBar();
 		this.renderGraph();
 		this.findWidget.refresh();
 	}
@@ -1194,8 +1331,12 @@ class GitGraphView {
 	}
 
 	public getRowActionsConfig(): GG.RowActionsConfig {
-		const config = this.config.rowActions;
-		return config && Array.isArray(config.actions) ? config : { actions: DEFAULT_ROW_COMMIT_ACTIONS, position: 'Pointer' };
+		const configured = this.config.rowActions;
+		if (typeof configured !== 'undefined' && Array.isArray(configured.actions)) {
+			const pos: GG.RowActionsPosition = configured.position === 'Description' || configured.position === 'Row' ? configured.position : 'Pointer';
+			return { actions: configured.actions, position: pos };
+		}
+		return { actions: DEFAULT_ROW_COMMIT_ACTIONS, position: 'Pointer' };
 	}
 
 	public setHideUnchangedRegions(enabled: boolean, persist: boolean = true) {
@@ -1212,10 +1353,10 @@ class GitGraphView {
 		}
 	}
 
-	public setCdvConfig(actions: ReadonlyArray<string>, hideUnchangedRegions: boolean, rowActions?: GG.RowActionsConfig) {
+	public setCdvConfig(actions: ReadonlyArray<string>, hideUnchangedRegions: boolean, pullRequestStatusEnabled?: boolean, rowActions?: GG.RowActionsConfig) {
 		if (typeof rowActions !== 'undefined') {
 			(<GG.Writeable<GG.GitGraphViewConfig>>this.config).rowActions = rowActions;
-			this.rowActions.hide(); // Shown with the new buttons the next time the mouse moves over a row
+			this.rowActions.hide();
 		}
 		(<GG.Writeable<GG.CommitDetailsViewConfig>>this.config.commitDetailsView).actions = actions;
 		(<GG.Writeable<GG.CommitDetailsViewConfig>>this.config.commitDetailsView).hideUnchangedRegions = hideUnchangedRegions;
@@ -1227,6 +1368,28 @@ class GitGraphView {
 			if (index !== null) diffElem.innerHTML = this.generateCdvFileDiffHtml(this.expandedCommit.commitHash, this.expandedCommit.fileChanges[index]);
 		}
 		this.settingsWidget.setHideUnchangedRegions(hideUnchangedRegions);
+		if (typeof pullRequestStatusEnabled === 'boolean') {
+			this.setPrStatusEnabled(pullRequestStatusEnabled, false);
+		}
+	}
+
+	public setPrStatusEnabled(enabled: boolean, persist: boolean) {
+		(<GG.Writeable<GG.GitGraphViewConfig>>this.config).pullRequestStatusEnabled = enabled;
+		this.settingsWidget.setPrStatusEnabled(enabled);
+		if (persist) {
+			sendMessage({ command: 'updateExtensionSetting', key: 'integrations.pullRequestStatus.enabled', value: enabled });
+		}
+		if (!enabled) {
+			if (Object.keys(this.pullRequestBadges).length > 0) {
+				this.pullRequestBadges = {};
+				if (this.commits.length > 0) {
+					if (this.expandedCommit === null || this.isCdvDocked()) this.renderRows();
+					else this.render();
+				}
+			}
+		} else if (this.gitRemotes.length > 0 && this.currentRepo !== '') {
+			sendMessage({ command: 'loadPullRequestBadges', repo: this.currentRepo, force: true });
+		}
 	}
 
 	public setAiConfig(ai: GG.AiSettingsConfig) {
@@ -1239,6 +1402,10 @@ class GitGraphView {
 		if (this.expandedCommit !== null && !this.expandedCommit.loading) {
 			this.renderCommitDetailsView(true);
 		}
+	}
+
+	public processFetchAiModelsResponse(msg: GG.ResponseFetchAiModels) {
+		this.settingsWidget.processFetchAiModelsResponse(msg);
 	}
 
 	public requestCommitDetails(hash: string, refresh: boolean) {
@@ -1283,9 +1450,15 @@ class GitGraphView {
 		if (this.saveStatePending) return;
 		this.saveStatePending = true;
 		Promise.resolve().then(() => {
+			if (!this.saveStatePending) return;
 			this.saveStatePending = false;
 			this.writeState();
 		});
+	}
+
+	public saveStateNow() {
+		this.saveStatePending = false;
+		this.writeState();
 	}
 
 	/**
@@ -1405,6 +1578,7 @@ class GitGraphView {
 	/* Renderers */
 
 	public render() {
+		this.renderOverviewBar();
 		this.renderTable();
 		this.renderGraph();
 		this.renderOverviews();
@@ -1413,8 +1587,17 @@ class GitGraphView {
 	/**
 	 * Render the overviews of the loaded commits: the Minimap, and the markers alongside the scrollbar.
 	 */
-	private renderOverviews() {
-		this.minimap.render(this.commits, this.commitHead, this.graph.getVertexColours(), this.config.graph.colours, this.config.graph.minimap);
+	public renderOverviews() {
+		this.minimap.render(
+			this.commits,
+			this.commitHead,
+			this.graph.getVertexColours(),
+			this.config.graph.colours,
+			this.config.graph.minimap,
+			Object.values(this.pullRequestBadges),
+			this.worktreeList.getWorktrees(),
+			this.config.graph.minimapAdditionalTypes
+		);
 		this.updateMinimapViewport();
 		this.renderScrollMarkers();
 	}
@@ -1424,7 +1607,23 @@ class GitGraphView {
 	 */
 	public renderScrollMarkers() {
 		this.minimap.setFindMatches(this.findWidget.getMatchHashes());
-		this.scrollMarkers.render(this.commits, this.commitHead, this.graph.getVertexColours(), this.config.graph.colours, this.findWidget.getMatchHashes(), (index) => this.getVirtualRowCentre(index));
+		this.scrollMarkers.render(
+			this.commits,
+			this.commitHead,
+			this.graph.getVertexColours(),
+			this.config.graph.colours,
+			this.findWidget.getMatchHashes(),
+			(index) => this.getVirtualRowCentre(index),
+			{
+				enabled: this.config.graph.scrollMarkers ? this.config.graph.scrollMarkers.enabled : true,
+				types: this.config.graph.scrollMarkers ? this.config.graph.scrollMarkers.types : undefined,
+				prBadges: Object.values(this.pullRequestBadges),
+				worktrees: this.worktreeList.getWorktrees(),
+				onJumpToIndex: (index) => {
+					if (index < this.commits.length) this.scrollToCommit(this.commits[index].hash, true, true);
+				}
+			}
+		);
 	}
 
 	/**
@@ -1471,6 +1670,7 @@ class GitGraphView {
 				viewportFrame = null;
 				this.updateRenderedRows();
 				this.updateMinimapViewport();
+				this.updateScrollJumpPill();
 			});
 		});
 		const resizeObserver = new ResizeObserver(() => {
@@ -1603,7 +1803,17 @@ class GitGraphView {
 			const commitElem = findCommitElemWithId(elems, this.getCommitId(expandedCommit.commitHash));
 			const compareWithElem = expandedCommit.compareWithHash !== null ? findCommitElemWithId(elems, this.getCommitId(expandedCommit.compareWithHash)) : null;
 
-			if (commitElem === null || (expandedCommit.compareWithHash !== null && compareWithElem === null)) {
+			if (expandedCommit.compareWithHash !== null && expandedCommit.customCompareLabels) {
+				expandedCommit.index = commitElem !== null ? parseInt(commitElem.dataset.id!) : -1;
+				expandedCommit.commitElem = commitElem;
+				expandedCommit.compareWithElem = compareWithElem;
+				this.saveState();
+				if (!expandedCommit.loading && expandedCommit.fileChanges !== null && expandedCommit.fileTree !== null) {
+					this.showCommitComparison(expandedCommit.commitHash, expandedCommit.compareWithHash, expandedCommit.fileChanges, expandedCommit.fileTree, expandedCommit.codeReview, expandedCommit.lastViewedFile, true);
+				} else {
+					this.requestCommitComparison(expandedCommit.commitHash, expandedCommit.compareWithHash, false);
+				}
+			} else if (commitElem === null || (expandedCommit.compareWithHash !== null && compareWithElem === null)) {
 				this.closeCommitDetails(false);
 				this.saveState();
 			} else {
@@ -1638,22 +1848,10 @@ class GitGraphView {
 
 	/* Virtualised Rows */
 
-	/**
-	 * Are the rows of the commits virtualised: when there are many commits, only the rows near the view are rendered (unless the Commit
-	 * Details View is inline, as it's inside the table).
-	 * @returns TRUE => The rows are virtualised, FALSE => All rows are rendered.
-	 */
 	private isVirtualised() {
 		return this.commits.length > VIRTUAL_ROWS_THRESHOLD && (this.expandedCommit === null || this.isCdvDocked());
 	}
 
-	/**
-	 * Get the HTML of the rows of the commits. When the rows are virtualised, only the rows near the view (and the rows of the commits whose
-	 * details are open) are rendered, the other rows are replaced by spacers of the same height, and the rows of the commits with the
-	 * longest date & author are rendered collapsed, so that the widths of the columns don't change as the view is scrolled.
-	 * @param ctx What's needed to render the rows.
-	 * @returns The HTML.
-	 */
 	private getPinnedRowIndices() {
 		const pinned = new Set(this.pinnedRows);
 		if (this.expandedCommit !== null) {
@@ -1698,11 +1896,6 @@ class GitGraphView {
 		return html;
 	}
 
-	/**
-	 * Get the HTML of the collapsed rows of the commits with the longest date & author (which determine the widths of their columns).
-	 * @param ctx What's needed to render the rows.
-	 * @returns The HTML.
-	 */
 	private getSizerRowsHtml(ctx: RowRenderContext) {
 		if (typeof ctx.sizerRowsHtml === 'string') return ctx.sizerRowsHtml;
 		let longestDate = -1, longestAuthor = -1, dateLength = 0, authorLength = 0;
@@ -1726,10 +1919,6 @@ class GitGraphView {
 		return ctx.sizerRowsHtml;
 	}
 
-	/**
-	 * Get the rows of the commits that are in view.
-	 * @returns The indexes of the first & last rows in view.
-	 */
 	private getRowsInView() {
 		const rowHeight = this.getRowHeight(), headersElem = document.getElementById('tableColHeaders'), lastIndex = Math.max(this.commits.length - 1, 0);
 		const rowsTop = this.controlsElem.offsetHeight + (headersElem !== null ? headersElem.offsetHeight : 31);
@@ -1740,19 +1929,12 @@ class GitGraphView {
 		};
 	}
 
-	/**
-	 * Get the height of the rows of the commits (as rendered, or the row height of the git-map.graph.density Extension Setting).
-	 * @returns The height (in pixels).
-	 */
 	private getRowHeight() {
 		if (this.rowHeight !== null) return this.rowHeight;
 		const height = parseFloat(getComputedStyle(document.body).getPropertyValue('--git-graph-rowHeight'));
 		return isNaN(height) || height <= 0 ? 32 : height;
 	}
 
-	/**
-	 * Render the rows near the view again, if the view has been scrolled (or resized) so that rows that aren't rendered will soon be in view.
-	 */
 	private updateRenderedRows() {
 		if (this.renderedRows === null || this.rowContext === null) return;
 		const inView = this.getRowsInView(), margin = Math.floor(VIRTUAL_ROWS_BUFFER / 4);
@@ -1762,9 +1944,6 @@ class GitGraphView {
 		}
 	}
 
-	/**
-	 * Render the rows of the commits again (keeping the column headers), when the rows that are rendered change.
-	 */
 	private renderRows() {
 		const headersElem = document.getElementById('tableColHeaders');
 		if (headersElem === null || this.rowContext === null) return;
@@ -1782,10 +1961,6 @@ class GitGraphView {
 		this.measureRowHeight();
 	}
 
-	/**
-	 * Measure the height of the rendered rows of the commits (used for the spacers that replace the rows that aren't rendered). If it's
-	 * different to the height that was used, the rows are rendered again.
-	 */
 	private measureRowHeight() {
 		if (this.renderedRows === null) return;
 		const elems = getCommitElems();
@@ -1797,11 +1972,6 @@ class GitGraphView {
 		}
 	}
 
-	/**
-	 * Get the element of the row of a commit, rendering the row if it isn't rendered (when the rows are virtualised).
-	 * @param index The index of the commit.
-	 * @returns The element, or NULL if there isn't a commit with the index.
-	 */
 	public getCommitElem(index: number | null) {
 		if (index === null || index < 0 || index >= this.commits.length) return null;
 		let elem = findCommitElemWithId(getCommitElems(), index);
@@ -1813,23 +1983,12 @@ class GitGraphView {
 		return elem;
 	}
 
-	/**
-	 * Get the vertical position of the centre of the row of a commit (in the content of the view), when the rows are virtualised.
-	 * @param index The index of the commit.
-	 * @returns The position, or NULL if the rows aren't virtualised.
-	 */
 	public getVirtualRowCentre(index: number) {
 		if (this.renderedRows === null) return null;
 		const headersElem = document.getElementById('tableColHeaders'), rowHeight = this.getRowHeight();
 		return this.controlsElem.offsetHeight + (headersElem !== null ? headersElem.offsetHeight : 31) + (index + 0.5) * rowHeight;
 	}
 
-	/**
-	 * Get the HTML of the row of a commit.
-	 * @param i The index of the commit.
-	 * @param ctx What's needed to render the rows (computed when the table is rendered).
-	 * @returns The HTML.
-	 */
 	private getCommitRowHtml(i: number, ctx: RowRenderContext) {
 		const { colVisibility, currentHash, vertexColours, widthsAtVertices, mutedCommits, textFormatter, fileHistory, maxLinesChanged, refsInColumn, showChanges, showFileChanges } = ctx;
 		let commit = this.commits[i];
@@ -1838,11 +1997,13 @@ class GitGraphView {
 		let date = formatShortDate(commit.date);
 		let branchLabels = getBranchLabels(commit.heads, commit.remotes);
 		let refBranches = '', refTags = '', j, k, refName, remoteName, refActive, refHtml, branchCheckedOutAtCommit: string | null = null;
+		const branchChips: { readonly html: string, readonly active: boolean }[] = [];
+		const tagChips: string[] = [];
 
 		for (j = 0; j < branchLabels.heads.length; j++) {
 			refName = escapeHtml(branchLabels.heads[j].name);
 			refActive = branchLabels.heads[j].name === this.gitBranchHead;
-			refHtml = '<span class="gitRef head' + (refActive ? ' active' : '') + '" data-name="' + refName + '">' + (refActive && refsInColumn ? SVG_ICONS.check : SVG_ICONS.branch) + '<span class="gitRefName" data-fullref="' + refName + '">' + refName + '</span>';
+			refHtml = '<span class="gitRef head' + (refActive ? ' active' : '') + '" draggable="true" data-name="' + refName + '">' + (refActive && refsInColumn ? SVG_ICONS.check : SVG_ICONS.branch) + '<span class="gitRefName" data-fullref="' + refName + '">' + refName + '</span>';
 			for (k = 0; k < branchLabels.heads[j].remotes.length; k++) {
 				remoteName = escapeHtml(branchLabels.heads[j].remotes[k]);
 				const remoteFullRef = escapeHtml(branchLabels.heads[j].remotes[k] + '/' + branchLabels.heads[j].name);
@@ -1850,18 +2011,49 @@ class GitGraphView {
 					? '<span class="gitRefHeadRemote icon" data-remote="' + remoteName + '" data-fullref="' + remoteFullRef + '" title="' + t('{0} is at this commit', remoteFullRef) + '">' + SVG_ICONS.cloud + '</span>'
 					: '<span class="gitRefHeadRemote" data-remote="' + remoteName + '" data-fullref="' + remoteFullRef + '">' + remoteName + '</span>';
 			}
-			refHtml += generateTrackingHtml(this.gitUpstreams[branchLabels.heads[j].name]) + '</span>';
-			refBranches = refActive ? refHtml + refBranches : refBranches + refHtml;
-			if (refActive) branchCheckedOutAtCommit = this.gitBranchHead;
+			const prBadge = this.pullRequestBadges[branchLabels.heads[j].name];
+			const prStackSuffix = prBadge && typeof prBadge.stackDepth === 'number' && typeof prBadge.stackSize === 'number' && prBadge.stackSize > 1
+				? (' · ' + prBadge.stackDepth + '/' + prBadge.stackSize)
+				: '';
+			const prMqSuffix = prBadge && prBadge.mergeQueueState ? ' MQ' : '';
+			const prBadgeHtml = typeof prBadge !== 'undefined'
+				? '<span class="gitRefPrBadge ci-' + prBadge.ciStatus + (prBadge.mergeQueueState ? ' inQueue' : '') + '" data-pr-url="' + escapeHtml(prBadge.url) + '" data-pr-branch="' + refName + '" data-pr-num="' + prBadge.number + '" title="' + escapeHtml('#' + prBadge.number + ' ' + prBadge.title + ' (CI: ' + prBadge.ciStatus + ')' + (prStackSuffix !== '' ? ' [Stack ' + prBadge.stackDepth + '/' + prBadge.stackSize + ']' : '') + (prMqSuffix !== '' ? ' [Merge Queue]' : '')) + '">#' + prBadge.number + (prBadge.ciStatus === 'success' ? ' &#10003;' : prBadge.ciStatus === 'failure' ? ' &#10005;' : prBadge.ciStatus === 'pending' ? ' &#9679;' : '') + prStackSuffix + prMqSuffix + '</span>'
+				: '';
+			refHtml += generateTrackingHtml(this.gitUpstreams[branchLabels.heads[j].name]) + prBadgeHtml + '</span>';
+			if (refActive) {
+				branchChips.unshift({ html: refHtml, active: true });
+				branchCheckedOutAtCommit = this.gitBranchHead;
+			} else {
+				branchChips.push({ html: refHtml, active: false });
+			}
 		}
 		for (j = 0; j < branchLabels.remotes.length; j++) {
 			refName = escapeHtml(branchLabels.remotes[j].name);
-			refBranches += '<span class="gitRef remote" data-name="' + refName + '" data-remote="' + (branchLabels.remotes[j].remote !== null ? escapeHtml(branchLabels.remotes[j].remote!) : '') + '">' + (refsInColumn ? SVG_ICONS.cloud : SVG_ICONS.branch) + '<span class="gitRefName" data-fullref="' + refName + '">' + refName + '</span></span>';
+			branchChips.push({
+				html: '<span class="gitRef remote" data-name="' + refName + '" data-remote="' + (branchLabels.remotes[j].remote !== null ? escapeHtml(branchLabels.remotes[j].remote!) : '') + '">' + (refsInColumn ? SVG_ICONS.cloud : SVG_ICONS.branch) + '<span class="gitRefName" data-fullref="' + refName + '">' + refName + '</span></span>',
+				active: false
+			});
 		}
 
 		for (j = 0; j < commit.tags.length; j++) {
 			refName = escapeHtml(commit.tags[j].name);
-			refTags += '<span class="gitRef tag" data-name="' + refName + '" data-tagtype="' + (commit.tags[j].annotated ? 'annotated' : 'lightweight') + '">' + SVG_ICONS.tag + '<span class="gitRefName" data-fullref="' + refName + '">' + refName + '</span></span>';
+			tagChips.push('<span class="gitRef tag" data-name="' + refName + '" data-tagtype="' + (commit.tags[j].annotated ? 'annotated' : 'lightweight') + '">' + SVG_ICONS.tag + '<span class="gitRefName" data-fullref="' + refName + '">' + refName + '</span></span>');
+		}
+
+		const maxRefs = typeof this.config.graph.maxVisibleRefsPerCommit === 'number' && this.config.graph.maxVisibleRefsPerCommit > 0
+			? this.config.graph.maxVisibleRefsPerCommit
+			: 0;
+		const totalRefChips = branchChips.length + tagChips.length;
+		if (maxRefs > 0 && totalRefChips > maxRefs && !this.expandedRefCommits.has(commit.hash)) {
+			const visibleBranches = branchChips.slice(0, maxRefs);
+			const remainingSlots = Math.max(0, maxRefs - visibleBranches.length);
+			const visibleTags = tagChips.slice(0, remainingSlots);
+			const hiddenCount = totalRefChips - visibleBranches.length - visibleTags.length;
+			refBranches = visibleBranches.map((c) => c.html).join('');
+			refTags = visibleTags.join('') + '<button type="button" class="gitRefOverflow" data-expand-refs="' + escapeHtml(commit.hash) + '" title="' + escapeHtml(t('Show {0} more references', hiddenCount)) + '">+' + hiddenCount + '</button>';
+		} else {
+			refBranches = branchChips.map((c) => c.html).join('');
+			refTags = tagChips.join('');
 		}
 
 		if (commit.stash !== null) {
@@ -1876,13 +2068,17 @@ class GitGraphView {
 			) + '."></span>'
 			: '';
 
+		const ghostRefsHtml = this.config.graph.showGhostRefsOnRowHover !== false && commit.hash !== UNCOMMITTED && commit.stash === null && branchLabels.heads.length === 0 && branchLabels.remotes.length === 0 && commit.tags.length === 0
+			? '<span class="ghostRefs"><button type="button" class="ghostRefBtn" data-ghost-act="branch" data-hash="' + escapeHtml(commit.hash) + '" title="' + escapeHtml(t('Create Branch here')) + '">+ ' + t('Branch') + '</button><button type="button" class="ghostRefBtn" data-ghost-act="tag" data-hash="' + escapeHtml(commit.hash) + '" title="' + escapeHtml(t('Add Tag here')) + '">+ ' + t('Tag') + '</button></span>'
+			: '';
+
 		message = this.branchCompare.getRowLabelHtml(commit.hash) + this.operationBar.getBisectLabelHtml(commit.hash) + message;
-		return '<tr class="commit' + this.branchCompare.getRowClass(commit.hash) + this.operationBar.getBisectRowClass(commit.hash) + (commit.hash === currentHash ? ' current' : '') + (mutedCommits[i] ? ' mute' : '') + (this.selectedCommits.has(commit.hash) ? ' multiSelected' : '') + (this.expandedCommit !== null && (this.expandedCommit.commitHash === commit.hash || this.expandedCommit.compareWithHash === commit.hash) ? ' ' + CLASS_COMMIT_DETAILS_OPEN : '') + (commit.hash === this.flashingHash ? ' flash' : '') + '"' + (commit.hash !== UNCOMMITTED ? '' : ' id="uncommittedChanges"') + ' data-id="' + i + '" data-color="' + vertexColours[i] + '">' +
+		return '<tr class="commit' + this.branchCompare.getRowClass(commit.hash) + this.operationBar.getBisectRowClass(commit.hash) + (commit.hash === currentHash ? ' current' : '') + (mutedCommits[i] ? ' mute' : '') + (this.selectedCommits.has(commit.hash) ? ' multiSelected' : '') + (this.expandedCommit !== null && (this.expandedCommit.commitHash === commit.hash || this.expandedCommit.compareWithHash === commit.hash) ? ' ' + CLASS_COMMIT_DETAILS_OPEN : '') + (commit.hash === this.flashingHash ? ' flash' : '') + '"' + (commit.hash !== UNCOMMITTED ? (commit.stash === null ? ' draggable="true"' : '') : ' id="uncommittedChanges"') + ' data-id="' + i + '" data-color="' + vertexColours[i] + '">' +
 			(refsInColumn
-				? '<td class="refsCol">' + (refBranches !== '' || refTags !== '' ? '<span class="refsColLabels" style="--git-graph-refs:' + (branchLabels.heads.length + branchLabels.remotes.length + commit.tags.length + (commit.stash !== null ? 1 : 0)) + '">' + refBranches + refTags + '</span>' : '') + '</td><td class="graphCol"></td><td class="descriptionCol"><span class="description">' + commitDot + message
+				? '<td class="refsCol">' + (refBranches !== '' || refTags !== '' ? '<span class="refsColLabels" style="--git-graph-refs:' + (branchLabels.heads.length + branchLabels.remotes.length + commit.tags.length + (commit.stash !== null ? 1 : 0)) + '">' + refBranches + refTags + '</span>' : '') + '</td><td class="graphCol"></td><td class="descriptionCol"><span class="description">' + commitDot + message + ghostRefsHtml
 				: this.config.referenceLabels.branchLabelsAlignedToGraph
-					? '<td class="graphCol">' + (refBranches !== '' ? '<span style="margin-left:' + (widthsAtVertices[i] - 4) + 'px"' + refBranches.substring(5) : '') + '</td><td class="descriptionCol"><span class="description">' + commitDot + (this.config.referenceLabels.tagLabelsOnRight ? message + refTags : refTags + message)
-					: '<td class="graphCol"></td><td class="descriptionCol"><span class="description">' + commitDot + refBranches + (this.config.referenceLabels.tagLabelsOnRight ? message + refTags : refTags + message)) + '</span></td>' +
+					? '<td class="graphCol">' + (refBranches !== '' ? '<span style="margin-left:' + (widthsAtVertices[i] - 4) + 'px"' + refBranches.substring(5) : '') + '</td><td class="descriptionCol"><span class="description">' + commitDot + (this.config.referenceLabels.tagLabelsOnRight ? message + refTags : refTags + message) + ghostRefsHtml
+					: '<td class="graphCol"></td><td class="descriptionCol"><span class="description">' + commitDot + refBranches + (this.config.referenceLabels.tagLabelsOnRight ? message + refTags : refTags + message) + ghostRefsHtml) + '</span></td>' +
 			(colVisibility.date ? '<td class="dateCol text" title="' + date.title + '">' + date.formatted + '</td>' : '') +
 			(colVisibility.author ? '<td class="authorCol text" title="' + escapeHtml(commit.author + ' <' + commit.email + '>') + '">' + (this.config.fetchAvatars ? '<span class="avatar" data-email="' + escapeHtml(commit.email) + '">' + (typeof this.avatars[commit.email] === 'string' ? '<img class="avatarImg" src="' + this.avatars[commit.email] + '">' : '') + '</span>' : generateAuthorInitialHtml(commit.author)) + escapeHtml(commit.author) + '</td>' : '') +
 			(showFileChanges ? '<td class="fileChangesCol">' + (typeof fileChange !== 'undefined'
@@ -1913,25 +2109,36 @@ class GitGraphView {
 		this.tableElem.querySelectorAll<HTMLElement>('.gitRef.head').forEach((refElem) => {
 			const worktree = this.worktreeList.getOtherWorktreeOfBranch(unescapeHtml(refElem.dataset.name!));
 			const markerElem = refElem.querySelector('.gitRefWorktree');
+			const wipElem = refElem.querySelector('.gitRefWipBadge');
 			alterClass(refElem, 'inWorktree', worktree !== null);
 			if (worktree !== null) {
-				refElem.title = t('Checked out in the worktree {0}', worktree.path);
+				const dirtyCount = typeof worktree.dirtyCount === 'number' ? worktree.dirtyCount : 0;
+				refElem.title = dirtyCount > 0
+					? t('Checked out in the worktree {0} ({1} uncommitted)', worktree.path, String(dirtyCount))
+					: t('Checked out in the worktree {0}', worktree.path);
 				if (markerElem === null) {
 					const nameElem = refElem.querySelector('.gitRefName');
 					if (nameElem !== null) nameElem.insertAdjacentHTML('afterend', '<span class="gitRefWorktree">' + WORKTREE_ICON + '</span>');
 				}
-			} else if (markerElem !== null) {
-				markerElem.remove();
+				if (dirtyCount > 0) {
+					if (wipElem !== null) {
+						wipElem.textContent = 'WIP ' + dirtyCount;
+						(<HTMLElement>wipElem).dataset.wtPath = worktree.path;
+					} else {
+						refElem.insertAdjacentHTML('beforeend', '<span class="gitRefWipBadge" data-wt-path="' + escapeHtml(worktree.path) + '" title="' + escapeHtml(t('Inspect uncommitted changes in this worktree')) + '">WIP ' + dirtyCount + '</span>');
+					}
+				} else if (wipElem !== null) {
+					wipElem.remove();
+				}
+			} else {
+				if (markerElem !== null) markerElem.remove();
+				if (wipElem !== null) wipElem.remove();
 				refElem.removeAttribute('title');
 			}
 		});
 	}
 
 
-	/**
-	 * Process the operation in progress in the repository (e.g. a rebase that stopped because of conflicts), loaded by the extension.
-	 * @param msg The message containing the operation.
-	 */
 	public processLoadOperationInProgressResponse(msg: GG.ResponseLoadOperationInProgress) {
 		this.operationBar.processLoadOperationInProgressResponse(msg);
 	}
@@ -1943,10 +2150,6 @@ class GitGraphView {
 
 	/* Undo */
 
-	/**
-	 * Render the last action in the current repository that can be undone: the Undo button, and a notification after the action is run.
-	 * @param undo The action, or NULL if no action can be undone.
-	 */
 	private renderUndo(undo: GG.UndoInfo | null) {
 		this.undo = undo;
 		alterClass(this.undoBtnElem, 'hidden', undo === null);
@@ -1962,9 +2165,6 @@ class GitGraphView {
 		this.lastUndoId = Math.max(this.lastUndoId, undo !== null ? undo.id : 0);
 	}
 
-	/**
-	 * Hide the notification that an action can be undone.
-	 */
 	private hideUndoToast() {
 		if (this.undoToastTimeout !== null) {
 			clearTimeout(this.undoToastTimeout);
@@ -1973,9 +2173,6 @@ class GitGraphView {
 		this.undoToastElem.classList.remove(CLASS_ACTIVE);
 	}
 
-	/**
-	 * Undo the last action in the current repository (after confirming it).
-	 */
 	private undoAction() {
 		const undo = this.undo;
 		if (undo === null) return;
@@ -1987,36 +2184,50 @@ class GitGraphView {
 
 	/* Selected Commits */
 
-	/**
-	 * Select commits (with Shift + click): the commits from the commit the selection started at (or the commit whose details are open) to
-	 * a commit, or add / remove a commit (with Ctrl / Cmd + Shift + click). The uncommitted changes & stashes can't be selected.
-	 * @param hash The hash of the commit that was clicked.
-	 * @param toggle Add or remove the commit, instead of selecting a range of commits.
-	 */
 	private selectCommits(hash: string, toggle: boolean) {
+		const multiselectMode = this.config.graph.multiselect || 'on';
+		if (multiselectMode === 'off') return;
 		const isSelectable = (commit: GG.GitCommit) => commit.hash !== UNCOMMITTED && commit.stash === null;
 		const index = this.commitLookup[hash];
 		if (typeof index !== 'number' || !isSelectable(this.commits[index])) return;
 		if (toggle) {
-			if (this.selectedCommits.has(hash)) {
-				this.selectedCommits.delete(hash);
+			const candidate = new Set(this.selectedCommits);
+			if (candidate.has(hash)) {
+				candidate.delete(hash);
 			} else {
-				this.selectedCommits.add(hash);
+				candidate.add(hash);
 			}
+			if (multiselectMode === 'topological' && candidate.size > 1) {
+				const check = validateTopologicalSelection(this.commits, this.commitLookup, Array.from(candidate));
+				if (!check.valid) {
+					dialog.showError(t('Topological Selection'), check.reason || t('Selected commits must form a contiguous chain.'), null, null);
+					return;
+				}
+			}
+			this.selectedCommits = candidate;
 			this.selectionAnchor = hash;
 		} else {
 			let anchor = this.selectionAnchor !== null ? this.selectionAnchor : this.expandedCommit !== null && this.expandedCommit.compareWithHash === null ? this.expandedCommit.commitHash : hash;
 			if (typeof this.commitLookup[anchor] !== 'number') anchor = hash;
 			const from = Math.min(index, this.commitLookup[anchor]), to = Math.max(index, this.commitLookup[anchor]);
-			this.selectedCommits = new Set(this.commits.slice(from, to + 1).filter(isSelectable).map((commit) => commit.hash));
+			const rawRange = this.commits.slice(from, to + 1).filter(isSelectable).map((commit) => commit.hash);
+			if (multiselectMode === 'topological' && rawRange.length > 1) {
+				const chain: string[] = [rawRange[0]];
+				for (let ci = 0; ci < rawRange.length - 1; ci++) {
+					const cur = this.commits[this.commitLookup[chain[chain.length - 1]]];
+					if (cur.parents.length !== 1 || cur.parents[0] !== rawRange[ci + 1]) break;
+					chain.push(rawRange[ci + 1]);
+				}
+				const check = validateTopologicalSelection(this.commits, this.commitLookup, chain);
+				this.selectedCommits = new Set(check.valid ? chain : [hash]);
+			} else {
+				this.selectedCommits = new Set(rawRange);
+			}
 			this.selectionAnchor = anchor;
 		}
 		this.renderCommitSelection();
 	}
 
-	/**
-	 * Clear the selected commits.
-	 */
 	public clearCommitSelection() {
 		if (this.selectedCommits.size === 0 && this.selectionAnchor === null) return;
 		this.selectedCommits = new Set();
@@ -2024,17 +2235,10 @@ class GitGraphView {
 		this.renderCommitSelection();
 	}
 
-	/**
-	 * Get the selected commits.
-	 * @returns The commits, oldest first (the order they're cherry picked in).
-	 */
 	public getSelectedCommits() {
 		return this.commits.filter((commit) => this.selectedCommits.has(commit.hash)).reverse();
 	}
 
-	/**
-	 * Render the selected commits (and the actions on them in the footer). Commits that are no longer loaded are unselected.
-	 */
 	private renderCommitSelection() {
 		this.selectedCommits.forEach((hash) => {
 			if (typeof this.commitLookup[hash] !== 'number') this.selectedCommits.delete(hash);
@@ -2050,50 +2254,33 @@ class GitGraphView {
 		selectionElem.innerHTML = count > 0
 			? '<span class="listFooterSelectionCount">' + (count !== 1 ? t('{0} commits selected', count) : t('1 commit selected')) + '</span>' +
 				'<span class="listFooterAction" data-action="cherrypick">' + MENU_ICONS.cherrypick + t('Cherry Pick') + ELLIPSIS + '</span>' +
+				(count >= 2 ? '<span class="listFooterAction" data-action="squash">' + MENU_ICONS.fixup + t('Squash') + ELLIPSIS + '</span>' : '') +
+				'<span class="listFooterAction" data-action="drop">' + MENU_ICONS.trash + t('Drop') + ELLIPSIS + '</span>' +
+				(count >= 2 ? '<span class="listFooterAction" data-action="changelog">' + MENU_ICONS.sparkle + t('AI Changelog') + '</span>' : '') +
 				'<span class="listFooterAction" data-action="copyHashes">' + MENU_ICONS.copy + t('Copy Hashes') + '</span>' +
 				'<span class="listFooterAction" data-action="clear" title="' + t('Escape') + '">' + MENU_ICONS.clear + t('Clear Selection') + '</span>'
 			: '';
 		alterClass(selectionElem, CLASS_ACTIVE, count > 0);
 	}
 
-	/**
-	 * Get the height of the top of the view that is covered by the sticky controls, and the column headers when they are frozen.
-	 * @returns The height (in pixels).
-	 */
 	private getCoveredTopHeight() {
 		const colHeadersElem = this.config.graph.freezeColumnHeaders ? document.getElementById('tableColHeaders') : null;
 		return this.controlsElem.offsetHeight + (colHeadersElem !== null ? colHeadersElem.offsetHeight : 0);
 	}
 
-	/**
-	 * Get the top of the area of the view in which commits are visible: below the sticky controls, and the column headers when they're frozen.
-	 * @returns The vertical position (relative to the viewport, as rendered).
-	 */
 	public getVisibleCommitsTop() {
 		const colHeaderElem = this.config.graph.freezeColumnHeaders ? document.querySelector('#tableColHeaders th') : null;
 		return Math.max(this.controlsElem.getBoundingClientRect().bottom, colHeaderElem !== null ? colHeaderElem.getBoundingClientRect().bottom : 0);
 	}
 
-	/**
-	 * Get the height of the bottom of the view that is covered by the footer when it's frozen.
-	 * @returns The height (in pixels).
-	 */
 	private getCoveredBottomHeight() {
 		return this.config.graph.freezeFooter ? this.footerElem.offsetHeight : 0;
 	}
 
-	/**
-	 * Is the Changes column (the files & lines changed by each commit) shown.
-	 * @returns TRUE => The column is shown, FALSE => The column isn't shown (e.g. the history of a file is shown, which has its own column).
-	 */
 	public isChangesColumnShown() {
 		return this.fileHistory === null && this.gitRepos[this.currentRepo].showChangesColumn !== false && !this.isColumnAutoHidden('changes');
 	}
 
-	/**
-	 * Request the files & lines changed by the commits that are shown, which haven't been loaded.
-	 * @param refreshUncommitted Should the stats of the uncommitted changes be refreshed (as they may have changed).
-	 */
 	public requestCommitStats(refreshUncommitted: boolean) {
 		if (!this.isChangesColumnShown()) return;
 		if (refreshUncommitted) {
@@ -2106,10 +2293,6 @@ class GitGraphView {
 		sendMessage({ command: 'loadCommitStats', repo: this.currentRepo, hashes: hashes });
 	}
 
-	/**
-	 * Process the files & lines changed by commits, loaded by the extension.
-	 * @param msg The message containing the stats.
-	 */
 	public processLoadCommitStatsResponse(msg: GG.ResponseLoadCommitStats) {
 		const commitElems = getCommitElems(), elemById = new Map<number, HTMLElement>();
 		for (let i = 0; i < commitElems.length; i++) {
@@ -2129,10 +2312,6 @@ class GitGraphView {
 		alterClass(this.controlsElem, CLASS_FETCH_SUPPORTED, this.gitRemotes.length > 0);
 	}
 
-	/**
-	 * Render the Pull & Push buttons in the control bar, with the number of commits the current branch is behind / ahead of its upstream branch.
-	 * @param branchHead The current branch (NULL if HEAD is detached).
-	 */
 	private renderSyncButtons(branchHead: string | null = this.gitBranchHead) {
 		const pullBtn = document.getElementById('pullBtn')!, pushBtn = document.getElementById('pushBtn')!;
 		const upstream = branchHead !== null && typeof this.gitUpstreams[branchHead] !== 'undefined' && !this.gitUpstreams[branchHead].gone ? this.gitUpstreams[branchHead] : null;
@@ -2152,10 +2331,6 @@ class GitGraphView {
 		alterClass(pushBtn, 'pending', ahead > 0);
 	}
 
-	/**
-	 * Scroll to a stash on the graph, and open its Commit Details View. If the stash isn't in the loaded commits, more commits are loaded until it is.
-	 * @param stash The stash.
-	 */
 	public goToStash(stash: GG.GitStash) {
 		const elem = this.getCommitElem(this.getCommitId(stash.hash));
 		const attempts = this.scrollToStashPending !== null && this.scrollToStashPending.stash.hash === stash.hash ? this.scrollToStashPending.attempts : 0;
@@ -2172,9 +2347,6 @@ class GitGraphView {
 		}
 	}
 
-	/**
-	 * Pull the upstream branch of the current branch into the current branch.
-	 */
 	private pullUpstreamAction() {
 		const branchHead = this.gitBranchHead;
 		if (branchHead === null || typeof this.gitUpstreams[branchHead] === 'undefined' || this.gitUpstreams[branchHead].gone) return;
@@ -2189,6 +2361,7 @@ class GitGraphView {
 		this.refreshBtnElem.title = enabled ? t('Refresh') : t('Refreshing');
 		this.refreshBtnElem.innerHTML = enabled ? SVG_ICONS.refresh : SVG_ICONS.loading;
 		alterClass(this.refreshBtnElem, CLASS_REFRESHING, !enabled);
+		this.syncAxState();
 	}
 
 	public renderTagDetails(tagName: string, commitHash: string, details: GG.GitTagDetails) {
@@ -2256,16 +2429,11 @@ class GitGraphView {
 		return 2 + (this.config.referenceLabels.inSeparateColumn ? 1 : 0) + (hasChangesCol ? 1 : 0) + (colVisibility.date ? 1 : 0) + (colVisibility.author ? 1 : 0) + (colVisibility.commit ? 1 : 0);
 	}
 
-	/**
-	 * Scroll the view to the previous or next stash.
-	 * @param next TRUE => Jump to the next stash, FALSE => Jump to the previous stash.
-	 */
 	private scrollToStash(next: boolean) {
 		const stashCommits = this.commits.filter((commit) => commit.stash !== null);
 		if (stashCommits.length > 0) {
 			const curTime = (new Date()).getTime();
 			if (this.lastScrollToStash.time < curTime - 5000) {
-				// Reset the lastScrollToStash hash if it was more than 5 seconds ago
 				this.lastScrollToStash.hash = null;
 			}
 
@@ -2284,25 +2452,16 @@ class GitGraphView {
 		}
 	}
 
-	/**
-	 * Scroll the view to a commit (if it exists).
-	 * @param hash The hash of the commit to scroll to.
-	 * @param alwaysCenterCommit TRUE => Always scroll the view to be centered on the commit. FALSE => Don't scroll the view if the commit is already within the visible portion of commits.
-	 * @param flash Should the commit flash after it has been scrolled to.
-	 */
 	public scrollToCommit(hash: string, alwaysCenterCommit: boolean, flash: boolean = false) {
 		const elem = this.getCommitElem(this.getCommitId(hash));
 		if (elem === null) return;
 
-		// The controls are sticky (always visible at the top of the view), so commits are only visible below them (and the frozen column
-		// headers), and above the footer when it's frozen
 		const elemTop = this.controlsElem.clientHeight + elem.offsetTop, coveredTop = this.getCoveredTopHeight(), visibleBottom = this.viewElem.clientHeight - this.getCoveredBottomHeight();
 		if (alwaysCenterCommit || elemTop - 8 < this.viewElem.scrollTop + coveredTop || elemTop + 32 - visibleBottom > this.viewElem.scrollTop) {
 			this.viewElem.scroll(0, elemTop + 12 - (visibleBottom + coveredTop) / 2);
 		}
 
 		if (flash && this.flashingHash !== hash) {
-			// The row is rendered with the flash while the commit is flashing (its row can be rendered again as the view is scrolled)
 			this.flashingHash = hash;
 			elem.classList.add('flash');
 			setTimeout(() => {
@@ -2313,9 +2472,6 @@ class GitGraphView {
 		}
 	}
 
-	/**
-	 * Scroll to the commit referenced by HEAD. If it hasn't been loaded yet, more commits are loaded until it is (when the branches being shown include HEAD).
-	 */
 	private scrollToHead() {
 		const headBranchShown = this.currentBranches === null || this.currentBranches.includes(SHOW_ALL_BRANCHES) || (this.gitBranchHead !== null && this.currentBranches.includes(this.gitBranchHead));
 		if (this.commitHead !== null && typeof this.commitLookup[this.commitHead] === 'number') {
@@ -2413,7 +2569,6 @@ class GitGraphView {
 			if (this.config.loadMoreCommitsAutomatically && this.moreCommitsAvailable && !this.currentRepoRefreshState.inProgress) {
 				const viewHeight = this.viewElem.clientHeight, contentHeight = this.viewElem.scrollHeight;
 				if (scrollTop > 0 && viewHeight > 0 && contentHeight > 0 && (scrollTop + viewHeight) >= contentHeight - 25) {
-					// If the user has scrolled such that the bottom of the visible view is within 25px of the end of the content, load more commits.
 					this.loadMoreCommits();
 				}
 			}
@@ -2428,7 +2583,6 @@ class GitGraphView {
 	}
 
 	private observeMouseNavigationButtons() {
-		// The back / forward buttons of a mouse navigate the Visual Studio Code editor history (the events aren't handled by Visual Studio Code when they occur in a Webview)
 		document.addEventListener('mouseup', (e) => {
 			if (e.button === 3 || e.button === 4) {
 				handledEvent(e);
@@ -2438,7 +2592,6 @@ class GitGraphView {
 	}
 
 	private observeKeyboardEvents() {
-		// The time at which a Ctrl / Cmd keybinding that wasn't handled by Git Map was pressed. Visual Studio Code may treat it as the first part of a keybinding chord (e.g. Ctrl+K Ctrl+S), so Git Map doesn't handle the next keypress (which Visual Studio Code is waiting for).
 		let possibleChordStart = 0;
 		window.addEventListener('blur', () => {
 			possibleChordStart = 0;
@@ -2454,7 +2607,6 @@ class GitGraphView {
 					contextMenu.close();
 					handledEvent(e);
 				} else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'c' && this.copyCommitHashWithKeyboard(e)) {
-					// Copy the hash of the commit whose context menu is open (as shown in the context menu)
 					handledEvent(e);
 				}
 			} else if (dialog.isOpen()) {
@@ -2462,8 +2614,6 @@ class GitGraphView {
 					dialog.close();
 					handledEvent(e);
 				} else if ((e.keyCode ? e.keyCode === 13 : e.key === 'Enter') && (!(e.target instanceof HTMLTextAreaElement) || e.ctrlKey || e.metaKey)) {
-					// Use keyCode === 13 to detect 'Enter' events if available (for compatibility with IME Keyboards used by Chinese / Japanese / Korean users).
-					// In a multi-line input, Enter adds a line, and Ctrl / Cmd + Enter submits the dialog.
 					dialog.submit();
 					handledEvent(e);
 				}
@@ -2475,16 +2625,13 @@ class GitGraphView {
 				let newHashIndex = -1;
 
 				if (e.ctrlKey || e.metaKey) {
-					// Up / Down navigates according to the order of commits on the branch
 					if (e.shiftKey) {
-						// Follow commits on alternative branches when possible
 						if (e.key === 'ArrowUp') {
 							newHashIndex = this.graph.getAlternativeChildIndex(curHashIndex);
 						} else if (e.key === 'ArrowDown') {
 							newHashIndex = this.graph.getAlternativeParentIndex(curHashIndex);
 						}
 					} else {
-						// Follow commits on the same branch
 						if (e.key === 'ArrowUp') {
 							newHashIndex = this.graph.getFirstChildIndex(curHashIndex);
 						} else if (e.key === 'ArrowDown') {
@@ -2492,7 +2639,6 @@ class GitGraphView {
 						}
 					}
 				} else {
-					// Up / Down navigates according to the order of commits in the table
 					if (e.key === 'ArrowUp' && curHashIndex > 0) {
 						newHashIndex = curHashIndex - 1;
 					} else if (e.key === 'ArrowDown' && curHashIndex < this.commits.length - 1) {
@@ -2505,20 +2651,30 @@ class GitGraphView {
 					const elem = this.getCommitElem(newHashIndex);
 					if (elem !== null) this.loadCommitDetails(elem);
 				}
+			} else if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && this.expandedCommit !== null) {
+				handledEvent(e);
+				this.navigateCdvHistory(e.key === 'ArrowLeft' ? -1 : 1);
 			} else if (e.key && (e.ctrlKey || e.metaKey)) {
-				if (chordInProgress) return; // Leave the second keypress of a chord to Visual Studio Code
+				if (chordInProgress) return;
 
-				const key = e.key.toLowerCase(), keybindings = this.config.keybindings;
-				if (key === keybindings.scrollToStash) {
+				const key = e.key.toLowerCase();
+				const kbStash = this.getEffectiveKeybinding('scrollToStash');
+				const kbRefresh = this.getEffectiveKeybinding('refresh');
+				const kbFind = this.getEffectiveKeybinding('find');
+				const kbHead = this.getEffectiveKeybinding('scrollToHead');
+				if (e.shiftKey && !e.altKey && key === 'k') {
+					this.commandPalette.open();
+					handledEvent(e);
+				} else if (kbStash !== null && key === kbStash) {
 					this.scrollToStash(!e.shiftKey);
 					handledEvent(e);
-				} else if (!e.shiftKey && key === keybindings.refresh) {
+				} else if (!e.shiftKey && kbRefresh !== null && key === kbRefresh) {
 					this.refresh(true, true);
 					handledEvent(e);
-				} else if (!e.shiftKey && key === keybindings.find) {
+				} else if (!e.shiftKey && kbFind !== null && key === kbFind) {
 					this.findWidget.show(true);
 					handledEvent(e);
-				} else if (!e.shiftKey && key === keybindings.scrollToHead && this.commitHead !== null) {
+				} else if (!e.shiftKey && kbHead !== null && key === kbHead && this.commitHead !== null) {
 					this.scrollToHead();
 					handledEvent(e);
 				} else if (key === 'c' && !e.shiftKey && !e.altKey && this.copyCommitHashWithKeyboard(e)) {
@@ -2526,8 +2682,31 @@ class GitGraphView {
 				} else if (key.length === 1 && !['a', 'c', 'v', 'x', 'y', 'z'].includes(key)) {
 					possibleChordStart = Date.now();
 				}
+			} else if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target instanceof HTMLElement && e.target.isContentEditable))) {
+				if (!this.commandPalette.isOpen() && !this.settingsWidget.isVisible() && !this.rebaseEditor.isOpen() && !this.branchCleanup.isOpen() && !this.commitExplainer.isCommitMessageModalOpen() && !this.findWidget.isVisible()) {
+					this.toggleShortcutsModal();
+					handledEvent(e);
+				}
 			} else if (e.key === 'Escape') {
-				if (this.isCdvActionsCustomizerOpen()) {
+				if (this.isShortcutsModalOpen()) {
+					this.closeShortcutsModal();
+					handledEvent(e);
+				} else if (this.commandPalette.isOpen()) {
+					this.commandPalette.close();
+					handledEvent(e);
+				} else if (this.branchCommitCompareModal.isOpen()) {
+					this.branchCommitCompareModal.close();
+					handledEvent(e);
+				} else if (this.reviewSessionModal.isOpen()) {
+					this.reviewSessionModal.close();
+					handledEvent(e);
+				} else if (this.prPopover.isOpen()) {
+					this.closePrPopover();
+					handledEvent(e);
+				} else if (this.isHunkModalOpen()) {
+					this.closeHunkModal();
+					handledEvent(e);
+				} else if (this.isCdvActionsCustomizerOpen()) {
 					this.closeCdvActionsCustomizer();
 					handledEvent(e);
 				} else if (this.commitExplainer.isCommitMessageModalOpen()) {
@@ -2564,26 +2743,17 @@ class GitGraphView {
 					this.findWidget.close();
 					handledEvent(e);
 				} else if (this.cdvComparePending) {
-					this.cdvComparePending = false;
-					const compareElem = document.getElementById('cdvCompare');
-					if (compareElem !== null) {
-						alterClass(compareElem, CLASS_ACTIVE, false);
-						compareElem.innerHTML = SVG_ICONS.compare + t('Compare with…');
-					}
+					this.cancelCdvComparePending();
 					handledEvent(e);
 				} else if (this.expandedCommit !== null) {
 					this.closeCommitDetails(true);
 					handledEvent(e);
 				}
+				this.syncAxState();
 			}
 		});
 	}
 
-	/**
-	 * Copy the hash of the commit whose context menu is open, or whose details are shown, to the clipboard (Ctrl/Cmd+C), unless text is selected.
-	 * @param e The keyboard event.
-	 * @returns TRUE => A commit hash was copied, FALSE => Nothing was copied (the default behaviour of the keyboard shortcut applies).
-	 */
 	private copyCommitHashWithKeyboard(e: KeyboardEvent) {
 		const selection = window.getSelection();
 		if ((selection !== null && selection.toString() !== '') || (e.target instanceof Element && e.target.closest('input, textarea') !== null)) return false;
@@ -2615,7 +2785,6 @@ class GitGraphView {
 		document.body.addEventListener('click', followInternalLink);
 
 		document.body.addEventListener('click', (e: MouseEvent) => {
-			// Visual Studio Code only follows links with standard schemes (e.g. http & https) that are clicked in a Webview, so links to other applications (e.g. issue links using a custom scheme) are opened by the extension
 			if (e.target === null || !isExternalUrlElem(<Element>e.target)) return;
 			const url = (<HTMLAnchorElement>e.target).href;
 			const scheme = url.substring(0, url.indexOf(':')).toLowerCase();
@@ -2636,7 +2805,6 @@ class GitGraphView {
 
 				let target: (ContextMenuTarget & CommitTarget) | RepoTarget, isInDialog = false;
 				if (this.expandedCommit !== null && eventTarget.closest('#cdv') !== null) {
-					// URL is in the Commit Details View
 					target = {
 						type: TargetType.CommitDetailsView,
 						hash: this.expandedCommit.commitHash,
@@ -2646,7 +2814,6 @@ class GitGraphView {
 					GitGraphView.closeCdvContextMenuIfOpen(this.expandedCommit);
 					this.expandedCommit.contextMenuOpen.summary = true;
 				} else if ((eventElem = eventTarget.closest('.commit')) !== null) {
-					// URL is in the Commits
 					const commit = this.getCommitOfElem(eventElem);
 					if (commit === null) return;
 					target = {
@@ -2656,7 +2823,6 @@ class GitGraphView {
 						elem: <HTMLElement>eventTarget
 					};
 				} else {
-					// URL is in a dialog
 					target = {
 						type: TargetType.Repo
 					};
@@ -2707,18 +2873,52 @@ class GitGraphView {
 			if (isUrlElem(eventTarget)) return;
 			let eventElem: HTMLElement | null;
 
+			if ((eventElem = eventTarget.closest('.ghostRefBtn')) !== null) {
+				handledEvent(e);
+				return;
+			}
+
+			if ((eventElem = eventTarget.closest('.gitRefOverflow')) !== null) {
+				handledEvent(e);
+				const expandHash = eventElem.dataset.expandRefs || '';
+				if (expandHash !== '') {
+					this.expandedRefCommits.add(expandHash);
+					if (this.expandedCommit === null || this.isCdvDocked()) this.renderRows();
+					else this.render();
+				}
+				return;
+			}
+
+			if ((eventElem = eventTarget.closest('.gitRefWipBadge')) !== null) {
+				handledEvent(e);
+				const wtPath = typeof eventElem.dataset.wtPath === 'string' ? eventElem.dataset.wtPath : '';
+				const wt = this.worktreeList.getWorktrees().find((w) => w.path === wtPath);
+				if (typeof wt !== 'undefined') this.openWorktreeWipInspector(wt);
+				return;
+			}
+
+			if ((eventElem = eventTarget.closest('.gitRefPrBadge')) !== null) {
+				handledEvent(e);
+				const branch = typeof eventElem.dataset.prBranch === 'string' ? unescapeHtml(eventElem.dataset.prBranch) : '';
+				const prNum = parseInt(eventElem.dataset.prNum || '0', 10) || 0;
+				const prUrl = typeof eventElem.dataset.prUrl === 'string' ? unescapeHtml(eventElem.dataset.prUrl) : '';
+				if (branch !== '' && prNum > 0) {
+					this.openPrPopover(branch, prNum, prUrl, eventElem);
+				} else if (prUrl !== '') {
+					sendMessage({ command: 'openExternalUrl', url: prUrl });
+				}
+				return;
+			}
+
 			if ((eventElem = eventTarget.closest('.gitRef')) !== null) {
-				// .gitRef was clicked
 				e.stopPropagation();
 				if (contextMenu.isOpen()) {
 					contextMenu.close();
 				}
 
 			} else if ((eventElem = eventTarget.closest('.commit')) !== null) {
-				// .commit was clicked
 				const clickedCommit = this.getCommitOfElem(eventElem);
 				if (e.shiftKey) {
-					// Shift + click selects the commits from the selected commit (or the commit whose details are open), and Ctrl / Cmd + Shift + click adds or removes a commit
 					if (clickedCommit !== null) this.selectCommits(clickedCommit.hash, e.ctrlKey || e.metaKey);
 					return;
 				}
@@ -2745,8 +2945,6 @@ class GitGraphView {
 			}
 		});
 
-		// Register Double Click Event Handler
-		// Highlight the branch of the commit that the mouse is over (on the graph)
 		let highlightedCommit: number | null = null;
 		const highlightBranchOfCommit = (id: number | null) => {
 			if (id === highlightedCommit) return;
@@ -2756,7 +2954,6 @@ class GitGraphView {
 		this.tableElem.addEventListener('mouseover', (e: MouseEvent) => {
 			const commitElem = e.target instanceof Element ? <HTMLElement | null>e.target.closest('.commit') : null;
 			highlightBranchOfCommit(commitElem !== null && typeof commitElem.dataset.id === 'string' ? parseInt(commitElem.dataset.id) : null);
-			// The buttons of the most common actions on the commit are shown on its row (next to the pointer, by default)
 			if (commitElem !== null && !e.altKey && !contextMenu.isOpen() && !dialog.isOpen()) {
 				this.rowActions.show(commitElem, e.clientX);
 			} else {
@@ -2775,7 +2972,6 @@ class GitGraphView {
 			this.rowActions.hide();
 		}, { passive: true });
 		this.tableElem.addEventListener('mouseleave', (e: MouseEvent) => {
-			// The buttons float over the table (outside it), so moving onto them doesn't leave the row
 			if (this.rowActions.contains(e.relatedTarget)) return;
 			highlightBranchOfCommit(null);
 			this.rowActions.hide();
@@ -2787,8 +2983,44 @@ class GitGraphView {
 			if (isUrlElem(eventTarget)) return;
 			let eventElem: HTMLElement | null;
 
+			if ((eventElem = eventTarget.closest('.ghostRefBtn')) !== null) {
+				handledEvent(e);
+				return;
+			}
+
+			if ((eventElem = eventTarget.closest('.gitRefOverflow')) !== null) {
+				handledEvent(e);
+				const expandHash = eventElem.dataset.expandRefs || '';
+				if (expandHash !== '') {
+					this.expandedRefCommits.add(expandHash);
+					if (this.expandedCommit === null || this.isCdvDocked()) this.renderRows();
+					else this.render();
+				}
+				return;
+			}
+
+			if ((eventElem = eventTarget.closest('.gitRefWipBadge')) !== null) {
+				handledEvent(e);
+				const wtPath = typeof eventElem.dataset.wtPath === 'string' ? eventElem.dataset.wtPath : '';
+				const wt = this.worktreeList.getWorktrees().find((w) => w.path === wtPath);
+				if (typeof wt !== 'undefined') this.openWorktreeWipInspector(wt);
+				return;
+			}
+
+			if ((eventElem = eventTarget.closest('.gitRefPrBadge')) !== null) {
+				handledEvent(e);
+				const branch = typeof eventElem.dataset.prBranch === 'string' ? unescapeHtml(eventElem.dataset.prBranch) : '';
+				const prNum = parseInt(eventElem.dataset.prNum || '0', 10) || 0;
+				const prUrl = typeof eventElem.dataset.prUrl === 'string' ? unescapeHtml(eventElem.dataset.prUrl) : '';
+				if (branch !== '' && prNum > 0) {
+					this.openPrPopover(branch, prNum, prUrl, eventElem);
+				} else if (prUrl !== '') {
+					sendMessage({ command: 'openExternalUrl', url: prUrl });
+				}
+				return;
+			}
+
 			if ((eventElem = eventTarget.closest('.gitRef')) !== null) {
-				// .gitRef was double clicked
 				e.stopPropagation();
 				closeDialogAndContextMenu();
 				const commitElem = <HTMLElement>eventElem.closest('.commit')!;
@@ -2826,7 +3058,6 @@ class GitGraphView {
 			let eventElem: HTMLElement | null;
 
 			if ((eventElem = eventTarget.closest('.gitRef')) !== null) {
-				// .gitRef was right clicked
 				handledEvent(e);
 				const commitElem = <HTMLElement>eventElem.closest('.commit')!;
 				const commit = this.getCommitOfElem(commitElem);
@@ -2863,7 +3094,6 @@ class GitGraphView {
 				contextMenu.show(actions, false, target, <MouseEvent>e, this.viewElem);
 
 			} else if ((eventElem = eventTarget.closest('.commit')) !== null) {
-				// .commit was right clicked
 				handledEvent(e);
 				const commit = this.getCommitOfElem(eventElem);
 				if (commit === null) return;
@@ -2891,7 +3121,6 @@ class GitGraphView {
 			}
 		});
 
-		// When a context menu is requested with the keyboard (e.g. the Menu key or Shift+F10), show the context menu of the commit selected with the keyboard
 		document.addEventListener('contextmenu', (e: MouseEvent) => {
 			if (e.button === 2 || (e.target !== document.body && e.target !== document.documentElement && e.target !== this.viewElem)) return;
 			if (this.expandedCommit === null || this.expandedCommit.commitElem === null || dialog.isOpen()) return;
@@ -2906,6 +3135,8 @@ class GitGraphView {
 				clientY: Math.round(bounds.top + bounds.height / 2)
 			}));
 		}, true);
+
+		this.dragDrop.observe(this.tableElem);
 	}
 
 
@@ -2915,11 +3146,36 @@ class GitGraphView {
 		const commit = this.getCommitOfElem(commitElem);
 		if (commit === null) return;
 
+		if (!this.navigatingCdvHistory && commit.hash !== this.cdvHistory[this.cdvHistoryIndex]) {
+			this.cdvHistory = this.cdvHistory.slice(0, this.cdvHistoryIndex + 1);
+			this.cdvHistory.push(commit.hash);
+			if (this.cdvHistory.length > 50) this.cdvHistory.shift();
+			this.cdvHistoryIndex = this.cdvHistory.length - 1;
+		}
+
 		this.closeCommitDetails(false);
 		this.saveExpandedCommitLoading(parseInt(commitElem.dataset.id!), commit.hash, commitElem, null, null);
 		commitElem.classList.add(CLASS_COMMIT_DETAILS_OPEN);
 		this.renderCommitDetailsView(false);
 		this.requestCommitDetails(commit.hash, false);
+	}
+
+	public navigateCdvHistory(delta: -1 | 1) {
+		const nextIndex = this.cdvHistoryIndex + delta;
+		if (nextIndex < 0 || nextIndex >= this.cdvHistory.length) return;
+		const hash = this.cdvHistory[nextIndex];
+		const commitIndex = this.commitLookup[hash];
+		if (typeof commitIndex !== 'number') return;
+		const elem = this.getCommitElem(commitIndex);
+		if (elem === null) return;
+		this.cdvHistoryIndex = nextIndex;
+		this.navigatingCdvHistory = true;
+		try {
+			this.loadCommitDetails(elem);
+			this.scrollToCommit(hash, false);
+		} finally {
+			this.navigatingCdvHistory = false;
+		}
 	}
 
 	public closeCommitDetails(saveAndRender: boolean) {
@@ -2947,10 +3203,10 @@ class GitGraphView {
 		GitGraphView.closeCdvContextMenuIfOpen(expandedCommit);
 		this.expandedCommit = null;
 		setCdvViewedCommitKey(null);
+		this.syncAxState();
 		if (saveAndRender) {
 			this.saveState();
 			if (!isDocked) {
-				// Only the rows near the view are rendered again (if there are many commits), now that the Commit Details View isn't inline
 				if (this.renderedRows === null && this.isVirtualised()) this.renderRows();
 				this.renderGraph();
 			}
@@ -2974,7 +3230,7 @@ class GitGraphView {
 		}
 		expandedCommit.avatar = avatar;
 		expandedCommit.codeReview = codeReview;
-		if (!refresh) {
+		if (!refresh && (lastViewedFile !== null || expandedCommit.lastViewedFile === null)) {
 			expandedCommit.lastViewedFile = lastViewedFile;
 		}
 		expandedCommit.commitElem.classList.add(CLASS_COMMIT_DETAILS_OPEN);
@@ -3018,6 +3274,10 @@ class GitGraphView {
 
 	/* Commit Comparison View */
 
+	public openCommitComparison(commitElem: HTMLElement, compareWithElem: HTMLElement) {
+		this.loadCommitComparison(commitElem, compareWithElem);
+	}
+
 	private loadCommitComparison(commitElem: HTMLElement, compareWithElem: HTMLElement) {
 		const commit = this.getCommitOfElem(commitElem);
 		const compareWithCommit = this.getCommitOfElem(compareWithElem);
@@ -3060,7 +3320,8 @@ class GitGraphView {
 
 	public showCommitComparison(commitHash: string, compareWithHash: string, fileChanges: ReadonlyArray<GG.GitFileChange>, fileTree: FileTreeFolder, codeReview: GG.CodeReview | null, lastViewedFile: string | null, refresh: boolean) {
 		const expandedCommit = this.expandedCommit;
-		if (expandedCommit === null || expandedCommit.commitElem === null || expandedCommit.compareWithElem === null || expandedCommit.commitHash !== commitHash || expandedCommit.compareWithHash !== compareWithHash) return;
+		if (expandedCommit === null || expandedCommit.commitHash !== commitHash || expandedCommit.compareWithHash !== compareWithHash) return;
+		if (!expandedCommit.customCompareLabels && (expandedCommit.commitElem === null || expandedCommit.compareWithElem === null)) return;
 
 		if (haveFilesChanged(expandedCommit.fileChanges, fileChanges)) {
 			expandedCommit.fileChanges = fileChanges;
@@ -3068,11 +3329,11 @@ class GitGraphView {
 			GitGraphView.closeCdvContextMenuIfOpen(expandedCommit);
 		}
 		expandedCommit.codeReview = codeReview;
-		if (!refresh) {
+		if (!refresh && (lastViewedFile !== null || expandedCommit.lastViewedFile === null)) {
 			expandedCommit.lastViewedFile = lastViewedFile;
 		}
-		expandedCommit.commitElem.classList.add(CLASS_COMMIT_DETAILS_OPEN);
-		expandedCommit.compareWithElem.classList.add(CLASS_COMMIT_DETAILS_OPEN);
+		if (expandedCommit.commitElem !== null) expandedCommit.commitElem.classList.add(CLASS_COMMIT_DETAILS_OPEN);
+		if (expandedCommit.compareWithElem !== null) expandedCommit.compareWithElem.classList.add(CLASS_COMMIT_DETAILS_OPEN);
 		expandedCommit.loading = false;
 		this.saveState();
 
@@ -3084,29 +3345,31 @@ class GitGraphView {
 
 	private renderCommitDetailsView(refresh: boolean) {
 		const expandedCommit = this.expandedCommit;
-		if (expandedCommit === null || expandedCommit.commitElem === null) return;
+		if (expandedCommit === null) return;
+		const isCustomCompare = expandedCommit.compareWithHash !== null && !!expandedCommit.customCompareLabels;
+		if (!isCustomCompare && expandedCommit.commitElem === null) return;
 
-		let elem = document.getElementById('cdv'), html = '<div id="cdvContent">', isDocked = this.isCdvDocked(), messageHtml = '';
-		const isRight = isDocked && this.isCdvDockedRight();
+		let elem = document.getElementById('cdv'), html = '<div id="cdvContent">', isDocked = this.isCdvDocked() || isCustomCompare, messageHtml = '';
+		const isRight = isDocked && (this.isCdvDockedRight() || isCustomCompare);
 		const commitOrder = this.getCommitOrder(expandedCommit.commitHash, expandedCommit.compareWithHash === null ? expandedCommit.commitHash : expandedCommit.compareWithHash);
 		const codeReviewPossible = !expandedCommit.loading && commitOrder.to !== UNCOMMITTED;
-		const externalDiffPossible = !expandedCommit.loading && (expandedCommit.compareWithHash !== null || this.commits[this.commitLookup[expandedCommit.commitHash]].parents.length > 0);
-		const explainPossible = this.config.explainCommit && expandedCommit.compareWithHash === null && expandedCommit.commitHash !== UNCOMMITTED && this.commits[this.commitLookup[expandedCommit.commitHash]].stash === null;
+		const commitObj = this.commits[this.commitLookup[expandedCommit.commitHash]];
+		const externalDiffPossible = !expandedCommit.loading && (expandedCommit.compareWithHash !== null || (typeof commitObj !== 'undefined' && commitObj.parents.length > 0));
+		const explainPossible = this.config.explainCommit && expandedCommit.compareWithHash === null && expandedCommit.commitHash !== UNCOMMITTED && typeof commitObj !== 'undefined' && commitObj.stash === null;
 		let activeTab: 'files' | 'allFiles' | 'message' | 'explain' = 'files';
 
 		if (elem === null) {
 			if (!isDocked && this.renderedRows !== null) {
-				// All of the rows are rendered while the Commit Details View is inline, as it's in the table
 				this.renderRows();
 			}
-			if (isDocked) this.branchCompare.closePanel(); // The panel of a comparison of branches is docked in the same place
+			if (isDocked) this.branchCompare.closePanel();
 			elem = document.createElement(isDocked ? 'div' : 'tr');
 			elem.id = 'cdv';
-			elem.className = isDocked ? (this.isCdvDockedRight() ? 'docked right' : 'docked') : 'inline';
+			elem.className = isDocked ? (isRight ? 'docked right' : 'docked') : 'inline';
 			this.setCdvHeight(elem, isDocked);
 			if (isDocked) {
 				document.body.appendChild(elem);
-			} else {
+			} else if (expandedCommit.commitElem !== null) {
 				insertAfter(elem, expandedCommit.commitElem);
 			}
 		}
@@ -3116,7 +3379,6 @@ class GitGraphView {
 		} else {
 			html += '<div id="cdvSummary">';
 			if (expandedCommit.compareWithHash === null) {
-				// Commit details should be shown
 				if (expandedCommit.commitHash !== UNCOMMITTED) {
 					const textFormatter = new TextFormatter(this.commits, this.gitRepos[this.currentRepo].issueLinkingConfig, {
 						commits: true,
@@ -3158,11 +3420,12 @@ class GitGraphView {
 						+ (body !== '' ? '<div class="cdvSummaryBody">' + textFormatter.format(body) + '</div>' : '')
 						+ detailsHtml + '<div id="cdvActions"></div>';
 				} else {
-					html += (isRight ? '<h2 class="cdvSubject">' + t('Uncommitted Changes') + '</h2>' : '') + '<p class="cdvSummaryText">' + t('Displaying all uncommitted changes.') + '</p>' + (isRight ? generateCdvStatsHtml(expandedCommit.fileChanges!) : '') + '<div id="cdvActions"></div>';
+					html += (isRight ? '<h2 class="cdvSubject">' + t('Uncommitted Changes') + '</h2>' : '') + '<p class="cdvSummaryText">' + t('Displaying all uncommitted changes.') + '</p>' + (isRight ? generateCdvStatsHtml(expandedCommit.fileChanges!) : '') + '<div id="cdvActions"></div><div id="cdvInlineCommitBox"></div>';
 				}
 			} else {
-				// Commit comparison should be shown
-				html += '<p class="cdvSummaryText">' + t('Displaying all changes from <b>{0}</b> to <b>{1}</b>.', commitOrder.from, (commitOrder.to !== UNCOMMITTED ? commitOrder.to : t('Uncommitted Changes'))) + '</p>' + (isRight ? generateCdvStatsHtml(expandedCommit.fileChanges!) : '');
+				const fromDisplay = expandedCommit.customCompareLabels ? escapeHtml(expandedCommit.customCompareLabels.from) : commitOrder.from;
+				const toDisplay = expandedCommit.customCompareLabels ? escapeHtml(expandedCommit.customCompareLabels.to) : (commitOrder.to !== UNCOMMITTED ? commitOrder.to : t('Uncommitted Changes'));
+				html += '<p class="cdvSummaryText">' + t('Displaying all changes from <b>{0}</b> to <b>{1}</b>.', fromDisplay, toDisplay) + '</p>' + (isRight ? generateCdvStatsHtml(expandedCommit.fileChanges!) : '');
 			}
 			const fileViewHtml = generateFileViewHtml(expandedCommit.fileTree!, expandedCommit.fileChanges!, expandedCommit.lastViewedFile, expandedCommit.contextMenuOpen.fileView, this.cdvFileView.getFileViewType(), commitOrder.to === UNCOMMITTED);
 			const reviewBarHtml = generateCdvReviewBarHtml(expandedCommit.fileChanges!);
@@ -3182,8 +3445,11 @@ class GitGraphView {
 			html = '<div id="cdvHeader"><span class="cdvHeaderTitle">' + title + '</span>' +
 				(canBrowseCommitTree ? '<div id="cdvBrowseTree" class="cdvDiffModePill" title="' + t('Browse all repository files at this commit') + '">' + MENU_ICONS.files + '<span class="cdvDiffModeLabel">' + t('All Files') + '</span></div>' : '') +
 				(!expandedCommit.loading ? '<div id="cdvHideUnchanged" class="cdvDiffModePill">' + MENU_ICONS.foldDiff + '<span class="cdvDiffModeLabel">' + t('Changes Only') + '</span></div>' : '') +
+				(!expandedCommit.loading ? '<div id="cdvReviewSession" class="cdvControlBtn" title="' + escapeHtml(t('Review Session (Uncommitted / Unpushed / Branch)')) + '">' + MENU_ICONS.eye + '</div>' : '') +
 				(codeReviewPossible ? '<div id="cdvCodeReview" class="cdvControlBtn">' + SVG_ICONS.review + '</div>' : '') +
 				(externalDiffPossible ? '<div id="cdvExternalDiff" class="cdvControlBtn">' + SVG_ICONS.linkExternal + '</div>' : '') +
+				'<div id="cdvBack" class="cdvControlBtn' + (this.cdvHistoryIndex <= 0 ? ' ' + CLASS_DISABLED : '') + '" title="' + escapeHtml(t('Back in History (Alt+Left)')) + '">&#8592;</div>' +
+				'<div id="cdvForward" class="cdvControlBtn' + (this.cdvHistoryIndex >= this.cdvHistory.length - 1 ? ' ' + CLASS_DISABLED : '') + '" title="' + escapeHtml(t('Forward in History (Alt+Right)')) + '">&#8594;</div>' +
 				(expandedCommit.compareWithHash === null ? '<div id="cdvPrev" class="cdvControlBtn" title="' + t('Previous Commit') + '">' + SVG_ICONS.arrowUp + '</div><div id="cdvNext" class="cdvControlBtn" title="' + t('Next Commit') + '">' + SVG_ICONS.arrowDown + '</div>' : '') +
 				'<div id="cdvClose" class="cdvControlBtn" title="' + t('Close') + '">' + SVG_ICONS.close + '</div></div>' +
 				html + '</div><div class="cdvHeightResize"></div>';
@@ -3191,7 +3457,7 @@ class GitGraphView {
 			html += '</div><div id="cdvControls"><div id="cdvClose" class="cdvControlBtn" title="' + t('Close') + '">' + SVG_ICONS.close + '</div>' +
 				(canBrowseCommitTree ? '<div id="cdvBrowseTree" class="cdvControlBtn" title="' + t('Browse all repository files at this commit') + '">' + MENU_ICONS.files + '</div>' : '') +
 				(codeReviewPossible ? '<div id="cdvCodeReview" class="cdvControlBtn">' + SVG_ICONS.review + '</div>' : '') +
-				(!expandedCommit.loading ? '<div id="cdvHideUnchanged" class="cdvControlBtn">' + MENU_ICONS.foldDiff + '</div><div id="cdvFileViewTypeTree" class="cdvControlBtn cdvFileViewTypeBtn" title="' + t('File Tree View') + '">' + SVG_ICONS.fileTree + '</div><div id="cdvFileViewTypeList" class="cdvControlBtn cdvFileViewTypeBtn" title="' + t('File List View') + '">' + SVG_ICONS.fileList + '</div>' : '') +
+				(!expandedCommit.loading ? '<div class="cdvControlSep"></div><div id="cdvHideUnchanged" class="cdvControlBtn">' + MENU_ICONS.foldDiff + '</div><div class="cdvControlSep"></div><div id="cdvFileViewTypeTree" class="cdvControlBtn cdvFileViewTypeBtn" title="' + t('File Tree View') + '">' + SVG_ICONS.fileTree + '</div><div id="cdvFileViewTypeList" class="cdvControlBtn cdvFileViewTypeBtn" title="' + t('File List View') + '">' + SVG_ICONS.fileList + '</div>' : '') +
 				(externalDiffPossible ? '<div id="cdvExternalDiff" class="cdvControlBtn">' + SVG_ICONS.linkExternal + '</div>' : '') +
 				'</div><div class="cdvHeightResize"></div>';
 		}
@@ -3200,36 +3466,29 @@ class GitGraphView {
 		if (!expandedCommit.loading) this.setCdvDivider();
 		if (!isDocked) this.renderGraph();
 
-		if (!refresh) {
+		if (!refresh && expandedCommit.commitElem !== null) {
 			if (isDocked) {
 				const elemTop = this.controlsElem.clientHeight + expandedCommit.commitElem.offsetTop, coveredTop = this.getCoveredTopHeight(), visibleBottom = this.viewElem.clientHeight - this.getCoveredBottomHeight();
 				if (elemTop - 8 < this.viewElem.scrollTop + coveredTop) {
-					// Commit is above what is visible on screen (below the sticky controls)
 					this.viewElem.scroll(0, elemTop - coveredTop - 8);
 				} else if (elemTop - visibleBottom + 32 > this.viewElem.scrollTop) {
-					// Commit is below what is visible on screen
 					this.viewElem.scroll(0, elemTop - visibleBottom + 32);
 				}
 			} else {
 				const elemTop = this.controlsElem.clientHeight + elem.offsetTop, cdvHeight = this.gitRepos[this.currentRepo].cdvHeight;
 				const coveredTop = this.getCoveredTopHeight(), visibleBottom = this.viewElem.clientHeight - this.getCoveredBottomHeight();
 				if (this.config.commitDetailsView.autoCenter) {
-					// Center Commit Detail View setting is enabled (in the area below the sticky controls & frozen column headers)
-					// elemTop - commit height [24px] + (commit details view height + commit height [24px]) / 2 - (visible bottom + covered top) / 2
 					this.viewElem.scroll(0, elemTop - 12 + (cdvHeight - visibleBottom - coveredTop) / 2);
 				} else if (elemTop - 32 < this.viewElem.scrollTop + coveredTop) {
-					// Commit Detail View is opening above what is visible on screen (below the sticky controls & frozen column headers)
-					// elemTop - commit height [24px] - desired gap from top [8px] < view scroll offset + covered top
 					this.viewElem.scroll(0, elemTop - coveredTop - 32);
 				} else if (elemTop + cdvHeight - visibleBottom + 8 > this.viewElem.scrollTop) {
-					// Commit Detail View is opening below what is visible on screen (above the frozen footer)
-					// elemTop + commit details view height + desired gap from bottom [8px] - visible bottom > view scroll offset
 					this.viewElem.scroll(0, elemTop + cdvHeight - visibleBottom + 8);
 				}
 			}
 		}
 
 		this.makeCdvResizable();
+		this.syncAxState();
 		document.getElementById('cdvClose')!.addEventListener('click', () => {
 			this.closeCommitDetails(true);
 		});
@@ -3243,6 +3502,14 @@ class GitGraphView {
 		if (!expandedCommit.loading) {
 			this.cdvFileView.makeCdvFileViewInteractive();
 			this.renderCdvActions();
+			if (expandedCommit.commitHash === UNCOMMITTED && expandedCommit.compareWithHash === null) {
+				this.inlineCommitBox.render();
+				sendMessage({ command: 'loadWorkingTreeStatus', repo: this.currentRepo });
+			} else if (expandedCommit.compareWithHash === null && expandedCommit.commitHash !== UNCOMMITTED) {
+				this.cdvNoteText = null;
+				this.cdvSigDetails = null;
+				sendMessage({ command: 'loadCommitExtras', repo: this.currentRepo, commitHash: expandedCommit.commitHash });
+			}
 			this.cdvFileView.renderCdvFileViewTypeBtns();
 			this.cdvFileView.renderCdvHideUnchangedBtn();
 			this.cdvFileView.renderCdvExternalDiffBtn();
@@ -3264,6 +3531,13 @@ class GitGraphView {
 						action: 'browse-commit-files',
 						commitHash: this.expandedCommit.commitHash
 					}, window.location.origin || '*');
+				});
+			}
+
+			const reviewSessionBtn = document.getElementById('cdvReviewSession');
+			if (reviewSessionBtn !== null) {
+				reviewSessionBtn.addEventListener('click', () => {
+					this.openReviewSession(expandedCommit.commitHash === UNCOMMITTED ? 'uncommitted' : 'branch');
 				});
 			}
 
@@ -3335,16 +3609,6 @@ class GitGraphView {
 		}
 	}
 
-	/**
-	 * Generate the HTML of the summary of a commit, in the Commit Details View docked to the right.
-	 * @param commitDetails The details of the commit.
-	 * @param avatar The avatar of the commit's author (if available).
-	 * @param fileChanges The files changed by the commit.
-	 * @param textFormatter The TextFormatter used to format the commit message.
-	 * @param subject The subject of the commit message.
-	 * @param body The body of the commit message.
-	 * @returns The HTML.
-	 */
 	private generateCdvSummaryHtml(commitDetails: GG.GitCommitDetails, avatar: string | null, fileChanges: ReadonlyArray<GG.GitFileChange>, textFormatter: TextFormatter, subject: string, body: string) {
 		const index = this.commitLookup[commitDetails.hash];
 		const issues = this.getIssueLinks(commitDetails.body);
@@ -3355,7 +3619,8 @@ class GitGraphView {
 			'<span class="cdvMuted" title="' + escapeHtml(formatLongDate(commitDetails.committerDate)) + '">' + t('Committed {0}', formatRelativeDate(commitDetails.committerDate)) + ' · ' + formatIsoDateTime(commitDetails.committerDate) + '</span></span></div>' +
 			'<div class="cdvChips"><button type="button" id="cdvCopyHash" class="cdvChip mono" title="' + t('Copy Commit Hash to Clipboard') + '" tabindex="-1">' + SVG_ICONS.copy + escapeHtml(abbrevCommit(commitDetails.hash)) + '</button>' +
 			(remoteUrl !== null ? '<button type="button" id="cdvOpenOnRemote" class="cdvChip" title="' + escapeHtml(remoteUrl) + '" tabindex="-1">' + SVG_ICONS.linkExternal + t('Open on Remote') + '</button>' : '') +
-			'<button type="button" id="cdvCompare" class="cdvChip' + (this.cdvComparePending ? ' active' : '') + '" title="' + t('Click on another commit to compare it with this commit') + '" tabindex="-1">' + SVG_ICONS.compare + (this.cdvComparePending ? t('Click on a commit to compare with') : t('Compare with…')) + '</button></div>' +
+			'<button type="button" id="cdvCompare" class="cdvChip' + (this.cdvComparePending ? ' active' : '') + '" title="' + t('Click on another commit to compare it with this commit') + '" tabindex="-1">' + SVG_ICONS.compare + (this.cdvComparePending ? t('Click on a commit to compare with') : t('Compare with…')) + '</button>' +
+			(commitDetails.hash === this.commitHead ? '<button type="button" id="cdvAmend" class="cdvChip" title="' + escapeHtml(t('Amend HEAD commit (git commit --amend)')) + '" tabindex="-1">' + MENU_ICONS.edit + t('Amend') + ELLIPSIS + '</button>' : '') + '</div>' +
 			'<h2 class="cdvSubject">' + textFormatter.format(subject) + '</h2>' +
 			(body !== '' ? '<div class="cdvBody">' + textFormatter.format(body) + '</div>' : '') +
 			(this.getCdvFileFocus(commitDetails.hash, fileChanges) !== null ? this.generateCdvFileFocusHtml(commitDetails.hash, fileChanges) : (issues.length > 0 ? '<div class="cdvLine"><span class="cdvMuted">' + t('Related Issues') + '</span>' + issues.map((issue) => '<a class="' + CLASS_EXTERNAL_URL + '" href="' + escapeHtml(issue.url) + '" tabindex="-1">' + escapeHtml(issue.label) + '</a>').join('') + '</div>' : '') +
@@ -3364,12 +3629,6 @@ class GitGraphView {
 			'<div id="cdvActions"></div>');
 	}
 
-	/**
-	 * Get the file the Commit Details View docked to the right focuses on: the file whose history is shown (unless the whole commit is shown).
-	 * @param hash The hash of the commit.
-	 * @param fileChanges The files changed by the commit.
-	 * @returns The index of the file in the files changed by the commit, or NULL if the Commit Details View doesn't focus on a file.
-	 */
 	private getCdvFileFocus(hash: string, fileChanges: ReadonlyArray<GG.GitFileChange>) {
 		if (this.fileHistory === null || this.cdvShowWholeCommit || !this.isCdvDocked() || !this.isCdvDockedRight()) return null;
 		const historyCommit = this.fileHistoryData !== null ? this.fileHistoryData.commits[hash] : undefined;
@@ -3378,12 +3637,6 @@ class GitGraphView {
 		return index > -1 ? index : null;
 	}
 
-	/**
-	 * Generate the HTML of the changes made by a commit to the file whose history is shown, in the Commit Details View docked to the right.
-	 * @param hash The hash of the commit.
-	 * @param fileChanges The files changed by the commit.
-	 * @returns The HTML.
-	 */
 	private generateCdvFileFocusHtml(hash: string, fileChanges: ReadonlyArray<GG.GitFileChange>) {
 		const file = fileChanges[this.getCdvFileFocus(hash, fileChanges)!], textFile = file.additions !== null && file.deletions !== null;
 		return '<div id="cdvFileFocus"><div class="cdvFileFocusFile"><span class="fileTreeFileBadge ' + file.type + '">' + file.type + '</span>' + fileIcons.getFileIcon(file.newFilePath) +
@@ -3396,12 +3649,6 @@ class GitGraphView {
 			'<div id="cdvFileDiff">' + this.generateCdvFileDiffHtml(hash, file) + '</div></div>';
 	}
 
-	/**
-	 * Generate the HTML of the diff of the file the Commit Details View focuses on (requesting it from the extension if it hasn't been loaded).
-	 * @param hash The hash of the commit.
-	 * @param file The file.
-	 * @returns The HTML.
-	 */
 	private generateCdvFileDiffHtml(hash: string, file: GG.GitFileChange) {
 		const key = hash + ':' + file.newFilePath;
 		if (this.cdvFileDiff === null || this.cdvFileDiff.key !== key) {
@@ -3417,10 +3664,6 @@ class GitGraphView {
 			: '<div class="cdvFileDiffMessage">' + (this.cdvFileDiff.error !== null ? escapeHtml(this.cdvFileDiff.error) : t('Loading the changes') + ELLIPSIS) + '</div>';
 	}
 
-	/**
-	 * Process the diff of a file loaded by the extension, for the Commit Details View.
-	 * @param msg The message containing the diff.
-	 */
 	public processLoadFileDiffResponse(msg: GG.ResponseLoadFileDiff) {
 		const key = msg.commitHash + ':' + msg.filePath;
 		if (this.cdvFileDiff === null || this.cdvFileDiff.key !== key) return;
@@ -3431,15 +3674,11 @@ class GitGraphView {
 		if (index !== null) diffElem.innerHTML = this.generateCdvFileDiffHtml(msg.commitHash, this.expandedCommit.fileChanges[index]);
 	}
 
-	/**
-	 * Add the event listeners to the changes to the file the Commit Details View focuses on.
-	 */
 	private makeCdvFileFocusInteractive() {
 		const expandedCommit = this.expandedCommit;
 		if (expandedCommit === null || expandedCommit.fileChanges === null || document.getElementById('cdvFileFocus') === null) return;
 		const index = this.getCdvFileFocus(expandedCommit.commitHash, expandedCommit.fileChanges);
 		if (index === null) return;
-		// The actions are performed on the file in the file view, so that its state (e.g. the last file viewed, and the files reviewed) is updated
 		const clickFileView = (selector: string) => {
 			const elem = document.querySelector('#cdvFileView .fileTreeFileRecord[data-index="' + index + '"] ' + selector);
 			if (elem !== null) elem.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -3456,10 +3695,6 @@ class GitGraphView {
 		});
 	}
 
-	/**
-	 * Show the history of a file (only the commits that change it), or all commits.
-	 * @param filePath The path of the file, or NULL to show all commits.
-	 */
 	public setFileHistory(filePath: string | null, lineRange: GG.GitLineRange | null = null) {
 		if (filePath === null) lineRange = null;
 		if (filePath === this.fileHistory && JSON.stringify(lineRange) === JSON.stringify(this.fileHistoryLines)) return;
@@ -3474,9 +3709,6 @@ class GitGraphView {
 		this.requestLoadRepoInfoAndCommits(true, true);
 	}
 
-	/**
-	 * Render the bar shown below the control bar when the history of a file is shown.
-	 */
 	private renderFileHistoryBar() {
 		const elem = document.getElementById('fileHistoryBar');
 		if (elem === null) return;
@@ -3520,11 +3752,6 @@ class GitGraphView {
 		}));
 	}
 
-	/**
-	 * Get the issues linked to by a commit message, according to the repository's Issue Linking configuration.
-	 * @param message The commit message.
-	 * @returns The label & URL of each issue.
-	 */
 	private getIssueLinks(message: string) {
 		const config = this.gitRepos[this.currentRepo].issueLinkingConfig || globalState.issueLinkingConfig;
 		const links: { label: string, url: string }[] = [];
@@ -3549,11 +3776,6 @@ class GitGraphView {
 		return links;
 	}
 
-	/**
-	 * Get the branches (on the loaded commits) that contain a commit.
-	 * @param index The index of the commit.
-	 * @returns The name, colour (of its branch on the graph) & whether it's a remote branch, of each branch.
-	 */
 	private getBranchesContainingCommit(index: number) {
 		const colours = this.config.graph.colours, vertexColours = this.graph.getVertexColours();
 		const reachable: { [hash: string]: boolean } = {}, local: { name: string, remote: boolean, colour: string }[] = [], remote: { name: string, remote: boolean, colour: string }[] = [];
@@ -3568,11 +3790,6 @@ class GitGraphView {
 		return local.concat(remote).slice(0, 12);
 	}
 
-	/**
-	 * Get the URL of a commit on the web page of the repository's remote (origin, or its first remote), for GitHub, GitLab, Bitbucket, Gitea & similar hosts.
-	 * @param hash The hash of the commit.
-	 * @returns The URL, or NULL if the remote's URL isn't known.
-	 */
 	private getRemoteCommitUrl(hash: string) {
 		if (this.gitConfig === null) return null;
 		const remote = this.gitConfig.remotes.find((remote) => remote.name === 'origin' && remote.url !== null) || this.gitConfig.remotes.find((remote) => remote.url !== null);
@@ -3591,9 +3808,6 @@ class GitGraphView {
 		return webUrl + (/bitbucket/i.test(webUrl) ? '/commits/' : '/commit/') + hash;
 	}
 
-	/**
-	 * Add the event listeners to the header & summary of the Commit Details View docked to the right.
-	 */
 	private makeCdvHeaderInteractive() {
 		const expandedCommit = this.expandedCommit;
 		if (expandedCommit === null) return;
@@ -3605,6 +3819,9 @@ class GitGraphView {
 		const prevElem = document.getElementById('cdvPrev'), nextElem = document.getElementById('cdvNext');
 		if (prevElem !== null) prevElem.addEventListener('click', () => navigate(-1));
 		if (nextElem !== null) nextElem.addEventListener('click', () => navigate(1));
+		const backElem = document.getElementById('cdvBack'), forwardElem = document.getElementById('cdvForward');
+		if (backElem !== null) backElem.addEventListener('click', () => this.navigateCdvHistory(-1));
+		if (forwardElem !== null) forwardElem.addEventListener('click', () => this.navigateCdvHistory(1));
 
 		const copyHashElem = document.getElementById('cdvCopyHash');
 		if (copyHashElem !== null) copyHashElem.addEventListener('click', () => sendMessage({ command: 'copyToClipboard', type: t('Commit Hash'), data: expandedCommit.commitHash }));
@@ -3618,12 +3835,72 @@ class GitGraphView {
 			this.cdvComparePending = !this.cdvComparePending;
 			alterClass(compareElem, CLASS_ACTIVE, this.cdvComparePending);
 			compareElem.innerHTML = SVG_ICONS.compare + (this.cdvComparePending ? t('Click on a commit to compare with') : t('Compare with…'));
+			this.syncAxState();
+		});
+		const amendElem = document.getElementById('cdvAmend');
+		if (amendElem !== null) amendElem.addEventListener('click', () => {
+			this.actions.openAmendCommitDialog(expandedCommit.commitHash, null);
 		});
 	}
 
-	/**
-	 * Add the event listeners to the Changed Files / Commit Message / Explain tabs of the Commit Details View.
-	 */
+	public cancelCdvComparePending() {
+		if (!this.cdvComparePending) return;
+		this.cdvComparePending = false;
+		const compareElem = document.getElementById('cdvCompare');
+		if (compareElem !== null) {
+			alterClass(compareElem, CLASS_ACTIVE, false);
+			compareElem.innerHTML = SVG_ICONS.compare + t('Compare with…');
+		}
+		this.syncAxState();
+	}
+
+	public getActiveOverlay(): string {
+		if (dialog.isOpen()) return 'dialog';
+		if (this.commandPalette && this.commandPalette.isOpen()) return 'command-palette';
+		if (this.branchCommitCompareModal && this.branchCommitCompareModal.isOpen()) return 'branch-commit-compare';
+		if (this.reviewSessionModal && this.reviewSessionModal.isOpen()) return 'review-session';
+		if (this.prPopover && this.prPopover.isOpen()) return 'pr-popover';
+		if (contextMenu.isOpen()) return 'context-menu';
+		if (this.isHunkModalOpen()) return 'hunk-modal';
+		if (this.isCdvActionsCustomizerOpen()) return 'cdv-actions-modal';
+		if (this.commitExplainer && this.commitExplainer.isCommitMessageModalOpen()) return 'ai-commit-modal';
+		if (this.rebaseEditor && this.rebaseEditor.isOpen()) return 'rebase-editor';
+		if (this.branchCleanup && this.branchCleanup.isOpen()) return 'branch-cleanup';
+		if (this.selectedCommits.size > 0) return 'multi-select';
+		if (this.worktreeList && this.worktreeList.isListOpen()) return 'worktree-list';
+		if (this.stashList && this.stashList.isStashListOpen()) return 'stash-list';
+		if (this.repoDropdown && this.repoDropdown.isOpen()) return 'repo-dropdown';
+		if (this.branchDropdown && this.branchDropdown.isOpen()) return 'branch-dropdown';
+		if (this.authorDropdown && this.authorDropdown.isOpen()) return 'author-dropdown';
+		if (this.settingsWidget && this.settingsWidget.isVisible()) return 'settings';
+		if (this.findWidget && this.findWidget.isVisible()) return 'find';
+		if (this.cdvComparePending) return 'cdv-compare-pick';
+		if (this.expandedCommit !== null) return 'cdv';
+		return 'none';
+	}
+
+	public syncAxState() {
+		const refreshStatus = !this.currentRepoRefreshState.inProgress
+			? 'idle'
+			: (this.currentRepoRefreshState.requestingRepoInfo ? 'loading-info' : 'loading-commits');
+		const cdvStatus = this.expandedCommit === null
+			? 'closed'
+			: this.cdvComparePending
+				? 'await-compare'
+				: this.expandedCommit.loading
+					? 'loading'
+					: this.expandedCommit.compareWithHash !== null
+						? 'comparison'
+						: this.expandedCommit.commitHash === UNCOMMITTED
+							? 'uncommitted'
+							: 'commit';
+		syncBodyStateAttrs({
+			smRefresh: refreshStatus,
+			smCdv: cdvStatus,
+			smOverlay: this.getActiveOverlay()
+		});
+	}
+
 	private makeCdvTabsInteractive() {
 		addListenerToClass('cdvTab', 'click', (e) => {
 			const tab = (<HTMLElement>(<Element>e.target).closest('.cdvTab')!).dataset.tab;
@@ -3683,7 +3960,6 @@ class GitGraphView {
 		const expandedCommit = this.expandedCommit;
 		if (host === null || expandedCommit === null) return;
 
-		// Build status badge & changed-folder lookup from the already-loaded commit fileChanges (zero extra git calls)
 		const changeStatus: { [filePath: string]: string } = {};
 		const changedDirs = new Set<string>();
 		const deletedByDir: { [dir: string]: string[] } = {};
@@ -3830,9 +4106,6 @@ class GitGraphView {
 		});
 	}
 
-	/**
-	 * Render the buttons of the most common actions (and a button that opens all of the actions) for the commit shown in the Commit Details View.
-	 */
 	private renderCdvActions() {
 		const expandedCommit = this.expandedCommit, actionsElem = document.getElementById('cdvActions');
 		if (expandedCommit === null || expandedCommit.commitElem === null || actionsElem === null) return;
@@ -3858,7 +4131,9 @@ class GitGraphView {
 			actions = this.actions.getCommitContextMenuActions(target);
 			const actionMap = new Map<string, ContextMenuAction>();
 			actions.forEach((group) => group.forEach((action) => {
-				if (typeof action.id === 'string') actionMap.set(action.id, action);
+				if (typeof action.id === 'string' && (action.visible || !actionMap.has(action.id))) {
+					actionMap.set(action.id, action);
+				}
 			}));
 			primary = this.getConfiguredCdvActions()
 				.map((id) => actionMap.get(id))
@@ -3871,7 +4146,7 @@ class GitGraphView {
 			elem.addEventListener('click', () => primary[parseInt((<HTMLElement>elem).dataset.index!)].onClick());
 		});
 		document.getElementById('cdvMoreActions')!.addEventListener('click', (e) => {
-			handledEvent(e); // Don't let the click propagate to the document, which closes context menus
+			handledEvent(e);
 			const moreActions: ContextMenuActions = isRegularCommit
 				? actions.concat([[{
 					title: t('Customize Action Buttons') + ELLIPSIS,
@@ -3893,32 +4168,27 @@ class GitGraphView {
 		if (elem !== null) elem.remove();
 	}
 
-	/**
-	 * Open the dialog that chooses which commit actions are buttons, and their order.
-	 * @param kind The buttons: of the Commit Details View's action bar, or on the row the mouse is over (the others are in its "More Actions" menu).
-	 */
-	public openCdvActionsCustomizer(kind: 'cdv' | 'row' = 'cdv') {
+	public openCdvActionsCustomizer(mode: 'cdv' | 'row' = 'cdv') {
 		this.closeCdvActionsCustomizer();
 		closeDialogAndContextMenu();
-		const isRow = kind === 'row';
+		const isRow = mode === 'row';
 		const catalog = getCommitActionCatalog();
-		const defaults = isRow ? DEFAULT_ROW_COMMIT_ACTIONS : DEFAULT_CDV_COMMIT_ACTIONS;
+		const defaults: ReadonlyArray<string> = isRow ? DEFAULT_ROW_COMMIT_ACTIONS : DEFAULT_CDV_COMMIT_ACTIONS;
 		const configured = isRow ? this.getRowActionsConfig().actions : this.getConfiguredCdvActions();
-		let position: GG.RowActionsConfig['position'] = this.getRowActionsConfig().position;
-		const title = isRow ? t('Customize Row Hover Buttons') : t('Customize Commit Action Buttons');
-		const items: { id: string, title: string, icon: string, checked: boolean }[] = [];
+		let position: GG.RowActionsPosition = isRow ? this.getRowActionsConfig().position : 'Pointer';
+		const items: { id: string, title: string, icon: string, conditional: boolean, checked: boolean }[] = [];
 		const added = new Set<string>();
 		configured.forEach((id) => {
 			const entry = catalog.find((item) => item.id === id);
 			if (typeof entry !== 'undefined' && !added.has(id)) {
 				added.add(id);
-				items.push({ id: entry.id, title: entry.title, icon: entry.icon, checked: true });
+				items.push({ id: entry.id, title: entry.title, icon: entry.icon, conditional: !!entry.conditional, checked: true });
 			}
 		});
 		catalog.forEach((entry) => {
 			if (!added.has(entry.id)) {
 				added.add(entry.id);
-				items.push({ id: entry.id, title: entry.title, icon: entry.icon, checked: false });
+				items.push({ id: entry.id, title: entry.title, icon: entry.icon, conditional: !!entry.conditional, checked: false });
 			}
 		});
 
@@ -3927,46 +4197,63 @@ class GitGraphView {
 		document.body.appendChild(modal);
 
 		let dragIndex = -1;
-		const render = () => {
+		const modalTitle = isRow ? t('Customize Row Hover Buttons') : t('Customize Commit Action Buttons');
+		const condTitle = escapeHtml(t('Shown only when applicable to the selected commit (e.g. HEAD, linear commits, or active bisect)'));
+		const render = (focusActionId?: string, focusControl?: 'checkbox' | 'up' | 'down') => {
+			const prevList = modal.querySelector<HTMLElement>('.cdvActionsModalList');
+			const savedScrollTop = prevList !== null ? prevList.scrollTop : 0;
 			let orderCounter = 0;
+			const checkedCount = items.filter((item) => item.checked).length;
 			const positionHtml = isRow
 				? '<div class="cdvActionsModalPosition"><span class="cdvActionsModalPositionLabel">' + t('Position:') + '</span>' +
 					[['Pointer', t('Next to the Pointer')], ['Description', t('End of the Description Column')], ['Row', t('End of the Row')]].map((option) =>
 						'<span class="cdvActionsModalPositionOption' + (option[0] === position ? ' ' + CLASS_SELECTED : '') + '" data-position="' + option[0] + '" role="radio" aria-checked="' + (option[0] === position ? 'true' : 'false') + '">' + option[1] + '</span>'
 					).join('') + '</div>'
 				: '';
-			modal.innerHTML = '<div class="cdvActionsModalPanel" role="dialog" aria-modal="true" aria-label="' + escapeHtml(title) + '">' +
-				'<div class="aiCommitHeader"><span class="aiCommitTitle">' + MENU_ICONS.settings + '<span>' + title + '</span></span>' +
-				'<button type="button" class="aiCommitClose" data-cdv-custom="close" title="' + t('Close') + '">' + SVG_ICONS.close + '</button></div>' +
+			modal.innerHTML = '<div class="cdvActionsModalPanel" role="dialog" aria-modal="true" aria-label="' + escapeHtml(modalTitle) + '">' +
+				'<div class="aiCommitHeader"><span class="aiCommitTitle">' + MENU_ICONS.settings + '<span>' + modalTitle + '</span></span>' +
+				'<button type="button" class="aiCommitClose" data-cdv-custom="close" title="' + t('Close') + '" aria-label="' + escapeHtml(t('Close')) + '">' + SVG_ICONS.close + '</button></div>' +
 				'<div class="cdvActionsModalHint">' + (isRow
-					? t('Checked actions are buttons on the row the mouse is over; the others are folded into its "More Actions" menu. Drag or use the arrows to adjust their order.')
-					: t('Choose which actions appear in the Commit Details action bar, and drag or use the arrows to adjust their order.')) + '</div>' +
+				? t('Checked actions are buttons on the row the mouse is over; the others are folded into its "More Actions" menu. Drag or use the arrows to adjust their order.')
+				: t('Choose which actions appear in the Commit Details action bar, and drag or use the arrows to adjust their order.')) + '</div>' +
 				positionHtml +
 				'<div class="cdvActionsModalList">' + items.map((item, index) => {
 				const badge = item.checked ? '<span class="cdvActionsOrderBadge' + (orderCounter === 0 && !isRow ? ' primary' : '') + '">#' + (++orderCounter) + '</span>' : '<span class="cdvActionsOrderBadge empty"></span>';
+				const condBadge = item.conditional ? '<span class="cdvActionsCondBadge" title="' + condTitle + '">' + t('Contextual') + '</span>' : '';
 				return '<div class="cdvActionsModalItem' + (item.checked ? ' checked' : '') + '" draggable="true" data-index="' + index + '" data-action-id="' + escapeHtml(item.id) + '">' +
 						'<span class="rebaseEditorGrip" title="' + t('Drag to reorder') + '">' + REBASE_GRIP_ICON + '</span>' +
-						'<label class="cdvActionsModalLabel"><input type="checkbox" data-index="' + index + '"' + (item.checked ? ' checked' : '') + ' tabindex="-1"><span class="customCheckbox"></span>' +
-						'<span class="cdvActionsModalIcon">' + item.icon + '</span><span class="cdvActionsModalTitle">' + item.title + '</span></label>' +
+						'<label class="cdvActionsModalLabel"><input type="checkbox" data-index="' + index + '"' + (item.checked ? ' checked' : '') + '><span class="customCheckbox"></span>' +
+						'<span class="cdvActionsModalIcon">' + item.icon + '</span><span class="cdvActionsModalTitle">' + item.title + '</span>' + condBadge + '</label>' +
 						badge +
-						'<span class="rebaseEditorMove"><span class="rebaseEditorMoveBtn' + (index === 0 ? ' ' + CLASS_DISABLED : '') + '" data-move="-1" data-index="' + index + '" title="' + t('Move Up') + '">' + SVG_ICONS.arrowUp + '</span>' +
-						'<span class="rebaseEditorMoveBtn' + (index === items.length - 1 ? ' ' + CLASS_DISABLED : '') + '" data-move="1" data-index="' + index + '" title="' + t('Move Down') + '">' + SVG_ICONS.arrowDown + '</span></span></div>';
+						'<span class="rebaseEditorMove"><button type="button" class="rebaseEditorMoveBtn' + (index === 0 ? ' ' + CLASS_DISABLED : '') + '"' + (index === 0 ? ' disabled' : '') + ' data-move="-1" data-index="' + index + '" title="' + t('Move Up') + '" aria-label="' + escapeHtml(t('Move Up')) + '">' + SVG_ICONS.arrowUp + '</button>' +
+						'<button type="button" class="rebaseEditorMoveBtn' + (index === items.length - 1 ? ' ' + CLASS_DISABLED : '') + '"' + (index === items.length - 1 ? ' disabled' : '') + ' data-move="1" data-index="' + index + '" title="' + t('Move Down') + '" aria-label="' + escapeHtml(t('Move Down')) + '">' + SVG_ICONS.arrowDown + '</button></span></div>';
 			}).join('') + '</div>' +
 				'<div class="rebaseEditorFooter">' +
-				'<span class="rebaseEditorLink" data-cdv-custom="reset">' + MENU_ICONS.revert + t('Reset to Default') + '</span>' +
-				'<span class="rebaseEditorProblem"></span>' +
+				'<button type="button" class="rebaseEditorLink" data-cdv-custom="reset">' + MENU_ICONS.revert + t('Reset to Default') + '</button>' +
+				'<span class="rebaseEditorProblem cdvActionsEmptyNote">' + (checkedCount === 0 ? escapeHtml(t('Only the "More Actions (···)" button will be shown.')) : '') + '</span>' +
 				'<button type="button" class="rebaseEditorBtn" data-cdv-custom="close">' + t('Cancel') + '</button>' +
 				'<button type="button" class="rebaseEditorBtn primary" data-cdv-custom="save">' + t('Save') + '</button></div></div>';
+			const nextList = modal.querySelector<HTMLElement>('.cdvActionsModalList');
+			if (nextList !== null && savedScrollTop > 0) nextList.scrollTop = savedScrollTop;
+			if (typeof focusActionId === 'string') {
+				const row = modal.querySelector<HTMLElement>('.cdvActionsModalItem[data-action-id="' + focusActionId + '"]');
+				if (row !== null) {
+					const selector = focusControl === 'up' ? '.rebaseEditorMoveBtn[data-move="-1"]' : focusControl === 'down' ? '.rebaseEditorMoveBtn[data-move="1"]' : 'input[type="checkbox"]';
+					const targetEl = row.querySelector<HTMLElement>(selector);
+					if (targetEl !== null && !(targetEl instanceof HTMLButtonElement && targetEl.disabled)) targetEl.focus();
+				}
+			}
 		};
 
-		const moveItem = (from: number, to: number) => {
+		const moveItem = (from: number, to: number, focusControl?: 'up' | 'down') => {
+			const actionId = items[from] ? items[from].id : undefined;
 			if (from === to || to < 0 || to >= items.length) {
-				render();
+				render(actionId, focusControl);
 				return;
 			}
 			const moved = items.splice(from, 1)[0];
 			items.splice(to, 0, moved);
-			render();
+			render(actionId, focusControl);
 		};
 
 		modal.addEventListener('mousedown', (e) => {
@@ -3976,10 +4263,10 @@ class GitGraphView {
 			if (!(e.target instanceof HTMLInputElement)) return;
 			const index = parseInt(e.target.dataset.index || '-1');
 			if (index < 0 || index >= items.length) return;
+			const actionId = items[index].id;
 			const checked = e.target.checked;
 			items[index].checked = checked;
 			if (checked) {
-				// Place newly checked item right after the existing checked items so all active buttons stay grouped at the top
 				let lastChecked = -1;
 				for (let i = 0; i < items.length; i++) {
 					if (i !== index && items[i].checked) lastChecked = i;
@@ -3990,7 +4277,7 @@ class GitGraphView {
 					items.splice(targetIndex, 0, moved);
 				}
 			}
-			render();
+			render(actionId, 'checkbox');
 		});
 		modal.addEventListener('click', (e) => {
 			if (!(e.target instanceof Element)) return;
@@ -4004,7 +4291,8 @@ class GitGraphView {
 			const moveElem = <HTMLElement | null>e.target.closest('.rebaseEditorMoveBtn');
 			if (moveElem !== null && !moveElem.classList.contains(CLASS_DISABLED)) {
 				const index = parseInt(moveElem.dataset.index!);
-				moveItem(index, index + parseInt(moveElem.dataset.move!));
+				const delta = parseInt(moveElem.dataset.move!);
+				moveItem(index, index + delta, delta < 0 ? 'up' : 'down');
 				return;
 			}
 			const actionElem = <HTMLElement | null>e.target.closest('[data-cdv-custom]');
@@ -4018,11 +4306,11 @@ class GitGraphView {
 					position = 'Pointer';
 					defaults.forEach((id) => {
 						const entry = catalog.find((item) => item.id === id);
-						if (typeof entry !== 'undefined') items.push({ id: entry.id, title: entry.title, icon: entry.icon, checked: true });
+						if (typeof entry !== 'undefined') items.push({ id: entry.id, title: entry.title, icon: entry.icon, conditional: !!entry.conditional, checked: true });
 					});
 					catalog.forEach((entry) => {
 						if (!defaults.includes(entry.id)) {
-							items.push({ id: entry.id, title: entry.title, icon: entry.icon, checked: false });
+							items.push({ id: entry.id, title: entry.title, icon: entry.icon, conditional: !!entry.conditional, checked: false });
 						}
 					});
 					render();
@@ -4079,11 +4367,11 @@ class GitGraphView {
 			modal.querySelectorAll('.cdvActionsModalItem.dragging, .cdvActionsModalItem.dropBefore, .cdvActionsModalItem.dropAfter').forEach((other) => other.classList.remove('dragging', 'dropBefore', 'dropAfter'));
 		});
 
-		render();
+		render(items.length > 0 ? items[0].id : undefined, 'checkbox');
 	}
 
 	private setCdvHeight(elem: HTMLElement, isDocked: boolean) {
-		if (isDocked && this.isCdvDockedRight()) {
+		if (isDocked && (this.isCdvDockedRight() || (this.expandedCommit !== null && !!this.expandedCommit.customCompareLabels))) {
 			const width = this.getCdvWidth(), widthPx = width + 'px';
 			elem.style.width = widthPx;
 			this.viewElem.style.right = widthPx;
@@ -4109,8 +4397,7 @@ class GitGraphView {
 	private setCdvDivider() {
 		let percent = (this.gitRepos[this.currentRepo].cdvDivider * 100).toFixed(2) + '%';
 		let summaryElem = document.getElementById('cdvSummary'), dividerElem = document.getElementById('cdvDivider'), filesElem = document.getElementById('cdvFiles');
-		if (this.isCdvDocked() && this.isCdvDockedRight()) {
-			// The summary is above the files
+		if (document.body.classList.contains(CLASS_CDV_DOCKED_RIGHT)) {
 			if (summaryElem !== null) summaryElem.style.height = percent;
 			if (dividerElem !== null) dividerElem.style.top = percent;
 			if (filesElem !== null) filesElem.style.top = percent;
@@ -4121,10 +4408,6 @@ class GitGraphView {
 		}
 	}
 
-	/**
-	 * Get the width of the Commit Details View when it's docked to the right, limited to the width of the Webview.
-	 * @returns The width (in pixels).
-	 */
 	private getCdvWidth() {
 		const maxWidth = Math.max(window.innerWidth - 240, CDV_MIN_WIDTH);
 		return Math.min(Math.max(this.gitRepos[this.currentRepo].cdvWidth || CDV_DEFAULT_WIDTH, CDV_MIN_WIDTH), maxWidth);
@@ -4177,7 +4460,7 @@ class GitGraphView {
 		};
 
 		addListenerToClass('cdvHeightResize', 'mousedown', (e) => {
-			if (this.isCdvDocked() && this.isCdvDockedRight()) {
+			if (document.body.classList.contains(CLASS_CDV_DOCKED_RIGHT)) {
 				prevX = (<MouseEvent>e).pageX;
 				eventOverlay.create('colResize', processResizingCdvWidth, stopResizingCdvWidth);
 			} else {
@@ -4214,7 +4497,7 @@ class GitGraphView {
 			if (contentElem === null) return;
 
 			const bounds = contentElem.getBoundingClientRect();
-			vertical = this.isCdvDocked() && this.isCdvDockedRight();
+			vertical = document.body.classList.contains(CLASS_CDV_DOCKED_RIGHT);
 			minX = vertical ? bounds.top : bounds.left;
 			width = vertical ? bounds.height : bounds.width;
 			eventOverlay.create(vertical ? 'rowResize' : 'colResize', processDraggingCdvDivider, stopDraggingCdvDivider);
@@ -4233,12 +4516,275 @@ class GitGraphView {
 		return this.expandedCommit !== null && this.expandedCommit.commitHash === commitHash && this.expandedCommit.compareWithHash === compareWithHash;
 	}
 
-	public getCommitOrder(hash1: string, hash2: string) {
-		if (this.commitLookup[hash1] > this.commitLookup[hash2]) {
-			return { from: hash1, to: hash2 };
-		} else {
-			return { from: hash2, to: hash1 };
+	public openBranchCommitCompareModal(initialLeftBranch?: string | null, initialRightBranch?: string | null, initialLeftHash?: string | null) {
+		this.branchCommitCompareModal.open(initialLeftBranch, initialRightBranch, initialLeftHash);
+	}
+
+	public processLoadBranchCommitsResponse(msg: GG.ResponseLoadBranchCommits) {
+		this.branchCommitCompareModal.processLoadBranchCommitsResponse(msg);
+	}
+
+	public toggleGraphSidebar() {
+		this.graphSidebar.toggle();
+		if (this.graphSidebar.isOpen()) {
+			this.ensureRepoMetadataLoaded();
 		}
+	}
+
+	public ensureRepoMetadataLoaded() {
+		if (this.currentRepo !== '' && this.repoMetadataLoadedFor !== this.currentRepo) {
+			this.repoMetadataLoadedFor = this.currentRepo;
+			sendMessage({ command: 'loadRepoMetadata', repo: this.currentRepo });
+		}
+	}
+
+	public refreshSidebar() {
+		this.graphSidebar.refresh();
+	}
+
+	public updateViewInsets() {
+		const leftInset = this.graphSidebar.getWidth();
+		this.viewElem.style.left = leftInset > 0 ? leftInset + 'px' : '';
+		this.renderGraph();
+	}
+
+	private updateScrollJumpPill() {
+		const maxScroll = this.viewElem.scrollHeight - this.viewElem.clientHeight;
+		if (this.commits.length < 16 || maxScroll <= 240 || this.viewElem.scrollTop < 220) {
+			if (this.scrollJumpPillElem !== null) {
+				this.scrollJumpPillElem.classList.remove('visible', 'expanded');
+				this.scrollJumpMenuOpen = false;
+			}
+			return;
+		}
+		if (this.scrollJumpPillElem === null) {
+			const pill = document.createElement('div');
+			pill.id = 'scrollJumpPill';
+			pill.innerHTML =
+				'<div class="sjpMenu" role="menu">' +
+					'<button type="button" class="sjpOpt" data-sjp="top">' + t('Jump to Top (HEAD)') + '</button>' +
+					'<button type="button" class="sjpOpt" data-sjp="7d">' + t('Last 7 Days') + '</button>' +
+					'<button type="button" class="sjpOpt" data-sjp="30d">' + t('Last 30 Days') + '</button>' +
+					'<button type="button" class="sjpOpt" data-sjp="tag">' + t('Latest Tag') + '</button>' +
+					'<button type="button" class="sjpOpt" data-sjp="merge">' + t('Previous Merge') + '</button>' +
+					'<button type="button" class="sjpOpt" data-sjp="bottom">' + t('Jump to Bottom') + '</button>' +
+				'</div>' +
+				'<button type="button" class="sjpTrigger" data-sjp="toggle" title="' + escapeHtml(t('Quick Scroll Navigator')) + '">' +
+					'<span class="sjpDate"></span><span class="sjpPct"></span>' +
+				'</button>';
+			pill.addEventListener('click', (e) => {
+				const btn = e.target instanceof Element ? <HTMLElement | null>e.target.closest('[data-sjp]') : null;
+				if (btn === null) return;
+				const act = btn.dataset.sjp!;
+				if (act === 'toggle') {
+					this.scrollJumpMenuOpen = !this.scrollJumpMenuOpen;
+					pill.classList.toggle('expanded', this.scrollJumpMenuOpen);
+					return;
+				}
+				this.scrollJumpMenuOpen = false;
+				pill.classList.remove('expanded');
+				const nowSec = Math.floor(Date.now() / 1000);
+				if (act === 'top') {
+					this.viewElem.scrollTo({ top: 0, behavior: 'smooth' });
+				} else if (act === 'bottom') {
+					this.viewElem.scrollTo({ top: this.viewElem.scrollHeight, behavior: 'smooth' });
+				} else if (act === '7d' || act === '30d') {
+					const cutoff = nowSec - (act === '7d' ? 7 : 30) * 86400;
+					const target = this.commits.find((c) => c.hash !== UNCOMMITTED && c.date <= cutoff);
+					if (typeof target !== 'undefined') this.scrollToCommit(target.hash, true, true);
+				} else if (act === 'tag') {
+					const tagged = this.commits.find((c) => c.tags.length > 0);
+					if (typeof tagged !== 'undefined') this.scrollToCommit(tagged.hash, true, true);
+				} else if (act === 'merge') {
+					const merged = this.commits.find((c) => c.parents.length >= 2);
+					if (typeof merged !== 'undefined') this.scrollToCommit(merged.hash, true, true);
+				}
+			});
+			document.body.appendChild(pill);
+			this.scrollJumpPillElem = pill;
+		}
+		const pct = Math.max(0, Math.min(100, Math.round((this.viewElem.scrollTop / maxScroll) * 100)));
+		const approxIdx = Math.max(0, Math.min(this.commits.length - 1, Math.floor((pct / 100) * (this.commits.length - 1))));
+		const sample = this.commits[approxIdx];
+		let dateLabel = '';
+		if (sample && sample.date > 0) {
+			const dt = new Date(sample.date * 1000);
+			dateLabel = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+		}
+		const dateEl = this.scrollJumpPillElem.querySelector('.sjpDate');
+		const pctEl = this.scrollJumpPillElem.querySelector('.sjpPct');
+		if (dateEl !== null) dateEl.textContent = dateLabel;
+		if (pctEl !== null) pctEl.textContent = pct + '%';
+		this.scrollJumpPillElem.classList.add('visible');
+	}
+
+	public openReviewSession(scope: GG.ReviewSessionScope = 'uncommitted') {
+		this.reviewSessionModal.openReview(scope);
+		this.syncAxState();
+	}
+
+	public openWorktreeWipInspector(wt: GG.GitWorktree) {
+		this.reviewSessionModal.openWorktreeWip(wt);
+		this.syncAxState();
+	}
+
+	public openAiSearch() {
+		this.findWidget.openAiSearchDialog();
+	}
+
+	public exportAgentContext() {
+		sendMessage({
+			command: 'exportAgentContext',
+			repo: this.currentRepo,
+			selectedCommitHash: this.expandedCommit !== null && this.expandedCommit.commitHash !== UNCOMMITTED ? this.expandedCommit.commitHash : null
+		});
+	}
+
+	public processLoadRepoMetadataResponse(msg: GG.ResponseLoadRepoMetadata) {
+		if (msg.repo !== this.currentRepo) return;
+		this.graphSidebar.setPinnedBranches(msg.pinnedBranches);
+		if (Array.isArray(msg.savedFilters)) {
+			this.findWidget.setSavedFilters(msg.savedFilters);
+		}
+	}
+
+	public processTogglePinBranchResponse(msg: GG.ResponseTogglePinBranch) {
+		if (msg.repo !== this.currentRepo) return;
+		this.graphSidebar.setPinnedBranches(msg.pinnedBranches);
+	}
+
+	public processSavedFilterPresetsResponse(msg: GG.ResponseSavedFilterPresets) {
+		if (msg.repo !== this.currentRepo) return;
+		this.findWidget.setSavedFilters(msg.savedFilters);
+	}
+
+	public processLoadWorktreeWipResponse(msg: GG.ResponseLoadWorktreeWip) {
+		this.reviewSessionModal.processLoadWorktreeWipResponse(msg);
+	}
+
+	public processLoadReviewSessionResponse(msg: GG.ResponseLoadReviewSession) {
+		this.reviewSessionModal.processLoadReviewSessionResponse(msg);
+	}
+
+	public processUpdateReviewSessionResponse(msg: GG.ResponseUpdateReviewSession) {
+		this.reviewSessionModal.processUpdateReviewSessionResponse(msg);
+	}
+
+	public processAiSearchCommitsResponse(msg: GG.ResponseAiSearchCommits) {
+		this.findWidget.processAiSearchResponse(msg);
+	}
+
+	public getAllBranchNames(): ReadonlyArray<string> {
+		return this.gitBranches;
+	}
+
+	public getAllTagNames(): ReadonlyArray<string> {
+		return this.gitTags;
+	}
+
+	public getStashes(): ReadonlyArray<GG.GitStash> {
+		return this.gitStashes;
+	}
+
+	public getUpstreams(): GG.GitBranchUpstreams {
+		return this.gitUpstreams;
+	}
+
+	public getPullRequestBadges(): { [branch: string]: GG.PullRequestBadgeInfo } {
+		return this.pullRequestBadges;
+	}
+
+	public getKnownAuthors(): string[] {
+		const set = new Set<string>();
+		this.commits.forEach((c) => {
+			if (c.hash !== UNCOMMITTED && c.author !== '') set.add(c.author);
+		});
+		return Array.from(set);
+	}
+
+	public scrollToCommitHash(hash: string, openDetails: boolean = false) {
+		if (typeof this.commitLookup[hash] === 'number') {
+			this.scrollToCommit(hash, true, true);
+			if (openDetails) {
+				const elem = this.getCommitElem(this.commitLookup[hash]);
+				if (elem !== null) this.loadCommitDetails(elem);
+			}
+		}
+	}
+
+	public focusBranchOrRef(branch: string, isRemote: boolean) {
+		const clean = isRemote ? branch.replace(/^remotes\//, '') : branch;
+		const matchedCommit = this.commits.find((c) =>
+			isRemote
+				? c.remotes.some((r) => r.name === clean)
+				: c.heads.includes(clean)
+		);
+		if (typeof matchedCommit !== 'undefined') {
+			this.scrollToCommit(matchedCommit.hash, true, true);
+		} else {
+			this.setShownBranches([branch]);
+		}
+	}
+
+	public focusTag(tag: string) {
+		const matched = this.commits.find((c) => c.tags.some((tg) => tg.name === tag));
+		if (typeof matched !== 'undefined') {
+			this.scrollToCommit(matched.hash, true, true);
+		}
+	}
+
+	public compareArbitraryCommits(fromHash: string, toHash: string, fromLabel?: string, toLabel?: string) {
+		if (fromHash === toHash) return;
+		const idxA = this.commitLookup[fromHash], idxB = this.commitLookup[toHash];
+		const elemA = typeof idxA === 'number' ? this.getCommitElem(idxA) : null;
+		const elemB = typeof idxB === 'number' ? this.getCommitElem(idxB) : null;
+		if (elemA !== null && elemB !== null && !fromLabel && !toLabel) {
+			this.loadCommitComparison(elemA, elemB);
+			return;
+		}
+		this.closeCommitDetails(false);
+		setCdvViewedCommitKey(this.currentRepo + '|' + fromHash + '|' + toHash);
+		this.expandedCommit = {
+			index: typeof idxA === 'number' ? idxA : -1,
+			commitHash: fromHash,
+			commitElem: elemA,
+			compareWithHash: toHash,
+			compareWithElem: elemB,
+			commitDetails: null,
+			fileChanges: null,
+			fileTree: null,
+			avatar: null,
+			codeReview: null,
+			lastViewedFile: null,
+			customCompareLabels: fromLabel && toLabel ? { from: fromLabel, to: toLabel } : null,
+			loading: true,
+			scrollTop: { summary: 0, fileView: 0 },
+			contextMenuOpen: { summary: false, fileView: -1 }
+		};
+		if (elemA !== null) elemA.classList.add(CLASS_COMMIT_DETAILS_OPEN);
+		if (elemB !== null) elemB.classList.add(CLASS_COMMIT_DETAILS_OPEN);
+		this.saveState();
+		this.renderCommitDetailsView(false);
+		sendMessage({
+			command: 'compareCommits',
+			repo: this.currentRepo,
+			commitHash: fromHash,
+			compareWithHash: toHash,
+			fromHash: fromHash,
+			toHash: toHash,
+			refresh: false
+		});
+	}
+
+	public getCommitOrder(hash1: string, hash2: string) {
+		const idx1 = this.commitLookup[hash1], idx2 = this.commitLookup[hash2];
+		if (this.expandedCommit !== null && this.expandedCommit.customCompareLabels && this.expandedCommit.commitHash === hash1 && this.expandedCommit.compareWithHash === hash2) {
+			return { from: hash1, to: hash2 };
+		}
+		if (typeof idx1 === 'number' && typeof idx2 === 'number') {
+			return idx1 > idx2 ? { from: hash1, to: hash2 } : { from: hash2, to: hash1 };
+		}
+		return { from: hash1, to: hash2 };
 	}
 
 	public static closeCdvContextMenuIfOpen(expandedCommit: ExpandedCommit) {
@@ -4281,6 +4827,495 @@ class GitGraphView {
 		let active = this.expandedCommit.codeReview !== null;
 		alterClass(btnElem, CLASS_ACTIVE, active);
 		btnElem.title = active ? t('End Code Review') : t('Start Code Review');
+	}
+
+
+	/* Tools Menu, PR Badges & Popover, Commit Notes/Signature Extras & Inline Staging / Commit */
+
+	private showToolsMenu(btnElem: HTMLElement, e: MouseEvent) {
+		const repoCount = Object.keys(this.gitRepos).length;
+		const target: RepoTarget = { type: TargetType.Repo };
+		contextMenu.show([
+			[
+				{
+					title: t('Command Palette (Jump to Branch / Commit / Tool)'),
+					icon: SVG_ICONS.search,
+					shortcut: (/Mac/.test(navigator.platform) ? '\u21E7\u2318' : 'Ctrl+Shift+') + 'K',
+					visible: true,
+					onClick: () => this.commandPalette.open()
+				},
+				{
+					title: t('Toggle Repository Navigator Sidebar'),
+					icon: MENU_ICONS.branch,
+					visible: true,
+					onClick: () => this.toggleGraphSidebar()
+				},
+				{
+					title: t('Review Session (Uncommitted / Unpushed / Branch)') + ELLIPSIS,
+					icon: MENU_ICONS.eye,
+					visible: true,
+					onClick: () => this.openReviewSession('uncommitted')
+				},
+				{
+					title: t('AI Natural Language Search') + ELLIPSIS,
+					icon: MENU_ICONS.sparkle,
+					visible: true,
+					onClick: () => this.openAiSearch()
+				},
+				{
+					title: t('Compare Commits Across Branches') + ELLIPSIS,
+					icon: MENU_ICONS.compare,
+					visible: this.gitBranches.length > 0,
+					onClick: () => this.openBranchCommitCompareModal()
+				},
+				{
+					title: t('Amend HEAD Commit') + ELLIPSIS,
+					icon: MENU_ICONS.edit,
+					visible: this.commitHead !== null,
+					onClick: () => this.actions.openAmendCommitDialog(this.commitHead!, null)
+				},
+				{
+					title: t('Copy Repository Context for Coding Agent'),
+					icon: MENU_ICONS.agent,
+					visible: true,
+					onClick: () => this.exportAgentContext()
+				},
+				{
+					title: t('Keyboard Shortcuts Cheatsheet'),
+					icon: MENU_ICONS.subject,
+					shortcut: '?',
+					visible: true,
+					onClick: () => this.openShortcutsModal()
+				}
+			],
+			[
+				{
+					title: t('AI Review Uncommitted Changes') + ELLIPSIS,
+					icon: MENU_ICONS.sparkle,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'aiReview', repo: this.currentRepo, mode: 'uncommitted', label: t('Uncommitted Changes') })
+				},
+				{
+					title: t('AI Smart Commit Splitter') + ELLIPSIS,
+					icon: MENU_ICONS.sparkle,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'aiSmartCommitSplit', repo: this.currentRepo })
+				},
+				{
+					title: t('AI PR / Release Notes') + ELLIPSIS,
+					icon: MENU_ICONS.sparkle,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'aiReleaseNotes', repo: this.currentRepo })
+				},
+				{
+					title: t('Pre-Commit Guard Check'),
+					icon: MENU_ICONS.warning,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'preCommitCheck', repo: this.currentRepo })
+				}
+			],
+			[
+				{
+					title: t('Visual Reflog Explorer'),
+					icon: MENU_ICONS.reset,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'reflogExplorer', repo: this.currentRepo })
+				},
+				{
+					title: t('Conflict Assistant'),
+					icon: MENU_ICONS.merge,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'conflictAssistant', repo: this.currentRepo })
+				},
+				{
+					title: t('Branch Lifecycle Dashboard'),
+					icon: MENU_ICONS.branch,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'branchDashboard', repo: this.currentRepo })
+				},
+				{
+					title: t('Submodule Manager'),
+					icon: MENU_ICONS.repo,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'submoduleManager', repo: this.currentRepo })
+				}
+			],
+			[
+				{
+					title: t('Repository Insights & Hotspots'),
+					icon: MENU_ICONS.files,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'repoInsights', repo: this.currentRepo })
+				},
+				{
+					title: repoCount > 1 ? t('Multi-Repository Overview ({0})', repoCount) : t('Multi-Repository Overview'),
+					icon: MENU_ICONS.repo,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'multiRepoOverview', repo: this.currentRepo })
+				},
+				{
+					title: t('Checkout Pull Request') + ELLIPSIS,
+					icon: MENU_ICONS.branch,
+					visible: this.gitRemotes.length > 0,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'checkoutPullRequest', repo: this.currentRepo })
+				},
+				{
+					title: t('Clean Up Branches') + ELLIPSIS,
+					icon: MENU_ICONS.trash,
+					visible: true,
+					onClick: () => this.branchCleanup.show()
+				},
+				{
+					title: t('Repository Health & Optimization') + ELLIPSIS,
+					icon: MENU_ICONS.settings,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'checkRepoHealth', repo: this.currentRepo })
+				}
+			],
+			[
+				{
+					title: t('Macro: Fetch + Rebase Upstream + Prune'),
+					icon: MENU_ICONS.rebase,
+					visible: this.gitRemotes.length > 0,
+					onClick: () => runAction({ command: 'runWorkflowMacro', repo: this.currentRepo, macroId: 'fetch-rebase-prune' }, t('Running Macro'))
+				},
+				{
+					title: t('Macro: Stash + Pull (--rebase) + Pop'),
+					icon: MENU_ICONS.stash,
+					visible: this.gitRemotes.length > 0,
+					onClick: () => runAction({ command: 'runWorkflowMacro', repo: this.currentRepo, macroId: 'stash-pull-pop' }, t('Running Macro'))
+				},
+				{
+					title: t('Export Graph as SVG') + ELLIPSIS,
+					icon: MENU_ICONS.files,
+					visible: this.commits.length > 0,
+					onClick: () => this.exportGraphSvg()
+				},
+				{
+					title: t('Export Changelog / Weekly Report') + ELLIPSIS,
+					icon: MENU_ICONS.subject,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'exportChangelog', repo: this.currentRepo })
+				}
+			]
+		], false, target, e, this.viewElem, () => btnElem.classList.remove(CLASS_ACTIVE), null);
+		btnElem.classList.add(CLASS_ACTIVE);
+	}
+
+	public exportGraphSvg() {
+		const svg = this.graph.exportStandaloneSvg(this.commits);
+		sendMessage({ command: 'exportGraphSvg', repo: this.currentRepo, svg: svg });
+	}
+
+	public processLoadPullRequestBadgesResponse(msg: GG.ResponseLoadPullRequestBadges) {
+		if (msg.repo !== this.currentRepo) return;
+		const nextJson = JSON.stringify(msg.badges || {});
+		if (nextJson === JSON.stringify(this.pullRequestBadges)) return;
+		this.pullRequestBadges = msg.badges || {};
+		if (this.commits.length > 0) {
+			if (this.expandedCommit === null || this.isCdvDocked()) {
+				this.renderRows();
+			} else {
+				this.render();
+			}
+			this.renderOverviews();
+		}
+	}
+
+	public processLoadContributorsResponse(msg: GG.ResponseLoadContributors) {
+		this.inlineCommitBox.processContributorsResponse(msg);
+	}
+
+	public processLoadCodingAgentsResponse(msg: GG.ResponseLoadCodingAgents) {
+		this.settingsWidget.processCodingAgentsResponse(msg.agents);
+	}
+
+	public getSoloRef(): string | null {
+		return this.soloRef;
+	}
+
+	public soloBranchOrTag(refName: string, isTag: boolean = false) {
+		if (this.soloRef === null) {
+			this.preSoloBranches = this.currentBranches !== null ? this.currentBranches.slice() : null;
+		}
+		if (isTag) {
+			this.soloRef = 'tag:' + refName;
+			const tagCommit = this.loadedCommits.find((c) => c.tags.some((tg) => tg.name === refName));
+			if (typeof tagCommit !== 'undefined') {
+				const byHash = new Map<string, GG.GitCommit>();
+				for (let i = 0; i < this.loadedCommits.length; i++) {
+					byHash.set(this.loadedCommits[i].hash, this.loadedCommits[i]);
+				}
+				const keep = new Set<string>();
+				const queue: string[] = [tagCommit.hash];
+				while (queue.length > 0) {
+					const cur = queue.pop()!;
+					if (keep.has(cur)) continue;
+					keep.add(cur);
+					const cObj = byHash.get(cur);
+					if (cObj) {
+						for (let pi = 0; pi < cObj.parents.length; pi++) {
+							if (!keep.has(cObj.parents[pi])) queue.push(cObj.parents[pi]);
+						}
+					}
+				}
+				this.setCompareFilter(keep);
+				this.renderOverviewBar();
+			}
+			return;
+		}
+		this.soloRef = refName;
+		this.compareFilter = null;
+		this.branchDropdown.setOptions(this.getBranchOptions(true), [refName]);
+		this.setShownBranches([refName]);
+	}
+
+	public exitSolo() {
+		if (this.soloRef === null) return;
+		this.soloRef = null;
+		this.compareFilter = null;
+		const restore = this.preSoloBranches !== null && this.preSoloBranches.length > 0 ? this.preSoloBranches : [SHOW_ALL_BRANCHES];
+		this.preSoloBranches = null;
+		this.branchDropdown.setOptions(this.getBranchOptions(true), restore);
+		this.setShownBranches(restore);
+	}
+
+	public renderOverviewBar() {
+		const bar = document.getElementById('graphOverviewBar');
+		if (bar === null) return;
+		const enabled = this.config.graph.overviewBarEnabled !== false && this.commits.length > 0;
+		if (!enabled) {
+			bar.classList.remove(CLASS_ACTIVE);
+			bar.innerHTML = '';
+			document.body.style.setProperty('--git-graph-headerHeight', this.controlsElem.offsetHeight + 'px');
+			return;
+		}
+		const chips: string[] = [];
+		const headLabel = this.gitBranchHead !== null
+			? this.gitBranchHead
+			: (this.commitHead !== null ? abbrevCommit(this.commitHead) : 'HEAD');
+		chips.push(
+			'<button type="button" class="gobChip gobHead" data-gob-act="head" title="' + escapeHtml(t('Scroll to HEAD')) + '">' +
+			SVG_ICONS.branch + '<span>' + escapeHtml(headLabel) + '</span></button>'
+		);
+		if (this.gitBranchHead !== null && typeof this.gitUpstreams[this.gitBranchHead] !== 'undefined' && !this.gitUpstreams[this.gitBranchHead].gone) {
+			const up = this.gitUpstreams[this.gitBranchHead];
+			if (up.ahead > 0 || up.behind > 0) {
+				const syncParts: string[] = [];
+				if (up.ahead > 0) syncParts.push('\u2191' + up.ahead);
+				if (up.behind > 0) syncParts.push('\u2193' + up.behind);
+				chips.push(
+					'<button type="button" class="gobChip gobSync" data-gob-act="head" title="' + escapeHtml(up.name) + '">' +
+					'<span>' + escapeHtml(syncParts.join(' ')) + ' · ' + escapeHtml(up.name) + '</span></button>'
+				);
+			}
+		}
+		if (this.commits.length > 0 && this.commits[0].hash === UNCOMMITTED) {
+			chips.push(
+				'<button type="button" class="gobChip gobWip" data-gob-act="wip" title="' + escapeHtml(t('Jump to Uncommitted Changes')) + '">' +
+				'<span>\u25CF ' + escapeHtml(t('Uncommitted')) + '</span></button>'
+			);
+		}
+		const otherWts = this.worktreeList.getWorktrees().filter((w) => !w.isCurrent).slice(0, 3);
+		for (let i = 0; i < otherWts.length; i++) {
+			const wt = otherWts[i];
+			const wtLabel = wt.branch || abbrevCommit(wt.head || '');
+			const dirty = typeof wt.dirtyCount === 'number' && wt.dirtyCount > 0 ? ' (WIP ' + wt.dirtyCount + ')' : '';
+			chips.push(
+				'<button type="button" class="gobChip gobWorktree" data-gob-act="wt" data-gob-wt="' + escapeHtml(wt.path) + '" title="' + escapeHtml(wt.path) + '">' +
+				WORKTREE_ICON + '<span>' + escapeHtml(wtLabel + dirty) + '</span></button>'
+			);
+		}
+		if (this.soloRef !== null) {
+			const cleanSolo = this.soloRef.startsWith('tag:')
+				? this.soloRef.substring(4)
+				: (this.soloRef.startsWith('remotes/') ? this.soloRef.substring(8) : this.soloRef);
+			chips.push(
+				'<span class="gobSoloBadge"><span>' + escapeHtml(t('Solo: {0}', cleanSolo)) + '</span>' +
+				'<button type="button" class="gobSoloExit" data-gob-act="exitSolo" title="' + escapeHtml(t('Exit Solo Mode')) + '">&times;</button></span>'
+			);
+		}
+		bar.innerHTML =
+			'<div class="gobChips">' + chips.join('') + '</div>' +
+			'<button type="button" id="overviewShortcutsBtn" class="gobBtn" data-gob-act="shortcuts" title="' + escapeHtml(t('Keyboard Shortcuts (?)')) + '"><kbd>?</kbd><span>' + escapeHtml(t('Shortcuts')) + '</span></button>';
+		bar.classList.add(CLASS_ACTIVE);
+		document.body.style.setProperty('--git-graph-headerHeight', this.controlsElem.offsetHeight + 'px');
+	}
+
+	private getEffectiveKeybinding(action: 'find' | 'refresh' | 'scrollToHead' | 'scrollToStash'): string | null {
+		const ov = this.config.graph.shortcutOverrides;
+		if (ov && typeof ov[action] === 'string' && ov[action].trim() !== '') {
+			return ov[action].trim().toLowerCase();
+		}
+		return this.config.keybindings[action];
+	}
+
+	public isShortcutsModalOpen(): boolean {
+		return this.shortcutsModalElem !== null;
+	}
+
+	public toggleShortcutsModal() {
+		if (this.isShortcutsModalOpen()) this.closeShortcutsModal();
+		else this.openShortcutsModal();
+	}
+
+	public closeShortcutsModal() {
+		if (this.shortcutsModalElem !== null) {
+			this.shortcutsModalElem.remove();
+			this.shortcutsModalElem = null;
+		}
+	}
+
+	public openShortcutsModal() {
+		this.closeShortcutsModal();
+		const mod = /Mac/.test(navigator.platform) ? '\u2318' : 'Ctrl+';
+		const shiftMod = /Mac/.test(navigator.platform) ? '\u21E7\u2318' : 'Ctrl+Shift+';
+		const fmtModKey = (k: string | null) => k !== null && k !== '' ? mod + k.toUpperCase() : t('Unassigned');
+		const rows: ReadonlyArray<[string, string]> = [
+			[fmtModKey(this.getEffectiveKeybinding('find')), t('Find / Filter Commits')],
+			[fmtModKey(this.getEffectiveKeybinding('refresh')), t('Refresh Repository Graph')],
+			[fmtModKey(this.getEffectiveKeybinding('scrollToHead')), t('Scroll to HEAD Commit')],
+			[fmtModKey(this.getEffectiveKeybinding('scrollToStash')), t('Jump to Next Stash')],
+			[shiftMod + 'K', t('Open Graph Command Palette')],
+			['\u2191 / \u2193', t('Previous / Next Commit in Table')],
+			[mod + '\u2191 / \u2193', t('Follow First Parent / Child on Branch')],
+			['Alt+\u2190 / \u2192', t('Commit Details History Back / Forward')],
+			['Alt+N', t('Open Next Unviewed File')],
+			['Shift+Click', t('Select Commit Range (Multi-Select)')],
+			[mod + 'C', t('Copy Selected Commit Hash')],
+			['?', t('Toggle Keyboard Shortcuts Cheatsheet')],
+			['Esc', t('Close Active Modal, Menu, or Details')]
+		];
+		const overlay = document.createElement('div');
+		overlay.id = 'shortcutsModal';
+		overlay.className = 'shortcutsOverlay';
+		overlay.setAttribute('role', 'dialog');
+		overlay.setAttribute('aria-label', t('Keyboard Shortcuts'));
+		overlay.innerHTML =
+			'<div class="shortcutsPanel">' +
+			'<div class="shortcutsHeader"><span>' + escapeHtml(t('Keyboard Shortcuts')) + '</span><button type="button" id="shortcutsCloseBtn" class="rsCloseBtn" title="' + escapeHtml(t('Close')) + '">' + SVG_ICONS.close + '</button></div>' +
+			'<div class="shortcutsBody">' +
+			rows.map((r) => '<div class="shortcutsRow"><kbd class="gcpKbd">' + escapeHtml(r[0]) + '</kbd><span>' + escapeHtml(r[1]) + '</span></div>').join('') +
+			'</div>' +
+			'<div class="shortcutsFooter"><button type="button" id="shortcutsCustomizeBtn" class="rsBtn">' + escapeHtml(t('Customize in Settings')) + ELLIPSIS + '</button></div>' +
+			'</div>';
+		overlay.addEventListener('click', (e) => {
+			if (e.target === overlay) this.closeShortcutsModal();
+		});
+		document.body.appendChild(overlay);
+		this.shortcutsModalElem = overlay;
+		const closeBtn = document.getElementById('shortcutsCloseBtn');
+		if (closeBtn !== null) closeBtn.addEventListener('click', () => this.closeShortcutsModal());
+		const custBtn = document.getElementById('shortcutsCustomizeBtn');
+		if (custBtn !== null) {
+			custBtn.addEventListener('click', () => {
+				this.closeShortcutsModal();
+				this.settingsWidget.show(this.currentRepo);
+			});
+		}
+	}
+
+	public closePrPopover() {
+		this.prPopover.close();
+	}
+
+	private openPrPopover(branch: string, prNumber: number, fallbackUrl: string, anchorElem: HTMLElement) {
+		this.prPopover.open(branch, prNumber, fallbackUrl, anchorElem, this.pullRequestBadges[branch]);
+	}
+
+	public processLoadPullRequestDetailsResponse(msg: GG.ResponseLoadPullRequestDetails) {
+		this.prPopover.processDetailsResponse(msg);
+	}
+
+	public processLoadCommitExtrasResponse(msg: GG.ResponseLoadCommitExtras) {
+		if (this.expandedCommit === null || this.expandedCommit.commitHash !== msg.commitHash) return;
+		this.cdvNoteText = msg.note;
+		this.cdvSigDetails = msg.signatureDetails;
+		this.renderCommitExtrasInCdv();
+	}
+
+	public processSetCommitNoteResponse(msg: GG.ResponseSetCommitNote) {
+		if (msg.error !== null) {
+			dialog.showError(t('Unable to Update Git Note'), msg.error, null, null);
+			return;
+		}
+		if (this.expandedCommit !== null && this.expandedCommit.commitHash === msg.commitHash) {
+			this.cdvNoteText = msg.note;
+			this.renderCommitExtrasInCdv();
+		}
+	}
+
+	private renderCommitExtrasInCdv() {
+		const summary = document.getElementById('cdvSummary');
+		if (summary === null || this.expandedCommit === null) return;
+		let slot = document.getElementById('cdvExtrasSlot');
+		if (slot === null) {
+			slot = document.createElement('div');
+			slot.id = 'cdvExtrasSlot';
+			const actions = document.getElementById('cdvActions');
+			if (actions !== null && actions.parentNode !== null) actions.parentNode.insertBefore(slot, actions);
+			else summary.appendChild(slot);
+		}
+		const parts: string[] = [];
+		if (this.cdvNoteText !== null && this.cdvNoteText !== '') {
+			parts.push('<div class="cdvNoteBox"><b>' + t('Git Note:') + '</b> ' + escapeHtml(this.cdvNoteText) + ' <button type="button" class="cdvLinkBtn" id="cdvEditNoteBtn">' + t('Edit') + '</button></div>');
+		}
+		if (this.cdvSigDetails !== null && (this.cdvSigDetails.keyId !== '' || this.cdvSigDetails.fingerprint !== '')) {
+			const fp = this.cdvSigDetails.fingerprint !== '' ? this.cdvSigDetails.fingerprint : this.cdvSigDetails.keyId;
+			parts.push('<div class="cdvSigMeta" title="' + escapeHtml(this.cdvSigDetails.signer + ' (' + fp + ')') + '">&#128274; ' + escapeHtml((this.cdvSigDetails.signer || 'Signed') + ' · ' + fp.substring(0, 16)) + '</div>');
+		}
+		slot.innerHTML = parts.join('');
+		const editBtn = document.getElementById('cdvEditNoteBtn');
+		if (editBtn !== null && this.expandedCommit !== null) {
+			const h = this.expandedCommit.commitHash;
+			editBtn.addEventListener('click', () => this.openEditCommitNoteDialog(h));
+		}
+	}
+
+	public openEditCommitNoteDialog(commitHash: string) {
+		const initial = this.expandedCommit !== null && this.expandedCommit.commitHash === commitHash && this.cdvNoteText !== null ? this.cdvNoteText : '';
+		dialog.showForm(
+			t('Git Note for commit <b><i>{0}</i></b> (leave empty to remove):', abbrevCommit(commitHash)),
+			[{ type: DialogInputType.TextArea, name: t('Note'), default: initial, placeholder: t('Enter a Git note…') }],
+			t('Save Note'),
+			(values) => {
+				const note = (<string>values[0]).trim();
+				runAction({ command: 'setCommitNote', repo: this.currentRepo, commitHash: commitHash, note: note !== '' ? note : null }, t('Saving Git Note'));
+			},
+			null
+		);
+	}
+
+	public processLoadWorkingTreeStatusResponse(msg: GG.ResponseLoadWorkingTreeStatus) {
+		this.inlineCommitBox.processWorkingTreeStatusResponse(msg);
+	}
+
+	public setInlineCommitDraft(text: string) {
+		this.inlineCommitBox.setDraft(text);
+	}
+
+	public clearInlineCommitDraft() {
+		this.inlineCommitBox.clearDraft();
+	}
+
+	public isHunkModalOpen() {
+		return this.hunkModal.isOpen();
+	}
+
+	public closeHunkModal() {
+		this.hunkModal.close();
+	}
+
+	public openHunkStagingModal(filePath: string, staged: boolean) {
+		this.hunkModal.open(filePath, staged);
+	}
+
+	public processLoadFileHunkDiffResponse(msg: GG.ResponseLoadFileHunkDiff) {
+		this.hunkModal.processDiffResponse(msg);
+	}
+
+	public processApplyHunkPatchResponse(msg: GG.ResponseApplyHunkPatch) {
+		this.hunkModal.processApplyResponse(msg);
 	}
 }
 

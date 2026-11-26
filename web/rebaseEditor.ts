@@ -263,7 +263,7 @@ class OperationBar {
 			if (typeof buttonElem.dataset.bisect === 'string') {
 				this.runBisectAction(buttonElem.dataset.bisect);
 			} else if (this.operation !== null) {
-				this.runAction(this.operation, <'continue' | 'skip' | 'abort' | 'scm'>buttonElem.dataset.action);
+				this.runAction(this.operation, <'continue' | 'skip' | 'abort' | 'scm' | 'conflicts'>buttonElem.dataset.action);
 			}
 		});
 	}
@@ -297,10 +297,6 @@ class OperationBar {
 	}
 
 	/**
-	 * Get the HTML of the label of a commit that has been marked while bisecting (shown before its message).
-	 * @param hash The hash of the commit.
-	 */
-	/**
 	 * Get the class of the row of a commit while bisecting: commits that can no longer be the first bad commit are dimmed.
 	 * @param hash The hash of the commit.
 	 * @returns The class (with a leading space), or an empty string.
@@ -331,6 +327,10 @@ class OperationBar {
 		if (bisect === null) return;
 		if (action === 'viewFirstBad') {
 			if (bisect.firstBad !== null) this.view.scrollToCommit(bisect.firstBad, true, true);
+		} else if (action === 'explainFirstBad') {
+			if (bisect.firstBad !== null) {
+				sendMessage({ command: 'openCompanionFeature', feature: 'aiExplainRegression', repo: this.view.currentRepo, commitHash: bisect.firstBad, label: abbrevCommit(bisect.firstBad) });
+			}
 		} else if (action === 'viewLog') {
 			sendMessage({ command: 'viewBisectLog', repo: this.view.currentRepo });
 		} else if (action === 'good' || action === 'bad' || action === 'skip' || action === 'reset') {
@@ -370,6 +370,7 @@ class OperationBar {
 		};
 		const button = (action: string, label: string, className: string = '') => '<span class="operationBarBtn' + (className !== '' ? ' ' + className : '') + '" data-action="' + action + '">' + label + '</span>';
 		this.elem.innerHTML = SVG_ICONS.alert + '<span class="operationBarText">' + descriptions[operation] + '</span><span class="operationBarSpacer"></span>' +
+			button('conflicts', MENU_ICONS.sparkle + t('Conflict Assistant'), 'primary') +
 			button('scm', t('Open Source Control')) +
 			button('continue', operation === 'merge' ? t('Commit Merge') : t('Continue'), 'primary') +
 			(operation !== 'merge' ? button('skip', t('Skip Commit')) : '') +
@@ -386,7 +387,8 @@ class OperationBar {
 			const commit = this.view.getLoadedCommits().find((commit) => commit.hash === bisect.firstBad);
 			return SVG_ICONS.alert + '<span class="operationBarText"><b>' + t('Found the first bad commit:') + '</b> <span class="bisectHash">' + abbrevCommit(bisect.firstBad) + '</span>' +
 				(typeof commit !== 'undefined' ? ' “' + escapeHtml(commit.message) + '” · ' + escapeHtml(commit.author) : '') + '</span><span class="operationBarSpacer"></span>' +
-				button('viewFirstBad', t('View Commit'), 'primary') + button('reset', t('Stop Bisecting'));
+				button('explainFirstBad', MENU_ICONS.sparkle + t('AI Analyze Root Cause…'), 'primary') +
+				button('viewFirstBad', t('View Commit')) + button('reset', t('Stop Bisecting'));
 		}
 		const status = bisect.bad === null || bisect.good.length === 0
 			? (bisect.bad === null ? t('Mark a bad commit (with the bug) to continue.') : t('Mark a good commit (without the bug) to continue.'))
@@ -402,8 +404,10 @@ class OperationBar {
 	 * @param operation The operation in progress.
 	 * @param action The action.
 	 */
-	private runAction(operation: GG.GitOperation, action: 'continue' | 'skip' | 'abort' | 'scm') {
-		if (action === 'scm') {
+	private runAction(operation: GG.GitOperation, action: 'continue' | 'skip' | 'abort' | 'scm' | 'conflicts') {
+		if (action === 'conflicts') {
+			sendMessage({ command: 'openCompanionFeature', feature: 'conflictAssistant', repo: this.view.currentRepo });
+		} else if (action === 'scm') {
 			sendMessage({ command: 'viewScm' });
 		} else if (action === 'abort') {
 			const names: { [operation: string]: string } = { 'rebase': t('the rebase'), 'merge': t('the merge'), 'cherry-pick': t('the cherry pick'), 'revert': t('the revert'), 'am': t('applying the patch') };

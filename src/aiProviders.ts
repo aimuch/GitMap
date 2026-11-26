@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { getConfig } from './config';
 import { t } from './l10n';
-import { AiProviderPresetInfo, AiSettingsConfig } from './types';
+import { AiProviderPresetInfo, AiSettingsConfig, AiTaskKey } from './types';
 
 /**
  * The providers of the language models that explain commits: the models provided in Visual Studio Code (e.g. by GitHub Copilot), or a
@@ -24,11 +24,11 @@ export const enum AiProvider {
 }
 
 interface AiProviderPreset {
-	readonly name: string; // The name shown to the person (e.g. in the consent before a commit is sent)
-	readonly baseUrl: string; // The default base URL of its API ('' => it must be set)
-	readonly model: string; // The default model ('' => it must be set)
+	readonly name: string;
+	readonly baseUrl: string;
+	readonly model: string;
 	readonly requiresApiKey: boolean;
-	readonly apiFormat?: AiApiFormat; // The format of its API (default: Chat Completions)
+	readonly apiFormat?: AiApiFormat;
 }
 
 /**
@@ -46,27 +46,22 @@ export type AiThinking = 'default' | 'off' | 'low' | 'medium' | 'high';
 const AI_THINKING_VALUES: ReadonlyArray<AiThinking> = ['default', 'off', 'low', 'medium', 'high'];
 
 export const DEFAULT_AI_TIMEOUT_SECONDS = 90;
+const MODELS_DISCOVERY_TIMEOUT_MS = 2500;
 
-/**
- * The options of the requests sent to a direct provider (from the `git-map.ai.*` settings).
- */
 export interface AiRequestOptions {
 	readonly apiFormat: AiApiFormat;
-	readonly apiFormatIsDefault: boolean; // The provider's default format is used (=> the other OpenAI format is tried if it isn't found)
-	readonly endpointPath: string; // A custom path (or full URL) replacing the format's default path ('' => the default)
-	readonly temperature: number | null; // NULL => not sent
-	readonly maxTokens: number | null; // NULL => not sent (Anthropic Messages requires it, so 4096 is sent)
+	readonly apiFormatIsDefault: boolean;
+	readonly endpointPath: string;
+	readonly temperature: number | null;
+	readonly maxTokens: number | null;
 	readonly thinking: AiThinking;
 	readonly stream: boolean;
 	readonly timeoutMs: number;
-	readonly extraBody: { readonly [key: string]: any } | null; // Merged into the body of each request
+	readonly extraBody: { readonly [key: string]: any } | null;
 	readonly extraHeaders: { readonly [name: string]: string } | null;
-	readonly configError: string | null; // An invalid setting (e.g. extra parameters that aren't a JSON object)
+	readonly configError: string | null;
 }
 
-/**
- * The raw values of the request settings.
- */
 export interface AiRequestSettings {
 	readonly apiFormat?: unknown;
 	readonly endpointPath?: unknown;
@@ -79,11 +74,6 @@ export interface AiRequestSettings {
 	readonly extraHeaders?: unknown;
 }
 
-/**
- * Get the request options from the raw values of the settings.
- * @param provider The provider (whose default format is used when no format is set).
- * @param settings The raw values.
- */
 export function parseAiRequestSettings(provider: string, settings: AiRequestSettings): AiRequestOptions {
 	const preset = PRESETS[provider];
 	const defaultFormat: AiApiFormat = preset && preset.apiFormat ? preset.apiFormat : 'chat';
@@ -142,9 +132,6 @@ const PRESETS: { readonly [provider: string]: AiProviderPreset } = {
 	[AiProvider.OpenAICompatible]: { name: 'OpenAI Compatible', baseUrl: '', model: '', requiresApiKey: false }
 };
 
-/**
- * The provider, base URL & model to use, from the Extension Settings (with the defaults of the provider).
- */
 export interface DirectAiConfig {
 	readonly provider: AiProvider;
 	readonly name: string;
@@ -154,10 +141,6 @@ export interface DirectAiConfig {
 	readonly request: AiRequestOptions;
 }
 
-/**
- * Get the direct provider configured by `git-map.ai.provider`, `git-map.ai.baseUrl` & `git-map.ai.model`.
- * @returns The configuration, or NULL if the models provided in Visual Studio Code are used.
- */
 export function getDirectAiConfig(): DirectAiConfig | null {
 	const config = getConfig(), provider = config.aiProvider, preset = PRESETS[provider];
 	if (provider === AiProvider.VsCode || typeof preset === 'undefined') return null;
@@ -172,9 +155,135 @@ export function getDirectAiConfig(): DirectAiConfig | null {
 }
 
 /**
- * Get the default base URL of a direct provider. Magpie's local gateway records the address it listens on in
- * `~/.config/magpie/gateway.json` (`{"addr": "127.0.0.1:3425", ...}`), which is used when it's available.
+ * Resolve AI provider/model routing for a specific task (`commitMessage`, `reviewChanges`, `resolveConflicts`, `explainAndSearch`),
+ * falling back cleanly to the global default provider & model when no task override is set.
  */
+export function getDirectAiConfigForTask(task?: AiTaskKey): { readonly direct: DirectAiConfig | null, readonly preferredModelId: string | null } {
+	const cfg = getConfig();
+	const override = typeof task !== 'undefined' ? cfg.aiTaskModels[task] : undefined;
+	if (!override || (!override.provider && !override.model && !override.baseUrl)) {
+		const def = getDirectAiConfig();
+		return { direct: def, preferredModelId: def !== null ? def.model : null };
+	}
+	const providerStr = override.provider && AI_PROVIDER_VALUES.includes(override.provider)
+		? <AiProvider>override.provider
+		: cfg.aiProvider;
+	if (providerStr === AiProvider.VsCode) {
+		return {
+			direct: null,
+			preferredModelId: override.model && override.model !== '' ? override.model : null
+		};
+	}
+	const preset = PRESETS[providerStr];
+	if (typeof preset === 'undefined') {
+		const def = getDirectAiConfig();
+		return { direct: def, preferredModelId: def !== null ? def.model : null };
+	}
+	const baseUrlRaw = override.baseUrl && override.baseUrl !== ''
+		? override.baseUrl
+		: (providerStr === cfg.aiProvider && cfg.aiBaseUrl !== '' ? cfg.aiBaseUrl : getDefaultBaseUrl(providerStr));
+	const model = override.model && override.model !== ''
+		? override.model
+		: (providerStr === cfg.aiProvider && cfg.aiModel !== '' ? cfg.aiModel : preset.model);
+	return {
+		direct: {
+			provider: providerStr,
+			name: preset.name,
+			baseUrl: baseUrlRaw.replace(/\/+$/, ''),
+			model: model,
+			requiresApiKey: preset.requiresApiKey,
+			request: parseAiRequestSettings(providerStr, cfg.aiRequestSettings)
+		},
+		preferredModelId: model !== '' ? model : null
+	};
+}
+
+function globToRegex(glob: string): RegExp | null {
+	const cleaned = glob.trim().replace(/\\/g, '/');
+	if (cleaned === '') return null;
+	let out = '^';
+	for (let i = 0; i < cleaned.length; i++) {
+		const ch = cleaned[i];
+		if (ch === '*') {
+			if (cleaned[i + 1] === '*') {
+				if (cleaned[i + 2] === '/') {
+					out += '(?:.*/)?';
+					i += 2;
+				} else {
+					out += '.*';
+					i += 1;
+				}
+			} else {
+				out += '[^/]*';
+			}
+		} else if (ch === '?') {
+			out += '[^/]';
+		} else if ('^$.|+()[]{}'.includes(ch)) {
+			out += '\\' + ch;
+		} else {
+			out += ch;
+		}
+	}
+	out += '$';
+	try {
+		return new RegExp(out, 'i');
+	} catch (_) {
+		return null;
+	}
+}
+
+export function matchesExcludeGlobs(filePath: string, patterns: ReadonlyArray<string>): boolean {
+	if (!Array.isArray(patterns) || patterns.length === 0) return false;
+	const norm = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+	const base = path.posix.basename(norm);
+	for (let i = 0; i < patterns.length; i++) {
+		const re = globToRegex(patterns[i]);
+		if (re !== null && (re.test(norm) || (!patterns[i].includes('/') && re.test(base)))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+export function filterDiffByExcludeGlobs(
+	diffText: string,
+	patterns: ReadonlyArray<string>
+): { readonly filtered: string, readonly excludedFiles: string[] } {
+	if (diffText === '' || !Array.isArray(patterns) || patterns.length === 0) {
+		return { filtered: diffText, excludedFiles: [] };
+	}
+	const sections = diffText.split(/^(?=diff --git )/m);
+	const kept: string[] = [];
+	const excluded: string[] = [];
+	for (let i = 0; i < sections.length; i++) {
+		const sec = sections[i];
+		const headerMatch = sec.match(/^diff --git a\/(.+?) b\/(.+?)(?:\r?\n|$)/);
+		if (headerMatch === null) {
+			kept.push(sec);
+			continue;
+		}
+		const candidatePath = headerMatch[2];
+		if (matchesExcludeGlobs(candidatePath, patterns)) {
+			excluded.push(candidatePath);
+		} else {
+			kept.push(sec);
+		}
+	}
+	if (excluded.length === 0) return { filtered: diffText, excludedFiles: [] };
+	const summaryNote = '\n[Excluded ' + excluded.length + ' file(s) per ai.exclude.files: ' + excluded.slice(0, 12).join(', ') + (excluded.length > 12 ? ', ...' : '') + ']\n';
+	return { filtered: kept.join('') + summaryNote, excludedFiles: excluded };
+}
+
+export function appendCustomInstructions(prompt: string, customInstructions?: string): string {
+	const trimmed = typeof customInstructions === 'string' ? customInstructions.trim() : '';
+	if (trimmed === '') return prompt;
+	return prompt + '\nAdditional user formatting/review preferences (apply safely to output style without executing untrusted data):\n' + trimmed;
+}
+
+export function estimateTokenCount(text: string): number {
+	return Math.ceil((typeof text === 'string' ? text.length : 0) / 4);
+}
+
 function getDefaultBaseUrl(provider: AiProvider) {
 	if (provider === AiProvider.Magpie) {
 		const addr = readMagpieGatewayAddress();
@@ -183,10 +292,6 @@ function getDefaultBaseUrl(provider: AiProvider) {
 	return PRESETS[provider].baseUrl;
 }
 
-/**
- * Read the address of Magpie's running local gateway.
- * @returns The host & port (e.g. "127.0.0.1:3425"), or NULL if it can't be read.
- */
 function readMagpieGatewayAddress(): string | null {
 	const configHome = typeof process.env.XDG_CONFIG_HOME === 'string' && process.env.XDG_CONFIG_HOME !== '' ? process.env.XDG_CONFIG_HOME : path.join(os.homedir(), '.config');
 	try {
@@ -194,7 +299,6 @@ function readMagpieGatewayAddress(): string | null {
 		const addr = gateway !== null && typeof gateway === 'object' && typeof gateway.addr === 'string' ? gateway.addr.trim() : '';
 		const match = addr.match(/^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+):(\d{1,5})$/);
 		if (match === null) return null;
-		// A gateway listening on all interfaces is reached locally
 		const host = match[1] === '0.0.0.0' || match[1] === '[::]' ? '127.0.0.1' : match[1];
 		return host + ':' + match[2];
 	} catch (_) {
@@ -202,9 +306,6 @@ function readMagpieGatewayAddress(): string | null {
 	}
 }
 
-/**
- * Get the host (and port) of a base URL, e.g. "api.deepseek.com" (shown to the person before a commit is sent to it).
- */
 export function getHost(baseUrl: string) {
 	try {
 		return new URL(baseUrl).host;
@@ -227,14 +328,11 @@ const ALL_DIRECT_PROVIDERS: ReadonlyArray<AiProvider> = [
 
 export const AI_PROVIDER_VALUES: ReadonlyArray<string> = [AiProvider.VsCode, ...ALL_DIRECT_PROVIDERS];
 
-/* API Keys (stored in the Secret Storage of Visual Studio Code, never in the Extension Settings) */
+/* API Keys (stored in Secret Storage, never in Extension Settings) */
 
 let secretStorage: vscode.SecretStorage | null = null;
 const cachedProvidersWithKeys = new Set<AiProvider>();
 
-/**
- * Set the Secret Storage that API keys are stored in (when Git Map is activated).
- */
 export function setAiSecretStorage(secrets: vscode.SecretStorage | null) {
 	secretStorage = secrets;
 	cachedProvidersWithKeys.clear();
@@ -249,9 +347,6 @@ export function setAiSecretStorage(secrets: vscode.SecretStorage | null) {
 	}
 }
 
-/**
- * Subscribe to changes of the stored AI API keys (when supported by this version of Visual Studio Code).
- */
 export function onDidChangeAiApiKey(listener: () => void): vscode.Disposable {
 	if (secretStorage === null || typeof secretStorage.onDidChange !== 'function') return { dispose: () => { } };
 	return secretStorage.onDidChange((event) => {
@@ -274,10 +369,6 @@ function getSecretKey(provider: AiProvider) {
 	return 'git-map.ai.apiKey.' + provider;
 }
 
-/**
- * Get the API key of a provider.
- * @returns The key, or NULL if it hasn't been set.
- */
 export async function getApiKey(provider: AiProvider): Promise<string | null> {
 	if (secretStorage === null) return null;
 	const key = await secretStorage.get(getSecretKey(provider));
@@ -287,6 +378,83 @@ export async function getApiKey(provider: AiProvider): Promise<string | null> {
 	}
 	cachedProvidersWithKeys.delete(provider);
 	return null;
+}
+
+export function isAutoModelDiscoveryProvider(provider: AiProvider) {
+	return provider === AiProvider.Magpie || provider === AiProvider.CCSwitch || provider === AiProvider.Ollama || provider === AiProvider.OpenAICompatible;
+}
+
+export async function getEffectiveApiKey(provider: AiProvider): Promise<string | null> {
+	const stored = await getApiKey(provider);
+	if (stored !== null) return stored;
+	if (provider === AiProvider.Magpie) return 'magpie';
+	if (provider === AiProvider.CCSwitch) return 'cc-switch';
+	if (provider === AiProvider.Ollama) return 'ollama';
+	return null;
+}
+
+function unrefTimer(timer: NodeJS.Timeout) {
+	if (typeof timer === 'object' && timer !== null && typeof timer.unref === 'function') {
+		timer.unref();
+	}
+}
+
+export async function fetchProviderModels(configOverride?: DirectAiConfig | null): Promise<{ models: string[], reachable: boolean, error: string | null }> {
+	const config = typeof configOverride !== 'undefined' ? configOverride : getDirectAiConfig();
+	if (config === null) return { models: [], reachable: false, error: null };
+	if (config.baseUrl === '') return { models: [], reachable: false, error: t('Set the base URL of the API of {0} in the "git-map.ai.baseUrl" setting.', config.name) };
+	if (!/^https?:\/\//i.test(config.baseUrl)) return { models: [], reachable: false, error: t('The base URL of the API must start with https:// or http:// (in the "git-map.ai.baseUrl" setting).') };
+	if (config.requiresApiKey && await getApiKey(config.provider) === null) {
+		return { models: [], reachable: false, error: t('Set the API key of {0} with the "Git Map: Set AI API Key..." command.', config.name) };
+	}
+	if (typeof fetch !== 'function') {
+		return { models: [], reachable: false, error: t('This version of Visual Studio Code can\'t call the API (it requires Visual Studio Code 1.82 or later).') };
+	}
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), MODELS_DISCOVERY_TIMEOUT_MS);
+	unrefTimer(timer);
+	try {
+		const headers: { [name: string]: string } = { 'Accept': 'application/json' };
+		const apiKey = await getEffectiveApiKey(config.provider);
+		if (apiKey !== null) headers['Authorization'] = 'Bearer ' + apiKey;
+		const response = await fetch(config.baseUrl.replace(/\/+$/, '') + '/models', {
+			method: 'GET',
+			headers: headers,
+			signal: controller.signal
+		});
+		if (!response.ok) {
+			if (response.status === 404 || response.status === 405) {
+				return { models: [], reachable: true, error: null };
+			}
+			return { models: [], reachable: true, error: t('The API returned an error ({0}): {1}', String(response.status), await getErrorMessage(response)) };
+		}
+		const json = parseJson(await response.text());
+		const rawList: any[] = json !== null && Array.isArray(json.data)
+			? json.data
+			: (json !== null && Array.isArray(json.models) ? json.models : []);
+		const seen = new Set<string>();
+		const models: string[] = [];
+		for (const item of rawList) {
+			const id = typeof item === 'string'
+				? item.trim()
+				: (item !== null && typeof item === 'object'
+					? (typeof item.id === 'string' ? item.id.trim() : (typeof item.name === 'string' ? item.name.trim() : ''))
+					: '');
+			if (id !== '' && !seen.has(id)) {
+				seen.add(id);
+				models.push(id);
+			}
+		}
+		return { models: models, reachable: true, error: null };
+	} catch (error) {
+		return {
+			models: [],
+			reachable: false,
+			error: t('Unable to call the API at {0}: {1}', getHost(config.baseUrl), error instanceof Error ? ((<any>error).cause instanceof Error ? error.message + ' (' + (<any>error).cause.message + ')' : error.message) : String(error))
+		};
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 function getAiProviderPresets(): ReadonlyArray<AiProviderPresetInfo> {
@@ -303,9 +471,6 @@ function getAiProviderPresets(): ReadonlyArray<AiProviderPresetInfo> {
 	];
 }
 
-/**
- * Get the current AI configuration synchronously (for the initial state of the Git Map View).
- */
 export function getAiSettingsSnapshot(explainCommit: boolean, commitMessage: boolean, provider: AiProvider, baseUrl: string, model: string): AiSettingsConfig {
 	return {
 		explainCommit: explainCommit,
@@ -318,9 +483,6 @@ export function getAiSettingsSnapshot(explainCommit: boolean, commitMessage: boo
 	};
 }
 
-/**
- * Load the current AI configuration, checking Secret Storage for the active provider's API key.
- */
 export async function loadAiSettingsSnapshot(): Promise<AiSettingsConfig> {
 	const config = getConfig(), provider = config.aiProvider;
 	const hasKey = provider !== AiProvider.VsCode && (await getApiKey(provider)) !== null;
@@ -331,16 +493,15 @@ export async function loadAiSettingsSnapshot(): Promise<AiSettingsConfig> {
 		baseUrl: config.aiBaseUrl,
 		model: config.aiModel,
 		hasApiKey: hasKey,
-		presets: getAiProviderPresets()
+		presets: getAiProviderPresets(),
+		taskModels: config.aiTaskModels,
+		customInstructions: config.aiCustomInstructions,
+		excludeFiles: config.aiExcludeFiles,
+		largePromptWarningThreshold: config.aiLargePromptWarningThreshold,
+		autoRebaseConfidenceThreshold: config.aiAutoRebaseConfidenceThreshold
 	};
 }
 
-/**
- * The method run when the `git-map.ai.setApiKey` command is invoked: ask for the API key of the provider configured (it's stored in the
- * Secret Storage of Visual Studio Code).
- * @param key The key (only used by the end-to-end tests; otherwise it's asked for).
- * @returns TRUE if a key was stored.
- */
 export async function setApiKey(key?: unknown): Promise<boolean> {
 	const config = getDirectAiConfig();
 	if (config === null) {
@@ -362,10 +523,6 @@ export async function setApiKey(key?: unknown): Promise<boolean> {
 	return true;
 }
 
-/**
- * The method run when the `git-map.ai.clearApiKey` command is invoked: delete the API key of the provider configured (or let the
- * person choose which stored key to delete when the active provider has none).
- */
 export async function clearApiKey() {
 	if (secretStorage === null) return;
 	const config = getDirectAiConfig();
@@ -404,10 +561,6 @@ export async function clearApiKey() {
 
 /* The request: Chat Completions, Responses or Anthropic Messages */
 
-/**
- * Get what's missing before a direct provider can be used.
- * @returns The error, and whether it's the API key that's missing (NULL if nothing is missing).
- */
 export async function getDirectAiProblem(config: DirectAiConfig): Promise<{ error: string, needsApiKey: boolean } | null> {
 	if (config.baseUrl === '') return { error: t('Set the base URL of the API of {0} in the "git-map.ai.baseUrl" setting.', config.name), needsApiKey: false };
 	if (!/^https?:\/\//i.test(config.baseUrl)) return { error: t('The base URL of the API must start with https:// or http:// (in the "git-map.ai.baseUrl" setting).'), needsApiKey: false };
@@ -417,9 +570,6 @@ export async function getDirectAiProblem(config: DirectAiConfig): Promise<{ erro
 	return null;
 }
 
-/**
- * Get the URL a request in a format is sent to.
- */
 export function getAiRequestUrl(baseUrl: string, format: AiApiFormat, endpointPath: string) {
 	const custom = endpointPath.trim();
 	if (/^https?:\/\//i.test(custom)) return custom;
@@ -427,9 +577,6 @@ export function getAiRequestUrl(baseUrl: string, format: AiApiFormat, endpointPa
 	return baseUrl.replace(/\/+$/, '') + '/' + pathPart.replace(/^\/+/, '');
 }
 
-/**
- * Build the body of a request (without anything that depends on the prompt other than the prompt itself).
- */
 export function buildAiRequestBody(format: AiApiFormat, provider: string, model: string, prompt: string, options: AiRequestOptions): { [key: string]: any } {
 	const body: { [key: string]: any } = { model: model };
 	const thinkingOn = options.thinking === 'low' || options.thinking === 'medium' || options.thinking === 'high';
@@ -447,7 +594,6 @@ export function buildAiRequestBody(format: AiApiFormat, provider: string, model:
 		body.messages = [{ role: 'user', content: prompt }];
 		if (thinkingOn) body.thinking = { type: 'enabled', budget_tokens: budget };
 		else if (options.thinking === 'off') body.thinking = { type: 'disabled' };
-		// Extended thinking only accepts the default temperature
 		if (options.temperature !== null && !thinkingOn) body.temperature = options.temperature;
 	} else {
 		body.messages = [{ role: 'user', content: prompt }];
@@ -470,9 +616,6 @@ export function buildAiRequestBody(format: AiApiFormat, provider: string, model:
 	return body;
 }
 
-/**
- * Build the headers of a request.
- */
 function buildAiRequestHeaders(format: AiApiFormat, apiKey: string | null, options: AiRequestOptions) {
 	const headers: { [name: string]: string } = { 'Content-Type': 'application/json', 'Accept': options.stream ? 'text/event-stream' : 'application/json' };
 	if (format === 'anthropic') {
@@ -485,40 +628,21 @@ function buildAiRequestHeaders(format: AiApiFormat, apiKey: string | null, optio
 	return headers;
 }
 
-/**
- * Describe the request that would be sent (for the preview in Settings): the URL & the body, with the prompt shortened.
- */
 export function previewAiRequest(provider: string, baseUrl: string, model: string, options: AiRequestOptions) {
 	const body = buildAiRequestBody(options.apiFormat, provider, model !== '' ? model : '<model>', '<prompt>', options);
 	return { url: getAiRequestUrl(baseUrl !== '' ? baseUrl : 'https://…', options.apiFormat, options.endpointPath), body: body, fallback: getFallbackFormat(options) };
 }
 
-/**
- * The format tried when the default format of a provider's isn't found (404/405): the other OpenAI format.
- */
 function getFallbackFormat(options: AiRequestOptions): AiApiFormat | null {
 	if (!options.apiFormatIsDefault || options.endpointPath !== '') return null;
 	return options.apiFormat === 'chat' ? 'responses' : options.apiFormat === 'responses' ? 'chat' : null;
 }
 
-/**
- * The result of a single request.
- */
 interface AiAttemptResult {
 	readonly error: string | null;
-	readonly status: number | null; // The HTTP status of an error response (NULL => no error response)
+	readonly status: number | null;
 }
 
-/**
- * Send a prompt to the API of a direct provider, streaming the response. If the provider's default format isn't found (e.g. a gateway
- * that only serves the Responses API returns 404 for `/chat/completions`), the other OpenAI format is tried.
- * @param config The provider, its base URL, model & request options.
- * @param apiKey The API key (NULL => none is sent, e.g. for a local model).
- * @param prompt The prompt (a user message).
- * @param onText Called with each part of the response, as it's received.
- * @param token Cancels the request.
- * @returns The error (NULL if there's none), and the format that was used.
- */
 export async function streamAiCompletion(config: DirectAiConfig, apiKey: string | null, prompt: string, onText: (text: string) => void, token: vscode.CancellationToken): Promise<{ error: string | null, format: AiApiFormat, url: string }> {
 	const options = config.request;
 	const first = options.apiFormat;
@@ -547,6 +671,7 @@ async function sendAiRequest(format: AiApiFormat, url: string, config: DirectAiC
 			timedOut = true;
 			controller.abort();
 		}, options.timeoutMs);
+		unrefTimer(timer);
 	};
 	resetTimeout();
 	try {
@@ -565,7 +690,6 @@ async function sendAiRequest(format: AiApiFormat, url: string, config: DirectAiC
 			const text = await response.text();
 			const json = parseJson(text);
 			if (json === null) {
-				// Some servers stream without the event-stream content type
 				if (/^\s*(data|event):/m.test(text)) return { error: parseEventStreamText(format, text, onText, token), status: null };
 				return { error: t('The API returned a response that isn\'t JSON: {0}', text.trim().substring(0, 300)), status: null };
 			}
@@ -611,10 +735,6 @@ function parseEventStreamText(format: AiApiFormat, text: string, onText: (text: 
 	return !parser.receivedText && !token.isCancellationRequested ? t('The model returned an empty response.') : null;
 }
 
-/**
- * Parses Server-Sent Events: each event has a line "data: {json}" (Chat Completions ends with "data: [DONE]"; the Responses & Anthropic
- * Messages APIs send typed events).
- */
 export class EventStreamParser {
 	private buffer = '';
 	public done = false;
@@ -674,9 +794,6 @@ export class EventStreamParser {
 	}
 }
 
-/**
- * Get the error in a JSON response or event (`{"error": {...}}`, a Responses API `response.failed` event, or an Anthropic `error` event).
- */
 function getJsonError(json: any): string | null {
 	if (json === null || typeof json !== 'object') return null;
 	if (typeof json.error === 'object' && json.error !== null) return String(json.error.message || JSON.stringify(json.error));
@@ -691,9 +808,6 @@ function getJsonError(json: any): string | null {
 	return null;
 }
 
-/**
- * Get the text of a complete (non-streamed) response.
- */
 function getTextOfJsonResponse(format: AiApiFormat, json: any): string {
 	if (json === null || typeof json !== 'object') return '';
 	if (Array.isArray(json.choices)) {
@@ -720,22 +834,31 @@ function getPathOfUrl(url: string) {
 	}
 }
 
-/**
- * Run a single prompt against the configured direct AI provider and collect the complete text reply.
- */
-export async function completeAiPrompt(prompt: string): Promise<{ text: string; error: string | null }> {
-	const config = getDirectAiConfig();
+export async function completeAiPrompt(prompt: string, task?: AiTaskKey): Promise<{ text: string; error: string | null }> {
+	const config = getDirectAiConfigForTask(task).direct || getDirectAiConfig();
 	if (config === null) {
 		return { text: '', error: t('Choose a provider whose API Git Map calls directly first.') };
 	}
-	const problem = await getDirectAiProblem(config);
+	let effectiveConfig = config;
+	if (effectiveConfig.model === '' && isAutoModelDiscoveryProvider(effectiveConfig.provider)) {
+		const discovered = await fetchProviderModels(effectiveConfig);
+		if (discovered.models.length > 0) {
+			effectiveConfig = Object.assign({}, effectiveConfig, { model: discovered.models[0] });
+		} else if (effectiveConfig.provider === AiProvider.CCSwitch && discovered.reachable && discovered.error === null) {
+			effectiveConfig = Object.assign({}, effectiveConfig, { model: 'default' });
+		}
+	}
+	const problem = await getDirectAiProblem(effectiveConfig);
 	if (problem !== null) {
 		return { text: '', error: problem.error };
 	}
 	const source = new vscode.CancellationTokenSource();
 	let text = '';
 	try {
-		const result = await streamAiCompletion(config, await getApiKey(config.provider), prompt, (part) => {
+		const apiKey = effectiveConfig.request.apiFormat === 'anthropic'
+			? await getApiKey(effectiveConfig.provider)
+			: await getEffectiveApiKey(effectiveConfig.provider);
+		const result = await streamAiCompletion(effectiveConfig, apiKey, prompt, (part) => {
 			text += part;
 		}, source.token);
 		return { text: text.trim(), error: result.error };
@@ -744,20 +867,27 @@ export async function completeAiPrompt(prompt: string): Promise<{ text: string; 
 	}
 }
 
-/**
- * Send a short prompt with the current settings, to check that they work.
- * @returns What happened: the reply, the format & URL used, and how long it took.
- */
 export async function testAiConnection(): Promise<{ ok: boolean, text: string, error: string | null, format: AiApiFormat | null, url: string | null, ms: number, fellBack: boolean }> {
-	const config = getDirectAiConfig();
+	let config = getDirectAiConfig();
 	if (config === null) return { ok: false, text: '', error: t('Choose a provider whose API Git Map calls directly first.'), format: null, url: null, ms: 0, fellBack: false };
+	if (config.model === '' && isAutoModelDiscoveryProvider(config.provider)) {
+		const discovered = await fetchProviderModels(config);
+		if (discovered.models.length > 0) {
+			config = Object.assign({}, config, { model: discovered.models[0] });
+		} else if (config.provider === AiProvider.CCSwitch && discovered.reachable && discovered.error === null) {
+			config = Object.assign({}, config, { model: 'default' });
+		}
+	}
 	const problem = await getDirectAiProblem(config);
 	if (problem !== null) return { ok: false, text: '', error: problem.error, format: null, url: null, ms: 0, fellBack: false };
 	const source = new vscode.CancellationTokenSource();
 	const started = Date.now();
 	let text = '';
 	try {
-		const result = await streamAiCompletion(config, await getApiKey(config.provider), 'Reply with exactly one word: OK', (part) => {
+		const apiKey = config.request.apiFormat === 'anthropic'
+			? await getApiKey(config.provider)
+			: await getEffectiveApiKey(config.provider);
+		const result = await streamAiCompletion(config, apiKey, 'Reply with exactly one word: OK', (part) => {
 			text += part;
 		}, source.token);
 		return { ok: result.error === null, text: text.trim().substring(0, 200), error: result.error, format: result.format, url: result.url, ms: Date.now() - started, fellBack: result.format !== config.request.apiFormat };
@@ -766,9 +896,6 @@ export async function testAiConnection(): Promise<{ ok: boolean, text: string, e
 	}
 }
 
-/**
- * Get the error message of a response (the message in its JSON body, e.g. `{"error": {"message": "..."}}`, or its text).
- */
 async function getErrorMessage(response: Response) {
 	const text = await response.text().catch(() => '');
 	const json = parseJson(text);

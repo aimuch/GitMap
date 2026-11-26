@@ -9,6 +9,7 @@ const STYLES_DIRECTORY = path.join(ROOT, 'web', 'styles');
 const MAIN_CSS_FILE = 'main.css';
 const MAIN_JS_FILE = 'main.js';
 const UTILS_JS_FILE = 'utils.js';
+const STATE_MACHINES_JS_FILE = 'stateMachines.js';
 
 const OUTPUT_MIN_CSS_FILE = 'out.min.css';
 const OUTPUT_MIN_JS_FILE = 'out.min.js';
@@ -18,10 +19,10 @@ const DEBUG = process.argv.length > 2 && process.argv[2] === 'debug';
 
 fs.mkdirSync(MEDIA_DIRECTORY, { recursive: true });
 
-// Order: utils.js, *.js, main.js
-const packageJsFiles = [path.join(MEDIA_DIRECTORY, UTILS_JS_FILE)];
+// Order: utils.js, stateMachines.js, *.js, main.js
+const packageJsFiles = [path.join(MEDIA_DIRECTORY, UTILS_JS_FILE), path.join(MEDIA_DIRECTORY, STATE_MACHINES_JS_FILE)];
 fs.readdirSync(MEDIA_DIRECTORY).sort().forEach((fileName) => {
-  if (fileName.endsWith('.js') && fileName !== OUTPUT_MIN_JS_FILE && fileName !== OUTPUT_TMP_JS_FILE && fileName !== UTILS_JS_FILE && fileName !== MAIN_JS_FILE) {
+  if (fileName.endsWith('.js') && fileName !== OUTPUT_MIN_JS_FILE && fileName !== OUTPUT_TMP_JS_FILE && fileName !== UTILS_JS_FILE && fileName !== STATE_MACHINES_JS_FILE && fileName !== MAIN_JS_FILE) {
     packageJsFiles.push(path.join(MEDIA_DIRECTORY, fileName));
   }
 });

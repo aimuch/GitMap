@@ -54,12 +54,17 @@ const SVG_ICONS = {
 	chevron: '<svg class="toolbarIcon chevron" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>',
 	cloud: '<svg class="toolbarIcon refIcon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5h7.25a2.75 2.75 0 0 0 .4-5.47A4 4 0 0 0 4.4 6.3 3.1 3.1 0 0 0 4.5 12.5z"/></svg>',
 	columns: '<svg class="toolbarIcon" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3h11v10h-11z"/><path d="M6.25 3v10M9.75 3v10"/></svg>',
+	compass: '<svg class="toolbarIcon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><polygon points="10.8 5.2 9.1 9.1 5.2 10.8 6.9 6.9 10.8 5.2"/></svg>',
 	undo: '<svg class="toolbarIcon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3L2.5 6l3 3"/><path d="M2.5 6h7a4 4 0 0 1 0 8H7"/></svg>',
 	review: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="m4,4.7 -4,7.3 4,7.3 2.5,0 -4,-7.3 4,-7.3zM11.5,6C9,5.5 6.6,7.1 6.1,9.6c-0.5,2.6 1.1,5 3.6,5.5 1,0.2 1.8,0.1 2.7,-0.3l2.5,3.3c0.1,0.1 0.3,0.2 0.5,0.3 0.2,0 0.4,0 0.6,-0.1 0.3,-0.2 0.4,-0.4 0.4,-0.6 0,-0.2 0,-0.4 -0.1,-0.6 0,-0.2 -2.4,-3.3 -2.4,-3.3 0.7,-0.6 1,-1.5 1.3,-2.4C15.7,8.9 14,6.5 11.5,6zm8.5,-1.3 -2.5,0 4,7.3 -4.2,7.3 2.5,0L24,12zm-8.8,3c1.6,0.3 2.6,1.8 2.3,3.4 -0.3,1.6 -1.8,2.6 -3.4,2.3C8.5,13 7.4,11.6 7.8,10 8,8.4 9.6,7.3 11.2,7.7z"/></svg>'
 };
 
 function strokeIcon(paths: string) {
 	return '<svg class="uiIcon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
+}
+
+function colorIcon(paths: string, extraClass: string = '') {
+	return '<svg class="uiIcon aiColorIcon' + (extraClass ? ' ' + extraClass : '') + '" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
 }
 
 const MENU_ICONS = {
@@ -83,7 +88,7 @@ const MENU_ICONS = {
 	subject: strokeIcon('<path d="M2.5 4.5h11M2.5 8h8.5M2.5 11.5h6"/>'),
 	patchSave: strokeIcon('<path d="M4 2h5.5L13 5.5V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M9.5 2v3.5H13M8 7.5v4M6.2 9.8L8 11.6l1.8-1.8"/>'),
 	patchApply: strokeIcon('<path d="M4 2h5.5L13 5.5V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M9.5 2v3.5H13M6 9.5h4M8 7.5v4"/>'),
-	sparkle: strokeIcon('<path d="M8 1.5l1.6 3.9 3.9 1.6-3.9 1.6L8 12.5 6.4 8.6 2.5 7l3.9-1.6z"/>'),
+	sparkle: colorIcon('<path d="M7.1 1.7l1.45 3.65L12.2 6.8 8.55 8.25 7.1 11.9 5.65 8.25 2 6.8l3.65-1.45z" fill="#A855F7" stroke="#C084FC" stroke-width="0.6"/><path d="M12.6 1.2l.58 1.48 1.48.58-1.48.58-.58 1.48-.58-1.48-1.48-.58 1.48-.58z" fill="#FBBF24"/><path d="M12.2 10.3l.5 1.28 1.28.5-1.28.5-.5 1.28-.5-1.28-1.28-.5 1.28-.5z" fill="#22D3EE"/>'),
 	stash: strokeIcon('<path d="M2.5 9.5l1.5-6h8l1.5 6v3.5h-11z"/><path d="M2.5 9.5h3.5l.5 1.5h3l.5-1.5h3.5"/>'),
 	stashApply: strokeIcon('<path d="M2.5 9.5l1.2-4.8h8.6l1.2 4.8v3.5h-11z"/><path d="M8 2v5.5M5.8 5.5L8 7.7l2.2-2.2"/>'),
 	stashPop: strokeIcon('<path d="M2.5 9.5l1.2-4.8h8.6l1.2 4.8v3.5h-11z"/><path d="M8 7.8V2M5.8 4.2L8 2l2.2 2.2"/>'),
@@ -118,13 +123,20 @@ const MENU_ICONS = {
 	terminal: strokeIcon('<rect x="2" y="3" width="12" height="10" rx="1.2"/><path d="M5 6.5L7.5 8.5 5 10.5M8.5 10.5h2.5"/>'),
 	stop: strokeIcon('<circle cx="8" cy="8" r="5.8"/><rect x="6" y="6" width="4" height="4" rx="0.6"/>'),
 	cloud: strokeIcon('<path d="M4.5 12.2h7.2a2.7 2.7 0 0 0 .4-5.4A3.9 3.9 0 0 0 4.4 6.1a3 3 0 0 0 .1 6.1z"/>'),
-	foldDiff: strokeIcon('<path d="M5.5 2.5L8 5l2.5-2.5M5.5 13.5L8 11l2.5 2.5M2.5 8h11"/>')
+	foldDiff: strokeIcon('<path d="M5.5 2.5L8 5l2.5-2.5M5.5 13.5L8 11l2.5 2.5M2.5 8h11"/>'),
+	agent: colorIcon('<circle cx="8" cy="1.9" r="1.1" fill="#FBBF24"/><path d="M8 3v1.6" stroke="#38BDF8" stroke-width="1.35"/><path d="M1.4 8.6H2.8M13.2 8.6h1.4" stroke="#A855F7" stroke-width="1.4"/><rect x="2.8" y="4.6" width="10.4" height="8.2" rx="2" fill="#38BDF8" fill-opacity="0.16" stroke="#38BDF8" stroke-width="1.35"/><circle cx="6.1" cy="8.2" r="1" fill="#C084FC"/><circle cx="9.9" cy="8.2" r="1" fill="#C084FC"/><path d="M6.1 10.7h3.8" stroke="#22D3EE" stroke-width="1.3"/>'),
+	link: strokeIcon('<path d="M6.5 11H4.8a3 3 0 0 1 0-6h1.7M9.5 5h1.7a3 3 0 0 1 0 6H9.5M5.5 8h5"/>'),
+	scm: strokeIcon('<circle cx="8" cy="8" r="6"/><circle cx="6.2" cy="5.5" r="1"/><circle cx="6.2" cy="10.5" r="1"/><circle cx="10.2" cy="7.5" r="1"/><path d="M6.2 6.5v3M10.2 8.5c0 1.4-4 1-4 2"/>'),
+	blame: strokeIcon('<path d="M2.2 8.5a6.2 6.2 0 0 1 11.6 0"/><path d="M4.5 9.8a3.8 3.8 0 0 1 7 0"/><circle cx="8" cy="11.2" r="1.3"/>'),
+	menus: strokeIcon('<rect x="2" y="4" width="12" height="8" rx="1.6"/><circle cx="5.2" cy="8" r="0.8"/><circle cx="8" cy="8" r="0.8"/><circle cx="10.8" cy="8" r="0.8"/>'),
+	expandWidth: strokeIcon('<path d="M2.5 8h11M5.5 5L2.5 8l3 3M10.5 5l3 3-3 3"/>'),
+	restoreWidth: strokeIcon('<path d="M1.5 8h4.5M4 5.5L6.5 8 4 10.5M14.5 8H10M12 5.5L9.5 8 12 10.5"/>')
 };
 
 const DEFAULT_CDV_COMMIT_ACTIONS: ReadonlyArray<string> = ['checkout', 'createBranch', 'cherrypick'];
 const DEFAULT_ROW_COMMIT_ACTIONS: ReadonlyArray<string> = ['createBranch', 'checkout', 'cherrypick', 'copyHash'];
 
-function getCommitActionCatalog(): ReadonlyArray<{ readonly id: string, readonly title: string, readonly icon: string }> {
+function getCommitActionCatalog(): ReadonlyArray<{ readonly id: string, readonly title: string, readonly icon: string, readonly conditional?: boolean }> {
 	return [
 		{ id: 'checkout', title: t('Checkout') + ELLIPSIS, icon: MENU_ICONS.checkout },
 		{ id: 'createBranch', title: t('Create Branch') + ELLIPSIS, icon: MENU_ICONS.createBranch },
@@ -132,15 +144,18 @@ function getCommitActionCatalog(): ReadonlyArray<{ readonly id: string, readonly
 		{ id: 'addTag', title: t('Add Tag') + ELLIPSIS, icon: MENU_ICONS.tag },
 		{ id: 'createWorktree', title: t('Create Worktree') + ELLIPSIS, icon: MENU_ICONS.worktree },
 		{ id: 'revert', title: t('Revert') + ELLIPSIS, icon: MENU_ICONS.revert },
-		{ id: 'drop', title: t('Drop') + ELLIPSIS, icon: MENU_ICONS.trash },
-		{ id: 'editMessage', title: t('Edit Commit Message') + ELLIPSIS, icon: MENU_ICONS.edit },
-		{ id: 'undoCommit', title: t('Undo Commit') + ELLIPSIS, icon: MENU_ICONS.revert },
-		{ id: 'fixup', title: t('Fix Up Staged Changes into this Commit') + ELLIPSIS, icon: MENU_ICONS.fixup },
+		{ id: 'drop', title: t('Drop') + ELLIPSIS, icon: MENU_ICONS.trash, conditional: true },
+		{ id: 'editMessage', title: t('Edit Commit Message') + ELLIPSIS, icon: MENU_ICONS.edit, conditional: true },
+		{ id: 'amendCommit', title: t('Amend Commit') + ELLIPSIS, icon: MENU_ICONS.edit, conditional: true },
+		{ id: 'undoCommit', title: t('Undo Commit') + ELLIPSIS, icon: MENU_ICONS.revert, conditional: true },
+		{ id: 'fixup', title: t('Fix Up Staged Changes into this Commit') + ELLIPSIS, icon: MENU_ICONS.fixup, conditional: true },
 		{ id: 'merge', title: t('Merge into current branch') + ELLIPSIS, icon: MENU_ICONS.merge },
 		{ id: 'rebase', title: t('Rebase current branch on this Commit') + ELLIPSIS, icon: MENU_ICONS.rebase },
 		{ id: 'reset', title: t('Reset current branch to this Commit') + ELLIPSIS, icon: MENU_ICONS.reset },
-		{ id: 'bisectBad', title: t('Start Bisecting: This Commit is Bad') + ELLIPSIS, icon: MENU_ICONS.bisectBad },
-		{ id: 'bisectGood', title: t('Start Bisecting: This Commit is Good') + ELLIPSIS, icon: MENU_ICONS.bisectGood },
+		{ id: 'bisectBad', title: t('Start Bisecting: This Commit is Bad') + ELLIPSIS, icon: MENU_ICONS.bisectBad, conditional: true },
+		{ id: 'bisectGood', title: t('Start Bisecting: This Commit is Good') + ELLIPSIS, icon: MENU_ICONS.bisectGood, conditional: true },
+		{ id: 'bisectSkip', title: t('Skip (Can\'t Be Tested)'), icon: MENU_ICONS.bisectSkip, conditional: true },
+		{ id: 'aiReview', title: t('AI Review Commit') + ELLIPSIS, icon: MENU_ICONS.sparkle },
 		{ id: 'copyHash', title: t('Copy Commit Hash to Clipboard'), icon: MENU_ICONS.copy },
 		{ id: 'copySubject', title: t('Copy Commit Subject to Clipboard'), icon: MENU_ICONS.subject },
 		{ id: 'savePatch', title: t('Save as Patch') + ELLIPSIS, icon: MENU_ICONS.patchSave },
@@ -192,6 +207,7 @@ const CLASS_DISABLED = 'disabled';
 const CLASS_ENABLED = 'enabled';
 const CLASS_FETCH_SUPPORTED = 'fetchSupported';
 const CLASS_FOCUSSED = 'focussed';
+const CLASS_LAST_VIEWED_FILE = 'lastViewed';
 const CLASS_LOADING = 'loading';
 const CLASS_PENDING_REVIEW = 'pendingReview';
 const CLASS_REFRESHING = 'refreshing';
@@ -216,13 +232,6 @@ const ATTR_ERROR = 'data-error';
 
 /* General Helpers */
 
-/**
- * Are two arrays equal, such that corresponding elements at each index are equal according to the `equalElements` method.
- * @param a An array.
- * @param b An array.
- * @param equalElements A function used to determine if two elements, each at the same index of `a` & `b`, are equal.
- * @returns TRUE => The arrays are equal, FALSE => The arrays are not equal
- */
 function arraysEqual<T>(a: ReadonlyArray<T>, b: ReadonlyArray<T>, equalElements: (a: T, b: T) => boolean) {
 	if (a.length !== b.length) return false;
 	for (let i = 0; i < a.length; i++) {
@@ -231,12 +240,6 @@ function arraysEqual<T>(a: ReadonlyArray<T>, b: ReadonlyArray<T>, equalElements:
 	return true;
 }
 
-/**
- * Are two arrays equal, such that corresponding elements at each index are strictly equal.
- * @param a An array.
- * @param b An array.
- * @returns TRUE => The arrays are equal, FALSE => The arrays are not equal
- */
 function arraysStrictlyEqual<T>(a: ReadonlyArray<T>, b: ReadonlyArray<T>) {
 	if (a.length !== b.length) return false;
 	for (let i = 0; i < a.length; i++) {
@@ -245,12 +248,6 @@ function arraysStrictlyEqual<T>(a: ReadonlyArray<T>, b: ReadonlyArray<T>) {
 	return true;
 }
 
-/**
- * Are two arrays equal, such that corresponding elements of each array are in strictly equal to an element in the other array (i.e. the order of elements doesn't matter).
- * @param a An array.
- * @param b An array.
- * @returns TRUE => The arrays are equal, FALSE => The arrays are not equal
- */
 function arraysStrictlyEqualIgnoringOrder<T>(a: ReadonlyArray<T>, b: ReadonlyArray<T>) {
 	if (a.length !== b.length) return false;
 	for (let i = 0; i < a.length; i++) {
@@ -259,12 +256,6 @@ function arraysStrictlyEqualIgnoringOrder<T>(a: ReadonlyArray<T>, b: ReadonlyArr
 	return true;
 }
 
-/**
- * Modify the opacity of an RGB/RGBA/HEX colour by multiplying it by a new opacity.
- * @param colour The colour to modify.
- * @param opacity The multiplier for the opacity (between 0 & 1).
- * @returns An equivalent RGBA colour with the applied opacity.
- */
 function modifyColourOpacity(colour: string, opacity: number) {
 	let fadedCol = 'rgba(0,0,0,0)', match;
 	if ((match = colour.match(/rgba\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/)) !== null) {
@@ -284,11 +275,6 @@ function modifyColourOpacity(colour: string, opacity: number) {
 	return fadedCol;
 }
 
-/**
- * Get the colour used to show an author's initial (derived from their name, so each author has the same colour everywhere).
- * @param name The name of the author.
- * @returns The colour.
- */
 function getAuthorColour(name: string) {
 	let hash = 0;
 	for (let i = 0; i < name.length; i++) {
@@ -297,36 +283,20 @@ function getAuthorColour(name: string) {
 	return 'hsl(' + hash + ',45%,40%)';
 }
 
-/**
- * Pad a number with a leading zero, so it contains at least two digits.
- * @param i The number to pad.
- * @returns The padded number.
- */
 function pad2(i: number) {
 	return i > 9 ? i : '0' + i;
 }
 
-/**
- * Get a short name for a repository.
- * @param path The path of the repository.
- * @returns The short name.
- */
 function getRepoName(path: string) {
 	const firstSep = path.indexOf('/');
 	if (firstSep === path.length - 1 || firstSep === -1) {
-		return path; // Path has no slashes, or a single trailing slash ==> use the path
+		return path;
 	} else {
-		const p = path.endsWith('/') ? path.substring(0, path.length - 1) : path; // Remove trailing slash if it exists
+		const p = path.endsWith('/') ? path.substring(0, path.length - 1) : path;
 		return p.substring(p.lastIndexOf('/') + 1);
 	}
 }
 
-/**
- * Get a sorted list of repository paths from a given GitRepoSet.
- * @param repos The set of repositories.
- * @param order The order to sort the repositories.
- * @returns An array of ordered repository paths.
- */
 function getSortedRepositoryPaths(repos: GG.GitRepoSet, order: GG.RepoDropdownOrder): ReadonlyArray<string> {
 	const repoPaths = Object.keys(repos);
 	if (order === GG.RepoDropdownOrder.WorkspaceFullPath) {
@@ -347,23 +317,47 @@ function getSortedRepositoryPaths(repos: GG.GitRepoSet, order: GG.RepoDropdownOr
 	}
 }
 
+/**
+ * Validate whether a set of selected commit hashes forms a contiguous, topologically valid single-parent chain.
+ */
+function validateTopologicalSelection(
+	commits: ReadonlyArray<GG.GitCommit>,
+	commitLookup: { readonly [hash: string]: number },
+	selectedHashes: ReadonlyArray<string>
+): { readonly valid: boolean, readonly reason?: string, readonly baseHash: string | null } {
+	const filtered = selectedHashes.filter((h) => typeof commitLookup[h] === 'number' && commits[commitLookup[h]].hash !== UNCOMMITTED && commits[commitLookup[h]].stash === null);
+	if (filtered.length === 0) {
+		return { valid: false, reason: 'No selectable commits in selection.', baseHash: null };
+	}
+	const ordered = filtered
+		.map((h) => ({ commit: commits[commitLookup[h]], index: commitLookup[h] }))
+		.sort((a, b) => a.index - b.index); // newest first
+	for (let i = 0; i < ordered.length; i++) {
+		const c = ordered[i].commit;
+		if (c.parents.length > 1) {
+			return { valid: false, reason: 'Merge commits cannot be part of a contiguous rebase chain.', baseHash: null };
+		}
+		if (i < ordered.length - 1) {
+			const nextOldest = ordered[i + 1].commit;
+			if (c.parents.length === 0 || c.parents[0] !== nextOldest.hash) {
+				return { valid: false, reason: 'Topological selection requires a contiguous single-parent chain of commits.', baseHash: null };
+			}
+		}
+	}
+	const oldest = ordered[ordered.length - 1].commit;
+	return {
+		valid: true,
+		baseHash: oldest.parents.length > 0 ? oldest.parents[0] : null
+	};
+}
+
 
 /* HTML Escape / Unescape */
 
-/**
- * Escape HTML in the specified string.
- * @param str The string to escape.
- * @returns The escaped string.
- */
 function escapeHtml(str: string) {
 	return str.replace(HTML_ESCAPER_REGEX, (match) => HTML_ESCAPES[match]);
 }
 
-/**
- * Unescape HTML in the specified string.
- * @param str The string to unescape.
- * @returns The unescaped string.
- */
 function unescapeHtml(str: string) {
 	return str.replace(HTML_UNESCAPER_REGEX, (match) => HTML_UNESCAPES[match]);
 }
@@ -371,11 +365,6 @@ function unescapeHtml(str: string) {
 
 /* Formatters */
 
-/**
- * Format an array of strings as a comma separated list.
- * @param items The array of strings.
- * @returns A formatted comma separated string (e.g. "A, B & C").
- */
 function formatCommaSeparatedList(items: string[]) {
 	let str = '';
 	for (let i = 0; i < items.length; i++) {
@@ -384,28 +373,17 @@ function formatCommaSeparatedList(items: string[]) {
 	return str;
 }
 
-/**
- * Translate a message into the language of the Git Map View.
- * @param message The message (in English), which is also the key of its translations. It can contain placeholders ({0}, {1}, etc.) for the arguments.
- * @param args The arguments substituted into the message's placeholders.
- * @returns The translated message.
- */
 function t(message: string, ...args: (string | number)[]) {
 	const bundle = initialState.l10n;
 	const translated = bundle !== null && typeof bundle[message] === 'string' ? bundle[message] : message;
 	return args.length === 0 ? translated : translated.replace(/\{(\d+)\}/g, (placeholder, index) => index < args.length ? String(args[parseInt(index)]) : placeholder);
 }
 
-/**
- * Format a date (short).
- * @param unixTimestamp The unix timestamp of the date to format.
- * @returns The formatted date.
- */
 function formatShortDate(unixTimestamp: number) {
 	const date = new Date(unixTimestamp * 1000), format = initialState.config.dateFormat;
 	let dateStr = format.iso
 		? date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate())
-		: t('{0} {1} {2}', date.getDate(), t(MONTHS[date.getMonth()]), date.getFullYear()); // Day Month Year
+		: t('{0} {1} {2}', date.getDate(), t(MONTHS[date.getMonth()]), date.getFullYear());
 	let hourMinsStr = pad2(date.getHours()) + ':' + pad2(date.getMinutes());
 	let formatted;
 
@@ -422,11 +400,6 @@ function formatShortDate(unixTimestamp: number) {
 	};
 }
 
-/**
- * Format a date relative to now (e.g. "5 minutes ago").
- * @param unixTimestamp The unix timestamp of the date to format.
- * @returns The formatted date.
- */
 function formatRelativeDate(unixTimestamp: number) {
 	let diff = Math.round((new Date()).getTime() / 1000) - unixTimestamp, unit;
 	if (diff < 60) {
@@ -451,24 +424,14 @@ function formatRelativeDate(unixTimestamp: number) {
 		diff /= 31557600;
 	}
 	diff = Math.round(diff);
-	return t('{0} ' + unit + (diff !== 1 ? 's' : '') + ' ago', diff); // e.g. "{0} days ago"
+	return t('{0} ' + unit + (diff !== 1 ? 's' : '') + ' ago', diff);
 }
 
-/**
- * Format a date as "YYYY-MM-DD HH:MM" (in the local timezone).
- * @param unixTimestamp The unix timestamp of the date to format.
- * @returns The formatted date.
- */
 function formatIsoDateTime(unixTimestamp: number) {
 	const date = new Date(unixTimestamp * 1000);
 	return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate()) + ' ' + pad2(date.getHours()) + ':' + pad2(date.getMinutes());
 }
 
-/**
- * Format a date (long).
- * @param unixTimestamp The unix timestamp of the date to format.
- * @returns The formatted date.
- */
 let cachedLongDateFormatter: { lang: string, formatter: Intl.DateTimeFormat } | null = null;
 
 function formatLongDate(unixTimestamp: number) {
@@ -491,43 +454,20 @@ function formatLongDate(unixTimestamp: number) {
 
 /* DOM Helpers */
 
-/**
- * Add an event listener to all elements with a class name.
- * @param className The class name used to identify the elements to add the event listener to.
- * @param event The event to listen for on each element.
- * @param eventListener The event listener to be called when the event occurs.
- */
 function addListenerToClass(className: string, event: string, eventListener: EventListener) {
 	addListenerToCollectionElems(document.getElementsByClassName(className), event, eventListener);
 }
 
-/**
- * Add an event listener to all elements in a collection of elements.
- * @param elems The collection of elements to add the event listener to.
- * @param event The event to listen for on each element.
- * @param eventListener The event listener to be called when the event occurs.
- */
 function addListenerToCollectionElems(elems: HTMLCollectionOf<Element>, event: string, eventListener: EventListener) {
 	for (let i = 0; i < elems.length; i++) {
 		elems[i].addEventListener(event, eventListener);
 	}
 }
 
-/**
- * Insert an HTML Element directly after a reference HTML Element (as a sibling).
- * @param newNode The HTML Element to insert.
- * @param referenceNode The reference HTML element that `newNode` should be inserted after.
- */
 function insertAfter(newNode: HTMLElement, referenceNode: HTMLElement) {
 	referenceNode.parentNode!.insertBefore(newNode, referenceNode.nextSibling);
 }
 
-/**
- * Insert an HTML Element directly before the first child element with a specified class name.
- * @param newChild The HTML Element to insert.
- * @param parent The parent element that the `newChild` should be inserted into as a child.
- * @param className The class name identifying the child that `newChild` should be inserted before.
- */
 function insertBeforeFirstChildWithClass(newChild: HTMLElement, parent: HTMLElement, className: string) {
 	let referenceNode: Node | null = null;
 	for (let i = 0; i < parent.children.length; i++) {
@@ -539,13 +479,6 @@ function insertBeforeFirstChildWithClass(newChild: HTMLElement, parent: HTMLElem
 	parent.insertBefore(newChild, referenceNode);
 }
 
-/**
- * Alter an HTML Element such that it contains, or doesn't contain the specified class name.
- * @param elem The HTML Element to alter.
- * @param className The class name.
- * @param state TRUE => Ensure the HTML Element has the class name, FALSE => Ensure the HTML Element doesn't have the class name
- * @returns TRUE => The HTML Element was altered, FALSE => No change was required.
- */
 function alterClass(elem: HTMLElement, className: string, state: boolean) {
 	if (elem.classList.contains(className) !== state) {
 		if (state) {
@@ -558,12 +491,6 @@ function alterClass(elem: HTMLElement, className: string, state: boolean) {
 	return false;
 }
 
-/**
- * Alter each HTML Element in a collection of HTML Elements, such that it contains, or doesn't contain the specified class name.
- * @param elems The collection of HTML Elements.
- * @param className The class name.
- * @param state TRUE => Ensure all HTML Elements have the class name, FALSE => Ensure no HTML Elements have the class name
- */
 function alterClassOfCollection(elems: HTMLCollectionOf<HTMLElement>, className: string, state: boolean) {
 	const lockedElems = [];
 	for (let i = 0; i < elems.length; i++) {
@@ -574,11 +501,6 @@ function alterClassOfCollection(elems: HTMLCollectionOf<HTMLElement>, className:
 	}
 }
 
-/**
- * Recursively get all of the child nodes of a node that have text content.
- * @param elem The node to recursively traverse.
- * @returns An array of all child nodes that have text content.
- */
 function getChildNodesWithTextContent(elem: Node) {
 	let textChildren: Node[] = [];
 	for (let i = 0; i < elem.childNodes.length; i++) {
@@ -591,12 +513,6 @@ function getChildNodesWithTextContent(elem: Node) {
 	return textChildren;
 }
 
-/**
- * Recursively get all of the child elements of an element that have the specified class name.
- * @param elem The element to recursively traverse.
- * @param className The class name to find.
- * @returns An array of all child elements that have the specified class name.
- */
 function getChildrenWithClassName(elem: Element, className: string) {
 	let children: Element[] = [];
 	for (let i = 0; i < elem.children.length; i++) {
@@ -609,11 +525,6 @@ function getChildrenWithClassName(elem: Element, className: string) {
 	return children;
 }
 
-/**
- * Get the first child of an HTML Element that is a \<ul\>.
- * @param elem The parent HTML Element.
- * @returns The HTML Element, or NULL if no child is a \<ul\>.
- */
 function getChildUl(elem: HTMLElement) {
 	for (let i = 0; i < elem.children.length; i++) {
 		if (elem.children[i].tagName === 'UL') {
@@ -623,13 +534,6 @@ function getChildUl(elem: HTMLElement) {
 	return null;
 }
 
-/**
- * Initialise scrollTop, and observe scroll events for an HTML Element. Invoke callbacks when the element has been scrolled, and when scrollTop should be saved.
- * @param id The ID identifying the HTML Element.
- * @param initialScrollTop The value used to initialise scrollTop.
- * @param onScroll A callback to be invoked when the element has been scrolled.
- * @param onScrolled A callback to be invoked when scrollTop should be saved.
- */
 function observeElemScroll(id: string, initialScrollTop: number, onScroll: (scrollTop: number) => void, onScrolled: () => void) {
 	const elem = document.getElementById(id);
 	if (elem === null) return;
@@ -650,18 +554,10 @@ function observeElemScroll(id: string, initialScrollTop: number, onScroll: (scro
 	});
 }
 
-/**
- * Get all of the rendered commit HTML Elements.
- * @returns A collection of all commit HTML Elements.
- */
 function getCommitElems() {
 	return <HTMLCollectionOf<HTMLElement>>document.getElementsByClassName('commit');
 }
 
-/**
- * Register that an event has been handled, to prevent the default behaviour from occurring, and any further handling of the event.
- * @param event The event.
- */
 function handledEvent(event: Event) {
 	event.preventDefault();
 	event.stopPropagation();
@@ -670,21 +566,11 @@ function handledEvent(event: Event) {
 
 /* State Helpers */
 
-/**
- * Update a key-value pair in the Global View State.
- * @param key The key identifying the value to update.
- * @param value The new value.
- */
 function updateGlobalViewState<K extends keyof GG.GitGraphViewGlobalState>(key: K, value: GG.GitGraphViewGlobalState[K]) {
 	(<GG.DeepWriteable<GG.GitGraphViewGlobalState>>globalState)[key] = value;
 	sendMessage({ command: 'setGlobalViewState', state: globalState });
 }
 
-/**
- * Update a key-value pair in the Workspace View State.
- * @param key The key identifying the value to update.
- * @param value The new value.
- */
 function updateWorkspaceViewState<K extends keyof GG.GitGraphViewWorkspaceState>(key: K, value: GG.GitGraphViewWorkspaceState[K]) {
 	(<GG.DeepWriteable<GG.GitGraphViewWorkspaceState>>workspaceState)[key] = value;
 	sendMessage({ command: 'setWorkspaceViewState', state: workspaceState });
@@ -693,27 +579,14 @@ function updateWorkspaceViewState<K extends keyof GG.GitGraphViewWorkspaceState>
 
 /* VSCode Helpers */
 
-/**
- * Send a message to the extension's back-end (typically to request data, or perform an action).
- * @param msg The message to send.
- */
 function sendMessage(msg: GG.RequestMessage) {
 	VSCODE_API.postMessage(msg);
 }
 
-/**
- * Show a Visual Studio Code Error Message.
- * @param message The message to display.
- */
 function showErrorMessage(message: string) {
 	sendMessage({ command: 'showErrorMessage', message: message });
 }
 
-/**
- * Get the value of a Visual Studio Code style variable.
- * @param name The name of the style variable.
- * @returns The value of the style variable.
- */
 function getVSCodeStyle(name: string) {
 	return document.documentElement.style.getPropertyValue(name);
 }
@@ -726,11 +599,6 @@ class ImageResizer {
 	private canvas: HTMLCanvasElement | null = null;
 	private context: CanvasRenderingContext2D | null = null;
 
-	/**
-	 * Resize an image to have an effective resolution of 18px x 18px. The actual resolution varies depending of the user's screen pixel ratio.
-	 * @param dataUri The data URI containing the image data.
-	 * @param callback A callback to be invoked once the image has been resized, with the resized image.
-	 */
 	public resize(dataUri: string, callback: (dataUri: string) => void) {
 		if (this.canvas === null) this.canvas = document.createElement('canvas');
 		if (this.context === null) this.context = this.canvas.getContext('2d');
@@ -766,12 +634,6 @@ class EventOverlay {
 	private move: EventListener | null = null;
 	private stop: EventListener | null = null;
 
-	/**
-	 * Create an event overlay.
-	 * @param className The class name to be used for the event overlay.
-	 * @param move A callback to be invoked if the user moves the mouse over the event overlay.
-	 * @param stop A callback to be invoked if the user moves the mouse off the event overlay.
-	 */
 	public create(className: string, move: EventListener | null, stop: EventListener | null) {
 		if (document.getElementById(ID_EVENT_CAPTURE_ELEM) !== null) this.remove();
 
@@ -796,9 +658,6 @@ class EventOverlay {
 		document.body.appendChild(eventOverlayElem);
 	}
 
-	/**
-	 * Remove the event overlay that is currently active in the view.
-	 */
 	public remove() {
 		let eventOverlayElem = document.getElementById(ID_EVENT_CAPTURE_ELEM);
 		if (eventOverlayElem === null) return;
@@ -826,13 +685,10 @@ class TitleTooltip {
 	private title: string = '';
 	private timeout: number | null = null;
 
-	/**
-	 * Creates the Title Tooltip, and registers the event listeners it requires.
-	 */
 	constructor() {
 		document.addEventListener('mouseover', (e) => this.onMouseOver(e), true);
 		document.addEventListener('mouseout', (e) => {
-			if (e.relatedTarget === null) this.hide(); // The mouse left the Webview
+			if (e.relatedTarget === null) this.hide();
 		}, true);
 		document.addEventListener('mousedown', () => this.hide(), true);
 		document.addEventListener('keydown', () => this.hide(), true);
@@ -840,22 +696,16 @@ class TitleTooltip {
 		window.addEventListener('blur', () => this.hide());
 	}
 
-	/**
-	 * Handles the mouse moving over an element, determining the element (if any) whose title should be shown.
-	 * @param e The mouse event.
-	 */
 	private onMouseOver(e: MouseEvent) {
 		if (!(e.target instanceof Element)) return;
 		const target = e.target.closest('[title]:not([title=""])');
 		if (this.target !== null && this.target.contains(e.target) && (target === null || !this.target.contains(target))) {
-			// The mouse is still over the current target (whose title attribute was removed while its tooltip is pending / shown)
 			return;
 		}
 
 		this.hide();
 		if (target === null) return;
 
-		// Remove the title attribute while the mouse is over the element, so that the native tooltip isn't also shown
 		this.target = target;
 		this.title = target.getAttribute('title')!;
 		target.removeAttribute('title');
@@ -867,11 +717,6 @@ class TitleTooltip {
 		}, 500);
 	}
 
-	/**
-	 * Show the tooltip of the current target.
-	 * @param x The x-coordinate of the mouse when it moved over the target.
-	 * @param y The y-coordinate of the mouse when it moved over the target.
-	 */
 	private show(x: number, y: number) {
 		if (this.target === null || !document.body.contains(this.target)) return;
 
@@ -889,9 +734,6 @@ class TitleTooltip {
 		this.elem = elem;
 	}
 
-	/**
-	 * Hide the tooltip (if it is shown), and restore the title attribute of the current target.
-	 */
 	public hide() {
 		if (this.timeout !== null) {
 			clearTimeout(this.timeout);
@@ -902,7 +744,6 @@ class TitleTooltip {
 			this.elem = null;
 		}
 		if (this.target !== null) {
-			// Only restore the title if it wasn't set (or cleared) while the mouse was over the element
 			if (!this.target.hasAttribute('title')) this.target.setAttribute('title', this.title);
 			this.target = null;
 		}

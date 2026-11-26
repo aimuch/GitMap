@@ -2,6 +2,7 @@
 import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { parseMcpRepoArg, startMcpStdioServer } from './mcpServerCli';
 import { GitMapServer } from './server/appServer';
 
 function readPackageVersion(): string {
@@ -23,6 +24,11 @@ process.on('unhandledRejection', (reason) => {
 
 async function main() {
   const args = process.argv.slice(2);
+  if (args.includes('--mcp')) {
+    startMcpStdioServer(parseMcpRepoArg(args));
+    return;
+  }
+
   let port = Number(process.env.GITMAP_PORT) || 3847;
   let host = process.env.GITMAP_HOST || '127.0.0.1';
   let authToken: string | undefined = process.env.GITMAP_AUTH_TOKEN || undefined;
@@ -65,10 +71,12 @@ async function main() {
       console.log(`GitMap Standalone Server & CLI (v${readPackageVersion()})
 Usage:
   gitmap [--web] [--port 3847] [--host 127.0.0.1] [--auth-token <secret>] [--open] [--json] [--version] [repo-path-or-ssh-uri...]
+  gitmap --mcp [--repo <repo-path-or-ssh-uri>]
 
 Examples:
   npm run web
   gitmap --version
+  gitmap --mcp --repo /path/to/repo
   gitmap --web --port 4000 --open /path/to/repo
   gitmap --web --host 0.0.0.0 --auth-token my-secret-token
   gitmap --web --json /path/to/repo

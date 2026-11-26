@@ -8,6 +8,7 @@ import { pipeline } from 'stream/promises';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
   AiProvider,
+  completeAiPrompt,
   DEFAULT_AI_TIMEOUT_SECONDS,
   clearApiKey,
   getApiKey,
@@ -18,15 +19,33 @@ import {
   setApiKey,
   testAiConnection
 } from '../aiProviders';
+import { continueAiAutoRebase, hasAutoRebaseSnapshot, runAiAutoRebase, undoAiAutoRebase } from '../aiAutoRebase';
+import { findAutolinkMatches, formatStartWorkBranchName } from '../autolinks';
 import { AvatarManager } from '../avatarManager';
-import { setSettingFallbackStorage } from '../config';
+import { loadBranchLifecycleData } from '../branchDashboard';
+import { CodingAgentId, detectCodingAgents, toggleCodingAgentHooks, toggleCodingAgentMcp } from '../codingAgents';
+import { getConfig, setSettingFallbackStorage } from '../config';
 import { DataSource } from '../dataSource';
 import { DiffDocProvider } from '../diffDocProvider';
+import {
+  buildScmGroupedViewData,
+  computeEditorAnnotationsForFile,
+  extractTerminalLinks,
+  getBuiltInModes
+} from '../editorAnnotationsCore';
+import { generateRepoChangelogMarkdown } from '../exportShare';
 import { ExtensionState } from '../extensionState';
 import { FileTimeMachine } from '../fileTimeMachine';
 import { GitFeatures } from '../gitFeatures';
 import { GitGraphView } from '../gitGraphView';
+import { ensureSshAllowedSignersFile, inspectRepoHealth, optimizeRepo } from '../gitMaintenance';
+import { runGit } from '../historyRewrite';
 import { Logger } from '../logger';
+import { computeGuardRiskScore, scanRepoWorkingTreeForIssues } from '../preCommitGuard';
+import { collectLaunchpadItems } from '../prLaunchpad';
+import { clearPrStatusCache, setHostingSecretStorage } from '../prStatusIntegration';
+import { parseRebaseTodoDocument, RebaseTodoEntry, serializeRebaseTodoDocument } from '../rebaseTodoCustomEditor';
+import { loadRepoInsightsData } from '../repoInsights';
 import {
   hostBridge,
   OpenDialogRequest,
@@ -288,6 +307,7 @@ export class GitMapServer {
     this.aiAssistantService = new AiAssistantService(this.dataSource);
     this.hostingService = new HostingService(this.dataSource);
     this.hostingService.setSecretStorage(secrets);
+    setHostingSecretStorage(secrets);
     this.terminalManager = new TerminalManager();
 
     const diffDocProvider = new DiffDocProvider(this.dataSource);
@@ -509,6 +529,9 @@ export class GitMapServer {
       },
       onOpenScm: (draftMessage) => {
         this.broadcast({ type: 'shell:openScm', draftMessage: draftMessage || '' });
+      },
+      onOpenCompanionFeature: (payload) => {
+        this.broadcast({ type: 'graph:openCompanionFeature', payload });
       },
       onSettingsChanged: (settings) => {
         this.broadcast({ type: 'settings:changed', settings });
@@ -1575,7 +1598,14 @@ export class GitMapServer {
 
       case 'hosting:setToken': {
         await this.hostingService.setHostToken(String(params.host || ''), String(params.token || ''));
+        clearPrStatusCache();
         return { ok: true, hasToken: await this.hostingService.hasHostToken(String(params.host || '')) };
+      }
+
+      case 'hosting:clearToken': {
+        await this.hostingService.setHostToken(String(params.host || ''), '');
+        clearPrStatusCache();
+        return { ok: true, hasToken: false };
       }
 
       case 'hosting:checkoutPr': {
@@ -2673,6 +2703,303 @@ export class GitMapServer {
         };
       }
 
+      /* v2.8 Ported Workbench, Guard, Insights, Lifecycle, Maintenance, Agents, Launchpad & Annotations */
+      case 'guard:scan': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const [issues, wt] = await Promise.all([
+          scanRepoWorkingTreeForIssues(this.dataSource, repo),
+          this.gitFeatures.getWorkingTreeStatus(repo)
+        ]);
+        const numstatRes = await runGit(this.dataSource, repo, ['diff', '--numstat', 'HEAD']);
+        let changedLines = 0;
+        if (numstatRes.code === 0) {
+          for (const line of numstatRes.stdout.toString().split(/\r?\n/)) {
+            const cols = line.split('\t');
+            if (cols.length >= 2) {
+              changedLines += (parseInt(cols[0], 10) || 0) + (parseInt(cols[1], 10) || 0);
+            }
+          }
+        }
+        const riskReport = computeGuardRiskScore(issues, wt.files.length, changedLines);
+        return { issues, riskReport, fileCount: wt.files.length, changedLines };
+      }
+
+      case 'insights:compute': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const days = typeof params.days === 'number' ? params.days : 90;
+        const insights = await loadRepoInsightsData(this.dataSource, repo, days);
+        return { insights };
+      }
+
+      case 'branches:lifecycle': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        return loadBranchLifecycleData(this.dataSource, repo);
+      }
+
+      case 'branches:deleteBatch': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const branches: Array<{ name: string; isRemote?: boolean }> = Array.isArray(params.branches) ? params.branches : [];
+        const force = !!params.force;
+        const deleted: string[] = [];
+        const errors: Array<{ name: string; error: string }> = [];
+        for (const item of branches) {
+          const name = String(item?.name || '').trim();
+          if (!name) continue;
+          let err: string | null = null;
+          if (item.isRemote) {
+            const slash = name.indexOf('/');
+            if (slash > 0) {
+              err = await this.dataSource.deleteRemoteBranch(repo, name.slice(slash + 1), name.slice(0, slash));
+            } else {
+              err = 'Invalid remote branch ref.';
+            }
+          } else {
+            err = await this.dataSource.deleteBranch(repo, name, force);
+          }
+          if (err === null) deleted.push(name);
+          else errors.push({ name, error: err });
+        }
+        if (deleted.length > 0) {
+          this.openViewTo({ repo });
+        }
+        return { deleted, errors };
+      }
+
+      case 'maintenance:inspect': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const report = await inspectRepoHealth(this.dataSource, repo);
+        return { report };
+      }
+
+      case 'maintenance:optimize': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const mode: 'commitGraph' | 'gc' | 'maintenance' =
+          params.mode === 'gc' ? 'gc' : params.mode === 'maintenance' ? 'maintenance' : 'commitGraph';
+        const error = await optimizeRepo(this.dataSource, repo, mode);
+        const report = await inspectRepoHealth(this.dataSource, repo);
+        return { error, report };
+      }
+
+      case 'maintenance:ensureSigners': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        return ensureSshAllowedSignersFile(this.dataSource, repo);
+      }
+
+      case 'work:previewBranch': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const template = typeof params.template === 'string' && params.template.trim() !== ''
+          ? params.template.trim()
+          : getConfig(repo || undefined).startWorkBranchFormat;
+        const branchName = formatStartWorkBranchName(template, String(params.id || ''), String(params.title || ''));
+        return { branchName, template };
+      }
+
+      case 'work:start': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const template = typeof params.template === 'string' && params.template.trim() !== ''
+          ? params.template.trim()
+          : getConfig(repo).startWorkBranchFormat;
+        const explicitBranch = typeof params.branchName === 'string' && params.branchName.trim() !== ''
+          ? formatStartWorkBranchName('${id}', params.branchName.trim(), '')
+          : formatStartWorkBranchName(template, String(params.id || ''), String(params.title || ''));
+        if (!explicitBranch) throw new Error('Branch name cannot be empty.');
+        const baseCommit = typeof params.baseCommit === 'string' && params.baseCommit.trim() !== ''
+          ? params.baseCommit.trim()
+          : 'HEAD';
+        const errs = await this.dataSource.createBranch(repo, explicitBranch, baseCommit, true, false);
+        const err = errs.find((e) => e !== null) || null;
+        if (err !== null) throw new Error(err);
+        this.openViewTo({ repo });
+        return { branchName: explicitBranch };
+      }
+
+      case 'rebase:autoAi': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const targetRef = String(params.targetRef || '').trim();
+        const threshold = typeof params.threshold === 'number' ? params.threshold : undefined;
+        const res = await runAiAutoRebase(this.dataSource, this.gitFeatures, repo, targetRef, threshold);
+        this.openViewTo({ repo });
+        return res;
+      }
+
+      case 'rebase:continueAi': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const threshold = typeof params.threshold === 'number' ? params.threshold : undefined;
+        const res = await continueAiAutoRebase(this.dataSource, this.gitFeatures, repo, threshold);
+        this.openViewTo({ repo });
+        return res;
+      }
+
+      case 'rebase:undoAi': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const res = await undoAiAutoRebase(this.dataSource, repo);
+        this.openViewTo({ repo });
+        return res;
+      }
+
+      case 'rebase:canUndoAi': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        return { canUndo: repo ? hasAutoRebaseSnapshot(repo) : false };
+      }
+
+      case 'rebase:parseTodo': {
+        return { entries: parseRebaseTodoDocument(String(params.content || '')) };
+      }
+
+      case 'rebase:serializeTodo': {
+        const entries = Array.isArray(params.entries) ? (params.entries as RebaseTodoEntry[]) : [];
+        return { content: serializeRebaseTodoDocument(entries) };
+      }
+
+      case 'agents:list': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '') || null;
+        const defaultAgent = getConfig(repo || undefined).defaultCodingAgent;
+        const agents = await detectCodingAgents(repo, defaultAgent);
+        return { agents, defaultAgent, mcpCliCommand: `gitmap --mcp${repo ? ' --repo ' + JSON.stringify(repo) : ''}` };
+      }
+
+      case 'agents:toggleMcp': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const agentId = String(params.agentId || 'claude-code') as CodingAgentId;
+        return toggleCodingAgentMcp(repo, this.rootDir, agentId, !!params.enable);
+      }
+
+      case 'agents:toggleHook': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const agentId = String(params.agentId || 'claude-code') as CodingAgentId;
+        return toggleCodingAgentHooks(repo, agentId, !!params.enable);
+      }
+
+      case 'scm:groupedView': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const activeFilePath = typeof params.activeFilePath === 'string' ? params.activeFilePath : undefined;
+        return buildScmGroupedViewData(this.dataSource, repo, Object.keys(this.repoManager.getRepos()), activeFilePath);
+      }
+
+      case 'changelog:export': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        return generateRepoChangelogMarkdown(this.dataSource, repo, {
+          since: typeof params.since === 'string' && params.since.trim() !== '' ? params.since.trim() : null,
+          rangeSpec: typeof params.rangeSpec === 'string' && params.rangeSpec.trim() !== '' ? params.rangeSpec.trim() : null,
+          limit: typeof params.limit === 'number' ? params.limit : 200,
+          label: typeof params.label === 'string' && params.label.trim() !== '' ? params.label.trim() : undefined
+        });
+      }
+
+      case 'launchpad:prs': {
+        const allRepos = Object.keys(this.repoManager.getRepos());
+        const repos = Array.isArray(params.repos) && params.repos.length > 0
+          ? params.repos.map(String)
+          : allRepos;
+        return collectLaunchpadItems(this.dataSource, repos, !!params.force);
+      }
+
+      case 'ai:explainRegression': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const commitHash = String(params.commitHash || 'HEAD').trim();
+        const lang = params.lang === 'en' ? 'en' : 'zh';
+        const showRes = await runGit(
+          this.dataSource,
+          repo,
+          ['-c', 'core.quotepath=false', 'show', '--stat', '-p', '-U2', '--format=Commit: %H%nAuthor: %an <%ae>%nDate: %ci%nSubject: %s%n%n%b', commitHash],
+          null,
+          null,
+          undefined,
+          256 * 1024
+        );
+        if (showRes.code !== 0 && !showRes.truncated) {
+          throw new Error(showRes.stderr.trim() || `Unable to inspect commit "${commitHash}".`);
+        }
+        const patchSnippet = showRes.stdout.toString('utf8').slice(0, 16000);
+        const sysPrompt = lang === 'zh'
+          ? '你是资深软件架构师与回归缺陷排查专家。请基于给定的 Git 提交与代码变更，使用清晰的简体中文 Markdown 输出：1) 潜在回归根因定位 2) 受影响的关键调用链与边界条件 3) 推荐的最小修复方案与回归验证步骤。'
+          : 'You are a staff engineer specializing in Git regression root-cause analysis. Given the commit metadata and unified diff, output concise Markdown covering: 1) Likely Regression Root Cause, 2) Impacted Code Paths & Edge Cases, and 3) Minimal Fix & Verification Plan.';
+        const aiRes = await completeAiPrompt(sysPrompt + '\n\n' + patchSnippet, 'explainAndSearch');
+        if (aiRes.error === null && aiRes.text.trim() !== '') {
+          return { markdown: aiRes.text.trim(), usedAi: true, commitHash, error: null };
+        }
+        const statLines = patchSnippet.split(/\r?\n/).slice(0, 35).join('\n');
+        const fallbackMd = lang === 'zh'
+          ? `### 提交回归快照（离线静态摘要）\n\n> 未配置可用 AI 模型或调用失败（${aiRes.error || '未设置密钥'}），以下为该可疑提交的静态变更概览：\n\n\`\`\`text\n${statLines}\n\`\`\``
+          : `### Regression Commit Snapshot (Static Summary)\n\n> AI model unavailable (${aiRes.error || 'No API key configured'}). Showing commit header & diffstat:\n\n\`\`\`text\n${statLines}\n\`\`\``;
+        return { markdown: fallbackMd, usedAi: false, commitHash, error: aiRes.error };
+      }
+
+      case 'file:annotations': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const filePath = String(params.filePath || '');
+        if (!repo || !filePath) throw new Error('Both repo and filePath are required.');
+        const cfg = getConfig(repo);
+        const computed = await computeEditorAnnotationsForFile(this.dataSource, repo, filePath);
+        const autolinksByHash: Record<string, ReturnType<typeof findAutolinkMatches>> = {};
+        if (computed.blame && cfg.autolinks.length > 0) {
+          for (const [hash, commit] of Object.entries(computed.blame.commits)) {
+            const matches = findAutolinkMatches(commit.summary || '', cfg.autolinks);
+            if (matches.length > 0) autolinksByHash[hash] = matches;
+          }
+        }
+        return {
+          ...computed,
+          activeMode: cfg.modeConfig.active,
+          modes: getBuiltInModes(),
+          currentLineFormat: cfg.blameInlineFormat,
+          statusBarFormat: cfg.blameStatusBarFormat,
+          autolinksByHash
+        };
+      }
+
+      case 'terminal:extractLinks': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const line = String(params.line || '');
+        if (!line.trim()) return { links: [] };
+        const knownRefs = repo ? await this.getKnownRefsForTerminal(repo) : new Set<string>();
+        return { links: extractTerminalLinks(line, knownRefs) };
+      }
+
+      case 'terminal:openLink': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const kind = String(params.kind || 'commit');
+        if (kind === 'range' && params.fromRef && params.toRef) {
+          const [fromHash, toHash] = await Promise.all([
+            this.gitFeatures.resolveCommit(repo, String(params.fromRef)),
+            this.gitFeatures.resolveCommit(repo, String(params.toRef))
+          ]);
+          if (!fromHash || !toHash) throw new Error('Unable to resolve commit range in repository.');
+          this.openViewTo({
+            repo,
+            commitDetails: { commitHash: toHash, compareWithHash: fromHash }
+          });
+          this.broadcast({ type: 'shell:focusGraphTab' });
+          return { ok: true, commitHash: toHash, compareWithHash: fromHash };
+        }
+        const refText = String(params.text || '').trim();
+        const resolved = await this.gitFeatures.resolveCommit(repo, refText);
+        if (!resolved) throw new Error(`Unable to resolve "${refText}" in repository.`);
+        this.openViewTo({
+          repo,
+          commitDetails: { commitHash: resolved, compareWithHash: null }
+        });
+        this.broadcast({ type: 'shell:focusGraphTab' });
+        return { ok: true, commitHash: resolved };
+      }
+
       /* In-App Update Check */
       case 'system:checkUpdate': {
         const currentVersion = this.getAppVersion();
@@ -2682,6 +3009,28 @@ export class GitMapServer {
       default:
         throw new Error(`Unknown RPC method: ${method}`);
     }
+  }
+
+  private terminalRefsCache = new Map<string, { expiresAt: number; refs: Set<string> }>();
+
+  private async getKnownRefsForTerminal(repo: string): Promise<Set<string>> {
+    const now = Date.now();
+    const cached = this.terminalRefsCache.get(repo);
+    if (cached && cached.expiresAt > now) return cached.refs;
+    const refs = new Set<string>(['HEAD']);
+    try {
+      const res = await runGit(this.dataSource, repo, ['for-each-ref', '--format=%(refname:short)', 'refs/heads', 'refs/remotes', 'refs/tags']);
+      if (res.code === 0) {
+        for (const r of res.stdout.toString().split(/\r?\n/)) {
+          const trimmed = r.trim();
+          if (trimmed && !trimmed.endsWith('/HEAD')) refs.add(trimmed);
+        }
+      }
+    } catch (_) {
+      // Ignore transient ref lookup errors
+    }
+    this.terminalRefsCache.set(repo, { expiresAt: now + 15000, refs });
+    return refs;
   }
 
   private getLauncherSettings(): LauncherSettings {

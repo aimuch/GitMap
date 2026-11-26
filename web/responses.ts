@@ -106,8 +106,60 @@ function observeResponseMessages(gitGraph: GitGraphView, imageResizer: ImageResi
 			case 'updateAiConfig':
 				gitGraph.setAiConfig(msg.ai);
 				break;
+			case 'fetchAiModels':
+				gitGraph.processFetchAiModelsResponse(msg);
+				break;
+			case 'loadWorkingTreeStatus':
+				gitGraph.processLoadWorkingTreeStatusResponse(msg);
+				break;
+			case 'stageFiles':
+				refreshOrDisplayError(msg.error, t('Unable to Stage Files'));
+				break;
+			case 'unstageFiles':
+				refreshOrDisplayError(msg.error, t('Unable to Unstage Files'));
+				break;
+			case 'discardWorkingChanges':
+				refreshOrDisplayError(msg.error, t('Unable to Discard Changes'));
+				break;
+			case 'loadFileHunkDiff':
+				gitGraph.processLoadFileHunkDiffResponse(msg);
+				break;
+			case 'applyHunkPatch':
+				gitGraph.processApplyHunkPatchResponse(msg);
+				break;
+			case 'commitStagedChanges':
+				if (msg.error === null) gitGraph.clearInlineCommitDraft();
+				refreshOrDisplayError(msg.error, t('Unable to Commit Changes'));
+				break;
+			case 'moveBranch':
+				refreshOrDisplayError(msg.error, t('Unable to Move Branch'));
+				break;
+			case 'loadPullRequestBadges':
+				gitGraph.processLoadPullRequestBadgesResponse(msg);
+				break;
+			case 'loadPullRequestDetails':
+				gitGraph.processLoadPullRequestDetailsResponse(msg);
+				break;
+			case 'loadCommitExtras':
+				gitGraph.processLoadCommitExtrasResponse(msg);
+				break;
+			case 'setCommitNote':
+				dialog.closeActionRunning();
+				gitGraph.processSetCommitNoteResponse(msg);
+				break;
+			case 'runWorkflowMacro':
+				if (msg.error !== null) {
+					dialog.showError(t('Workflow Macro Failed'), msg.error, null, null);
+				} else {
+					dialog.closeActionRunning();
+					gitGraph.refresh(false);
+				}
+				break;
 			case 'updateCdvConfig':
-				gitGraph.setCdvConfig(msg.actions, msg.hideUnchangedRegions, msg.rowActions);
+				gitGraph.setCdvConfig(msg.actions, msg.hideUnchangedRegions, msg.pullRequestStatusEnabled, msg.rowActions);
+				break;
+			case 'loadBranchCommits':
+				gitGraph.processLoadBranchCommitsResponse(msg);
 				break;
 			case 'explainCommit':
 				gitGraph.commitExplainer.processExplainCommitResponse(msg);
@@ -285,6 +337,49 @@ function observeResponseMessages(gitGraph: GitGraphView, imageResizer: ImageResi
 			case 'pushBranch':
 				refreshAndDisplayErrors(msg.errors, t('Unable to Push Branch'), msg.willUpdateBranchConfig);
 				break;
+			case 'pushToCommit':
+				refreshAndDisplayErrors(msg.errors, t('Unable to Push to Commit'));
+				break;
+			case 'batchSquashCommits':
+				refreshOrDisplayError(msg.error, t('Unable to Squash Selected Commits'));
+				break;
+			case 'batchDropCommits':
+				refreshOrDisplayError(msg.error, t('Unable to Drop Selected Commits'));
+				break;
+			case 'addToGitignore':
+				refreshOrDisplayError(msg.error, t('Unable to Add to .gitignore'));
+				break;
+			case 'loadContributors':
+				gitGraph.processLoadContributorsResponse(msg);
+				break;
+			case 'loadCodingAgents':
+				gitGraph.processLoadCodingAgentsResponse(msg);
+				break;
+			case 'toggleCodingAgentMcp':
+			case 'toggleCodingAgentHooks':
+				if (msg.error !== null) {
+					dialog.showError(t('Coding Agent Configuration Error'), msg.error, null, null);
+				} else {
+					dialog.closeActionRunning();
+				}
+				gitGraph.processLoadCodingAgentsResponse({ command: 'loadCodingAgents', repo: msg.repo, agents: msg.agents });
+				break;
+			case 'copyWipToWorktree':
+				if (msg.error !== null) {
+					dialog.showError(t('Unable to Copy Uncommitted Changes'), msg.error, null, null);
+				} else {
+					dialog.closeActionRunning();
+					dialog.showMessage(t('Copied {0} uncommitted file(s) to the target worktree.', msg.copiedFiles));
+					gitGraph.worktreeList.requestWorktrees();
+				}
+				break;
+			case 'saveExtendedSettings':
+				if (msg.error !== null) {
+					dialog.showError(t('Unable to Save Settings'), msg.error, null, null);
+				} else {
+					dialog.closeActionRunning();
+				}
+				break;
 			case 'pushStash':
 				refreshOrDisplayError(msg.error, t('Unable to Stash Uncommitted Changes'));
 				break;
@@ -357,6 +452,33 @@ function observeResponseMessages(gitGraph: GitGraphView, imageResizer: ImageResi
 				break;
 			case 'loadCommitTree':
 				gitGraph.receiveCommitTree(msg.commitHash, msg.subPath, msg.entries, msg.error);
+				break;
+			case 'loadRepoMetadata':
+				gitGraph.processLoadRepoMetadataResponse(msg);
+				break;
+			case 'togglePinBranch':
+				gitGraph.processTogglePinBranchResponse(msg);
+				break;
+			case 'savedFilterPresets':
+				gitGraph.processSavedFilterPresetsResponse(msg);
+				break;
+			case 'loadWorktreeWip':
+				gitGraph.processLoadWorktreeWipResponse(msg);
+				break;
+			case 'loadReviewSession':
+				gitGraph.processLoadReviewSessionResponse(msg);
+				break;
+			case 'updateReviewSession':
+				gitGraph.processUpdateReviewSessionResponse(msg);
+				break;
+			case 'aiSearchCommits':
+				gitGraph.processAiSearchCommitsResponse(msg);
+				break;
+			case 'generateStashMessage':
+				gitGraph.actions.processGenerateStashMessageResponse(msg);
+				break;
+			case 'restoreFilesFromCommit':
+				refreshOrDisplayError(msg.error, t('Unable to Restore Selected Files'));
 				break;
 			case 'viewScm':
 				finishOrDisplayError(msg.error, t('Unable to open the Source Control View'));

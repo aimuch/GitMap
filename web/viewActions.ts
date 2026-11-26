@@ -4,7 +4,7 @@
  */
 class ViewActions {
 	private readonly view: GitGraphView;
-	private editMessageTarget: (DialogTarget & CommitTarget) | null = null; // The target of the Edit Commit Message dialog (while its message is loaded)
+	private editMessageTarget: DialogTarget | null = null; // The target of the Edit Commit Message / Amend dialog (while its message is loaded)
 	private stashTarget: DialogTarget | null = null; // The target of the Stash dialog (while the files are loaded)
 	private impactPreviewReqSeq: number = 0;
 
@@ -111,6 +111,12 @@ class ViewActions {
 				icon: MENU_ICONS.clear,
 				visible: visibility.unselectInBranchesDropdown && isSelectedInBranchesDropdown,
 				onClick: () => this.view.branchDropdown.unselectOption(refName)
+			},
+			{
+				title: this.view.getSoloRef() === refName ? t('Exit Solo Mode') : t('Show Only this Branch'),
+				icon: MENU_ICONS.eye,
+				visible: true,
+				onClick: () => this.view.getSoloRef() === refName ? this.view.exitSolo() : this.view.soloBranchOrTag(refName, false)
 			}
 		], [
 			{
@@ -254,13 +260,19 @@ class ViewActions {
 		], [
 			{
 				id: 'editMessage',
-				title: (isHead ? t('Amend Commit') : t('Edit Commit Message')) + ELLIPSIS,
+				title: t('Edit Commit Message') + ELLIPSIS,
 				icon: MENU_ICONS.edit,
-				visible: visibility.editMessage && (isHead || (commit.parents.length < 2 && rebasable)),
+				visible: visibility.editMessage && commit.parents.length < 2 && (isHead || rebasable),
 				onClick: () => {
 					this.editMessageTarget = target;
 					sendMessage({ command: 'loadCommitMessage', repo: this.view.currentRepo, commitHash: hash });
 				}
+			}, {
+				id: 'amendCommit',
+				title: t('Amend Commit') + ELLIPSIS,
+				icon: MENU_ICONS.edit,
+				visible: isHead,
+				onClick: () => this.openAmendCommitDialog(hash, target)
 			}, {
 				id: 'undoCommit',
 				title: t('Undo Commit') + ELLIPSIS,
@@ -304,6 +316,12 @@ class ViewActions {
 				visible: visibility.rebase,
 				onClick: () => this.rebaseAction(hash, abbrevCommit(hash), GG.RebaseActionOn.Commit, target)
 			}, {
+				id: 'pushToCommit',
+				title: t('Push to this Commit') + ELLIPSIS,
+				icon: MENU_ICONS.push,
+				visible: this.view.gitRemotes.length > 0 && commit.stash === null,
+				onClick: () => this.pushToCommitAction(hash, target)
+			}, {
 				id: 'reset',
 				title: t('Reset current branch to this Commit') + ELLIPSIS,
 				icon: MENU_ICONS.reset,
@@ -333,22 +351,46 @@ class ViewActions {
 				visible: visibility.bisect && bisect === null,
 				onClick: () => this.startBisectAction(hash, false, target)
 			}, {
+				id: 'bisectGood',
 				title: t('Mark as Good'),
 				icon: MENU_ICONS.bisectGood,
 				visible: visibility.bisect && bisect !== null && bisect.firstBad === null,
 				onClick: () => runAction({ command: 'bisect', repo: this.view.currentRepo, action: 'good', commitHash: hash, goodRef: null }, t('Bisecting'))
 			}, {
+				id: 'bisectBad',
 				title: t('Mark as Bad'),
 				icon: MENU_ICONS.bisectBad,
 				visible: visibility.bisect && bisect !== null && bisect.firstBad === null,
 				onClick: () => runAction({ command: 'bisect', repo: this.view.currentRepo, action: 'bad', commitHash: hash, goodRef: null }, t('Bisecting'))
 			}, {
+				id: 'bisectSkip',
 				title: t('Skip (Can\'t Be Tested)'),
 				icon: MENU_ICONS.bisectSkip,
 				visible: visibility.bisect && bisect !== null && bisect.firstBad === null,
 				onClick: () => runAction({ command: 'bisect', repo: this.view.currentRepo, action: 'skip', commitHash: hash, goodRef: null }, t('Bisecting'))
 			}
 		], [
+			{
+				id: 'aiReview',
+				title: t('AI Review Commit') + ELLIPSIS,
+				icon: MENU_ICONS.sparkle,
+				visible: true,
+				onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'aiReview', repo: this.view.currentRepo, mode: 'commit', commitHash: hash, label: abbrevCommit(hash) + ' ' + commit.message })
+			},
+			{
+				id: 'aiRegression',
+				title: t('AI Analyze Regression') + ELLIPSIS,
+				icon: MENU_ICONS.sparkle,
+				visible: true,
+				onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'aiExplainRegression', repo: this.view.currentRepo, commitHash: hash, label: abbrevCommit(hash) + ' ' + commit.message })
+			},
+			{
+				id: 'editGitNote',
+				title: t('Add / Edit Git Note') + ELLIPSIS,
+				icon: MENU_ICONS.subject,
+				visible: true,
+				onClick: () => this.view.openEditCommitNoteDialog(hash)
+			},
 			{
 				id: 'browseFilesAtCommit',
 				title: t('Browse Files at Commit'),
@@ -361,22 +403,7 @@ class ViewActions {
 						commitHash: hash
 					}, window.location.origin || '*');
 				}
-			}, {
-				id: 'compareWithBranchCommit',
-				title: t('Compare with Branch / Commit') + ELLIPSIS,
-				icon: MENU_ICONS.compare,
-				visible: true,
-				onClick: () => {
-					const leftRef = commit.heads[0] || (commit.remotes[0] ? commit.remotes[0].remote + '/' + commit.remotes[0].name : null);
-					window.parent.postMessage({
-						type: 'gitmap-shell-action',
-						action: 'open-commit-compare',
-						leftHash: hash,
-						leftRef: leftRef
-					}, window.location.origin || '*');
-				}
-			}
-		], [
+			},
 			{
 				id: 'copyHash',
 				title: t('Copy Commit Hash to Clipboard'),
@@ -409,6 +436,16 @@ class ViewActions {
 				icon: MENU_ICONS.copy,
 				visible: visibility.savePatch,
 				onClick: () => this.savePatchAction('commits', [hash], '', true)
+			},
+			{
+				id: 'compareBranchCommit',
+				title: t('Compare with Branch Commit') + ELLIPSIS,
+				icon: MENU_ICONS.compare,
+				visible: true,
+				onClick: () => {
+					const branchHint = commit.heads.length > 0 ? commit.heads[0] : (commit.remotes.length > 0 ? commit.remotes[0].name : null);
+					this.view.openBranchCommitCompareModal(branchHint, null, hash);
+				}
 			}
 		]];
 	}
@@ -427,6 +464,43 @@ class ViewActions {
 				icon: MENU_ICONS.cherrypick,
 				visible: visibility.cherrypick,
 				onClick: () => this.cherrypickCommitsAction(commits, target)
+			}, {
+				title: t('Squash {0} Selected Commits', commits.length) + ELLIPSIS,
+				icon: MENU_ICONS.fixup,
+				visible: commits.length >= 2 && visibility.fixup,
+				onClick: () => this.batchSquashCommitsAction(commits, target)
+			}, {
+				title: t('Drop {0} Selected Commits', commits.length) + ELLIPSIS,
+				icon: MENU_ICONS.trash,
+				visible: commits.length >= 1 && visibility.drop,
+				onClick: () => this.batchDropCommitsAction(commits, target)
+			}, {
+				title: t('AI Review Selected Range') + ELLIPSIS,
+				icon: MENU_ICONS.sparkle,
+				visible: commits.length >= 2,
+				onClick: () => {
+					const oldest = commits[0], newest = commits[commits.length - 1];
+					const baseRef = oldest.parents.length > 0 ? oldest.parents[0] : oldest.hash;
+					sendMessage({ command: 'openCompanionFeature', feature: 'aiReview', repo: this.view.currentRepo, mode: 'range', fromRef: baseRef, toRef: newest.hash, label: abbrevCommit(oldest.hash) + '..' + abbrevCommit(newest.hash) });
+				}
+			}, {
+				title: t('AI PR / Release Notes for Selection') + ELLIPSIS,
+				icon: MENU_ICONS.sparkle,
+				visible: commits.length >= 2,
+				onClick: () => {
+					const oldest = commits[0], newest = commits[commits.length - 1];
+					const baseRef = oldest.parents.length > 0 ? oldest.parents[0] : oldest.hash;
+					sendMessage({ command: 'openCompanionFeature', feature: 'aiReleaseNotes', repo: this.view.currentRepo, fromRef: baseRef, toRef: newest.hash, label: abbrevCommit(oldest.hash) + ' → ' + abbrevCommit(newest.hash) });
+				}
+			}, {
+				title: t('AI Changelog for Selection') + ELLIPSIS,
+				icon: MENU_ICONS.sparkle,
+				visible: commits.length >= 2,
+				onClick: () => {
+					const oldest = commits[0], newest = commits[commits.length - 1];
+					const baseRef = oldest.parents.length > 0 ? oldest.parents[0] : oldest.hash;
+					sendMessage({ command: 'aiChangelogFromCommits', repo: this.view.currentRepo, fromRef: baseRef, toRef: newest.hash, label: abbrevCommit(oldest.hash) + ' → ' + abbrevCommit(newest.hash) });
+				}
 			}
 		], [
 			{
@@ -545,6 +619,12 @@ class ViewActions {
 				icon: MENU_ICONS.clear,
 				visible: visibility.unselectInBranchesDropdown && isSelectedInBranchesDropdown,
 				onClick: () => this.view.branchDropdown.unselectOption(prefixedRefName)
+			},
+			{
+				title: this.view.getSoloRef() === prefixedRefName ? t('Exit Solo Mode') : t('Show Only this Branch'),
+				icon: MENU_ICONS.eye,
+				visible: true,
+				onClick: () => this.view.getSoloRef() === prefixedRefName ? this.view.exitSolo() : this.view.soloBranchOrTag(prefixedRefName, false)
 			}
 		], [
 			{
@@ -680,6 +760,12 @@ class ViewActions {
 			}
 		], [
 			{
+				title: this.view.getSoloRef() === 'tag:' + tagName ? t('Exit Solo Mode') : t('Show Only this Tag'),
+				icon: MENU_ICONS.eye,
+				visible: true,
+				onClick: () => this.view.getSoloRef() === 'tag:' + tagName ? this.view.exitSolo() : this.view.soloBranchOrTag(tagName, true)
+			},
+			{
 				title: t('Create Archive'),
 				icon: MENU_ICONS.archive,
 				visible: visibility.createArchive,
@@ -700,12 +786,18 @@ class ViewActions {
 
 	public getUncommittedChangesContextMenuActions(target: DialogTarget & CommitTarget): ContextMenuActions {
 		let visibility = this.view.config.contextMenuActionsVisibility.uncommittedChanges;
+		const otherWorktrees = this.view.worktreeList.getWorktrees().filter((w) => !w.isCurrent);
 		return [[
 			{
 				title: t('Generate Commit Message with AI') + ELLIPSIS,
 				icon: MENU_ICONS.sparkle,
 				visible: this.view.config.ai.commitMessage && visibility.generateCommitMessage,
 				onClick: () => this.view.commitExplainer.openCommitMessageModal()
+			}, {
+				title: t('AI Review Uncommitted Changes') + ELLIPSIS,
+				icon: MENU_ICONS.sparkle,
+				visible: true,
+				onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'aiReview', repo: this.view.currentRepo, mode: 'uncommitted' })
 			}, {
 				title: t('Stash uncommitted changes') + ELLIPSIS,
 				icon: MENU_ICONS.stash,
@@ -721,6 +813,26 @@ class ViewActions {
 				icon: MENU_ICONS.patchApply,
 				visible: visibility.applyPatch,
 				onClick: () => sendMessage({ command: 'checkPatch', repo: this.view.currentRepo })
+			}, {
+				title: t('Copy Uncommitted Changes to Worktree') + ELLIPSIS,
+				icon: MENU_ICONS.worktree,
+				visible: otherWorktrees.length > 0,
+				onClick: () => {
+					const opts = otherWorktrees.map((w) => ({
+						name: (w.branch ? w.branch + ' — ' : '') + w.path,
+						value: w.path
+					}));
+					dialog.showSelect(
+						t('Select the target worktree to copy your uncommitted changes into:'),
+						opts[0].value,
+						opts,
+						t('Copy Changes'),
+						(wtPath) => {
+							runAction({ command: 'copyWipToWorktree', repo: this.view.currentRepo, targetWorktreePath: wtPath }, t('Copying Uncommitted Changes'));
+						},
+						target
+					);
+				}
 			}
 		], [
 			{
@@ -929,6 +1041,14 @@ class ViewActions {
 		sendMessage({ command: 'copyToClipboard', type: subjects ? t('Commit Subjects') : t('Commit Hashes'), data: commits.map((commit) => subjects ? commit.message : commit.hash).join('\n') });
 	}
 
+	public openCreateBranchForCommit(hash: string, target: DialogTarget & CommitTarget) {
+		this.createBranchAction(hash, '', this.view.config.dialogDefaults.createBranch.checkout, target);
+	}
+
+	public openAddTagForCommit(hash: string, target: DialogTarget & CommitTarget) {
+		this.addTagAction(hash, '', this.view.config.dialogDefaults.addTag.type, '', null, target);
+	}
+
 	private createBranchAction(hash: string, initialName: string, initialCheckOut: boolean, target: DialogTarget & CommitTarget) {
 		dialog.showForm(t('Create branch at commit <b><i>{0}</i></b>:', abbrevCommit(hash)), [
 			{ type: DialogInputType.TextRef, name: t('Name'), default: initialName },
@@ -995,6 +1115,74 @@ class ViewActions {
 				willUpdateBranchConfig: setUpstream && remotes.length > 0 && (this.view.gitConfig === null || typeof this.view.gitConfig.branches[refName] === 'undefined' || this.view.gitConfig.branches[refName].remote !== remotes[remotes.length - 1])
 			}, t('Pushing Branch'));
 		}, target);
+	}
+
+	public pushToCommitAction(hash: string, target: DialogTarget | null) {
+		if (this.view.gitRemotes.length === 0) return;
+		const defaultBranch = this.view.gitBranchHead || (this.view.gitBranches.length > 0 ? this.view.gitBranches[0] : 'main');
+		const inputs: DialogInput[] = [
+			{ type: DialogInputType.Select, name: t('Remote'), default: this.view.getPushRemote(defaultBranch), options: this.view.gitRemotes.map((r) => ({ name: r, value: r })) },
+			{ type: DialogInputType.TextRef, name: t('Target Remote Branch'), default: defaultBranch },
+			{
+				type: DialogInputType.Radio,
+				name: t('Push Mode'),
+				options: [
+					{ name: t('Normal'), value: GG.GitPushBranchMode.Normal },
+					{ name: t('Force With Lease'), value: GG.GitPushBranchMode.ForceWithLease },
+					{ name: t('Force'), value: GG.GitPushBranchMode.Force }
+				],
+				default: GG.GitPushBranchMode.Normal
+			}
+		];
+		dialog.showForm(t('Push commit <b><i>{0}</i></b> to remote branch:', abbrevCommit(hash)), inputs, t('Yes, push'), (values) => {
+			runAction({
+				command: 'pushToCommit',
+				repo: this.view.currentRepo,
+				commitHash: hash,
+				remote: <string>values[0],
+				branchName: <string>values[1],
+				mode: <GG.GitPushBranchMode>values[2]
+			}, t('Pushing to Commit'));
+		}, target);
+	}
+
+	public batchSquashCommitsAction(commits: ReadonlyArray<GG.GitCommit>, _target: DialogTarget | null) {
+		const check = validateTopologicalSelection(this.view.commits, this.view.commitLookup, commits.map((c) => c.hash));
+		if (!check.valid || check.baseHash === null) {
+			dialog.showError(t('Unable to Squash Selection'), check.reason || t('Selected commits must form a contiguous chain with a valid parent commit.'), null, null);
+			return;
+		}
+		const baseHash = check.baseHash;
+		const defaultMsg = commits.map((c) => c.message).join('\n\n');
+		dialog.showForm(t('Squash <b>{0}</b> selected commits into one commit onto <b><i>{1}</i></b>?', commits.length, abbrevCommit(baseHash)), [
+			{ type: DialogInputType.Text, name: t('Squashed Commit Message'), default: defaultMsg, placeholder: null }
+		], t('Yes, squash commits'), (values) => {
+			const msg = (<string>values[0]).trim() || commits[0].message;
+			runAction({
+				command: 'batchSquashCommits',
+				repo: this.view.currentRepo,
+				baseHash: baseHash,
+				commitHashes: commits.map((c) => c.hash),
+				message: msg
+			}, t('Squashing Selected Commits'));
+		}, _target);
+	}
+
+	public batchDropCommitsAction(commits: ReadonlyArray<GG.GitCommit>, _target: DialogTarget | null) {
+		const check = validateTopologicalSelection(this.view.commits, this.view.commitLookup, commits.map((c) => c.hash));
+		if (!check.valid || check.baseHash === null) {
+			dialog.showError(t('Unable to Drop Selection'), check.reason || t('Selected commits must form a contiguous chain with a valid parent commit.'), null, null);
+			return;
+		}
+		const baseHash = check.baseHash;
+		dialog.asDangerous().showConfirmation(t('Are you sure you want to permanently drop <b>{0}</b> selected commits onto <b><i>{1}</i></b>?', commits.length, abbrevCommit(baseHash)), t('Yes, drop commits'), () => {
+			runAction({
+				command: 'batchDropCommits',
+				repo: this.view.currentRepo,
+				baseHash: baseHash,
+				commitHashes: commits.map((c) => c.hash)
+			}, t('Dropping Selected Commits'));
+		}, _target);
 	}
 
 	/**
@@ -1107,10 +1295,48 @@ class ViewActions {
 			runAction({ command: 'pushStash', repo: this.view.currentRepo, message: <string>values[0], includeUntracked: <boolean>values[index], paths: paths, onlyStaged: onlyStaged }, t('Stashing uncommitted changes'));
 		}, target);
 		if (selectable) addFileSelectionToDialog(files.length);
+		const msgInput = <HTMLInputElement | null>document.getElementById('dialogInput0');
+		if (msgInput !== null && msgInput.parentElement !== null) {
+			const aiBtn = document.createElement('button');
+			aiBtn.type = 'button';
+			aiBtn.id = 'stashAiMsgBtn';
+			aiBtn.className = 'dialogInlineAiBtn';
+			aiBtn.innerHTML = MENU_ICONS.sparkle + '<span>' + escapeHtml(t('AI Name')) + '</span>';
+			aiBtn.title = t('Generate a descriptive stash message with AI');
+			aiBtn.addEventListener('click', () => {
+				aiBtn.disabled = true;
+				aiBtn.textContent = t('Generating…');
+				sendMessage({ command: 'generateStashMessage', repo: this.view.currentRepo });
+			});
+			msgInput.parentElement.appendChild(aiBtn);
+		}
+	}
+
+	public processGenerateStashMessageResponse(msg: GG.ResponseGenerateStashMessage) {
+		const aiBtn = <HTMLButtonElement | null>document.getElementById('stashAiMsgBtn');
+		const msgInput = <HTMLInputElement | null>document.getElementById('dialogInput0');
+		if (aiBtn !== null) {
+			aiBtn.disabled = false;
+			aiBtn.innerHTML = MENU_ICONS.sparkle + '<span>' + escapeHtml(t('AI Name')) + '</span>';
+		}
+		if (msg.error !== null) {
+			if (aiBtn !== null) aiBtn.title = msg.error;
+			return;
+		}
+		if (msgInput !== null && msg.message.trim() !== '') {
+			msgInput.value = msg.message.trim();
+			msgInput.dispatchEvent(new Event('input', { bubbles: true }));
+			msgInput.focus();
+		}
+	}
+
+	public openAmendCommitDialog(commitHash: string, target: DialogTarget | null) {
+		this.editMessageTarget = target;
+		sendMessage({ command: 'loadCommitMessage', repo: this.view.currentRepo, commitHash: commitHash, amendMode: true });
 	}
 
 	/**
-	 * Show the dialog to edit the message of a commit, once its message is loaded.
+	 * Show the dialog to edit the message (or amend) a commit, once its message is loaded.
 	 * @param msg The message containing the message of the commit.
 	 */
 	public processLoadCommitMessageResponse(msg: GG.ResponseLoadCommitMessage) {
@@ -1120,63 +1346,78 @@ class ViewActions {
 			dialog.showError(t('Unable to Edit Commit Message'), msg.error, null, null);
 			return;
 		}
-		const isHead = msg.commitHash === this.view.getCommitHead();
-		const stagedCount = typeof msg.stagedCount === 'number' ? msg.stagedCount : 0;
+		const isHead = typeof msg.isHead === 'boolean' ? msg.isHead : msg.commitHash === this.view.getCommitHead();
 		const origAuthor = typeof msg.author === 'string' ? msg.author : '';
-		const headerHtml = (isHead
-			? t('Amend commit <b><i>{0}</i></b> (<code>git commit --amend</code>):', abbrevCommit(msg.commitHash))
-			: t('Edit the message of commit <b><i>{0}</i></b>:', abbrevCommit(msg.commitHash)) + '<br/><i>' + t('The later commits are rebased onto the changed commit (they get new hashes).') + '</i>') +
-			(msg.pushedTo !== null ? '<div class="dialogCallout warning">' + SVG_ICONS.alert + '<span>' + t('This commit is already on <b>{0}</b>. Changing it gives it a new hash, so the branch must be force-pushed.', escapeHtml(msg.pushedTo)) + '</span></div>' : '');
-
-		if (isHead) {
+		if (msg.amendMode && isHead) {
+			const stagedCount = typeof msg.stagedCount === 'number' ? msg.stagedCount : 0;
+			const unstagedCount = typeof msg.unstagedCount === 'number' ? msg.unstagedCount : 0;
+			const statusHint = stagedCount > 0 || unstagedCount > 0
+				? '<br/><i>' + t('Working tree: {0} staged, {1} unstaged.', stagedCount, unstagedCount) + '</i>'
+				: '';
 			const inputs: DialogInput[] = [
-				{ type: DialogInputType.TextArea, name: t('Message'), default: msg.message, placeholder: null }
-			];
-			if (stagedCount > 0) {
-				inputs.push({
+				{ type: DialogInputType.TextArea, name: t('Message'), default: msg.message, placeholder: null },
+				{
+					type: DialogInputType.Text,
+					name: t('Author (Name <email>)'),
+					default: origAuthor,
+					placeholder: 'Name <email@example.com>',
+					info: t('Leave unchanged to keep the original commit author.')
+				},
+				{
 					type: DialogInputType.Checkbox,
-					name: t('Include {0} staged file(s) in this commit (--amend)', stagedCount),
-					value: true,
-					info: t('Checked: fold staged changes into this commit. Unchecked: edit metadata/message only (--only).')
-				});
-			}
-			inputs.push({
-				type: DialogInputType.Text,
-				name: t('Author (Name <email>)'),
-				default: origAuthor,
-				placeholder: 'Name <email@example.com>',
-				info: t('Leave unchanged to keep the original commit author.')
-			});
-			inputs.push({
-				type: DialogInputType.Checkbox,
-				name: t('Reset commit date to now (--date=now)'),
-				value: false
-			});
-
-			dialog.showForm(headerHtml, inputs, t('Amend Commit'), (values) => {
-				const message = (<string>values[0]).trim();
-				if (message === '') {
-					dialog.showError(t('Unable to Edit Commit Message'), t('The message can\'t be empty.'), null, null);
-					return;
+					name: stagedCount > 0 ? t('Include staged changes ({0})', stagedCount) : t('Include staged changes'),
+					value: stagedCount > 0,
+					info: t('When unchecked, only the commit message and metadata are amended (--only).')
+				},
+				{
+					type: DialogInputType.Checkbox,
+					name: unstagedCount > 0 ? t('Stage all uncommitted changes (git add -A, {0})', unstagedCount) : t('Stage all uncommitted changes (git add -A)'),
+					value: false,
+					info: t('Stage all modified, deleted, and untracked files before amending HEAD.')
+				},
+				{
+					type: DialogInputType.Checkbox,
+					name: t('Reset author date to now (--date=now)'),
+					value: false
+				},
+				{
+					type: DialogInputType.Checkbox,
+					name: t('Skip Git hooks (--no-verify)'),
+					value: false
 				}
-				let idx = 1;
-				const includeStaged = stagedCount > 0 ? <boolean>values[idx++] : false;
-				const nextAuthor = (<string>values[idx++]).trim();
-				const resetAuthorDate = <boolean>values[idx++];
-				runAction({
-					command: 'editCommitMessage',
-					repo: this.view.currentRepo,
-					commitHash: msg.commitHash,
-					message: message,
-					includeStaged: includeStaged,
-					author: nextAuthor && nextAuthor !== origAuthor ? nextAuthor : null,
-					resetAuthorDate: resetAuthorDate
-				}, t('Amending Commit'));
-			}, target);
+			];
+			dialog.showForm(
+				t('Amend HEAD commit <b><i>{0}</i></b> (<code>git commit --amend</code>):', abbrevCommit(msg.commitHash)) +
+				statusHint +
+				(msg.pushedTo !== null ? '<div class="dialogCallout warning">' + SVG_ICONS.alert + '<span>' + t('This commit is already on <b>{0}</b>. Amending it gives it a new hash, so the branch must be force-pushed.', escapeHtml(msg.pushedTo)) + '</span></div>' : ''),
+				inputs,
+				t('Amend Commit'),
+				(values) => {
+					const message = (<string>values[0]).trim();
+					if (message === '') {
+						dialog.showError(t('Unable to Amend Commit'), t('The message can\'t be empty.'), null, null);
+						return;
+					}
+					const nextAuthor = (<string>values[1]).trim();
+					runAction({
+						command: 'editCommitMessage',
+						repo: this.view.currentRepo,
+						commitHash: msg.commitHash,
+						message: message,
+						author: nextAuthor && nextAuthor !== origAuthor ? nextAuthor : null,
+						includeStaged: <boolean>values[2],
+						stageAll: <boolean>values[3],
+						resetAuthorDate: <boolean>values[4],
+						noVerify: <boolean>values[5]
+					}, t('Amending Commit'));
+				},
+				target
+			);
 			return;
 		}
-
-		dialog.showForm(headerHtml, [
+		dialog.showForm(t('Edit the message of commit <b><i>{0}</i></b>:', abbrevCommit(msg.commitHash)) +
+			(isHead ? '' : '<br/><i>' + t('The later commits are rebased onto the changed commit (they get new hashes).') + '</i>') +
+			(msg.pushedTo !== null ? '<div class="dialogCallout warning">' + SVG_ICONS.alert + '<span>' + t('This commit is already on <b>{0}</b>. Changing it gives it a new hash, so the branch must be force-pushed.', escapeHtml(msg.pushedTo)) + '</span></div>' : ''), [
 			{ type: DialogInputType.TextArea, name: t('Message'), default: msg.message, placeholder: null }
 		], t('Save Message'), (values) => {
 			const message = (<string>values[0]).trim();
@@ -1300,7 +1541,7 @@ class ViewActions {
 			detailHtml;
 	}
 
-	private mergeAction(obj: string, name: string, actionOn: GG.MergeActionOn, target: DialogTarget & (CommitTarget | RefTarget)) {
+	public mergeAction(obj: string, name: string, actionOn: GG.MergeActionOn, target: (DialogTarget & (CommitTarget | RefTarget)) | null) {
 		const impactHtml = this.requestDialogImpactPreview('merge', obj);
 		dialog.showForm(t('Are you sure you want to merge {0} <b><i>{1}</i></b> into {2}?', t(actionOn).toLowerCase(), escapeHtml(name), (this.view.gitBranchHead !== null ? t('<b><i>{0}</i></b> (the current branch)', escapeHtml(this.view.gitBranchHead)) : t('the current branch'))) + impactHtml, [
 			{ type: DialogInputType.Checkbox, name: t('Create a new commit even if fast-forward is possible'), value: this.view.config.dialogDefaults.merge.noFastForward },
@@ -1311,7 +1552,7 @@ class ViewActions {
 		}, target);
 	}
 
-	private rebaseAction(obj: string, name: string, actionOn: GG.RebaseActionOn, target: DialogTarget & (CommitTarget | RefTarget)) {
+	public rebaseAction(obj: string, name: string, actionOn: GG.RebaseActionOn, target: (DialogTarget & (CommitTarget | RefTarget)) | null) {
 		const impactHtml = this.requestDialogImpactPreview('rebase', obj);
 		dialog.showForm(t('Are you sure you want to rebase {0} on {1} <b><i>{2}</i></b>?', (this.view.gitBranchHead !== null ? t('<b><i>{0}</i></b> (the current branch)', escapeHtml(this.view.gitBranchHead)) : t('the current branch')), actionOn.toLowerCase(), escapeHtml(name)) + impactHtml, [
 			{ type: DialogInputType.Checkbox, name: t('Interactive Rebase'), value: this.view.config.dialogDefaults.rebase.interactive, info: t('Choose how each commit is rebased (reorder, reword, squash or drop commits) in the Rebase Editor.') },

@@ -746,8 +746,14 @@ body.freezeFooter #footer{
 	top:0;
 	left:auto;
 	box-sizing:border-box;
+	container-type:inline-size;
 	border-left:1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
 	background-color:var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+@container (max-width: 340px){
+	#cdvHeader .cdvDiffModeLabel{
+		display:none;
+	}
 }
 #cdv.docked.right #cdvContent{
 	top:36px;
@@ -1085,6 +1091,31 @@ body.freezeFooter #footer{
 }
 .cdvFileDiffLine.del > span:nth-child(3){
 	color:var(--vscode-gitDecoration-deletedResourceForeground);
+}
+.cdvFileDiffCollapsed{
+	padding:2px 10px;
+	background-color:color-mix(in srgb, var(--vscode-focusBorder, #0e7afe) 8%, transparent);
+	color:var(--vscode-descriptionForeground);
+	font-family:var(--vscode-font-family);
+	font-size:11px;
+	text-align:center;
+	border-top:1px dashed rgba(128,128,128,0.22);
+	border-bottom:1px dashed rgba(128,128,128,0.22);
+}
+.cdvControlSep{
+	width:14px;
+	height:1px;
+	margin:3px auto;
+	background-color:var(--vscode-panel-border, rgba(128,128,128,0.3));
+}
+#cdvControls #cdvHideUnchanged{
+	border:1px solid transparent;
+	border-radius:4px;
+	box-sizing:border-box;
+}
+#cdvControls #cdvHideUnchanged.active{
+	border-color:var(--vscode-focusBorder);
+	background-color:color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
 }
 .cdvFileDiffMore, .cdvFileDiffMessage{
 	padding:6px 10px;
@@ -1699,6 +1730,11 @@ body.vscode-light #commitTable tr.commit.commitDetailsOpen.rowActionsTarget{
 	backdrop-filter:blur(10px);
 	-webkit-backdrop-filter:blur(10px);
 	box-shadow:var(--gm-floating-bar-shadow, 0 4px 14px rgba(0,0,0,0.44));
+}
+body.vscode-light #rowActions, body.vscode-light #cdvFileFloatingBar{
+	border:1px solid var(--gm-floating-bar-border, rgba(37, 99, 235, 0.34));
+	background:var(--gm-floating-bar-bg, rgba(255, 255, 255, 0.95));
+	box-shadow:var(--gm-floating-bar-shadow, 0 4px 14px rgba(15, 23, 42, 0.14), 0 1px 3px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.85));
 }
 #rowActions.gliding, #cdvFileFloatingBar.gliding{
 	transition:left 0.08s cubic-bezier(0.2, 0, 0, 1);
@@ -4477,3 +4513,694 @@ button.operationBarBtn svg{
 	border-radius:3px;
 	background:rgba(128,128,128,0.18);
 }
+
+/* Ported v2.6 – v2.8.2 Commit Graph & Companion Styles */
+.cdvActionsCondBadge{
+	flex:0 0 auto;
+	padding:1px 5px;
+	border-radius:4px;
+	border:1px solid rgba(128,128,128,0.28);
+	color:var(--vscode-descriptionForeground);
+	font-size:10.5px;
+	line-height:1.3;
+	cursor:help;
+}
+#cdvActionsModal button.rebaseEditorMoveBtn,
+#cdvActionsModal button.rebaseEditorLink{
+	padding:0;
+	border:none;
+	background:transparent;
+	color:inherit;
+	font:inherit;
+}
+#cdvActionsModal button.rebaseEditorMoveBtn:focus-visible,
+#cdvActionsModal button.rebaseEditorLink:focus-visible,
+#cdvActionsModal .cdvActionsModalLabel input[type="checkbox"]:focus-visible + .customCheckbox{
+	outline:2px solid var(--vscode-focusBorder);
+	outline-offset:1px;
+}
+#cdvActionsModal .cdvActionsEmptyNote{
+	color:var(--vscode-descriptionForeground);
+	font-size:11.5px;
+}
+
+/* PR & CI Status Badges, Drag & Drop, Inline Staging/Commit & Hunk Modal */
+#toolsMenuBtn.active{
+	background-color:var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.22));
+	color:var(--vscode-foreground);
+}
+.gitRef.head[draggable="true"]{
+	cursor:grab;
+}
+.gitRef.head[draggable="true"]:active{
+	cursor:grabbing;
+}
+.gitRefPrBadge{
+	display:inline-flex;
+	align-items:center;
+	gap:2px;
+	margin-left:4px;
+	padding:0 5px;
+	border-radius:8px;
+	font-size:10.5px;
+	font-weight:600;
+	line-height:15px;
+	background-color:rgba(128,128,128,0.22);
+	color:var(--vscode-foreground);
+	cursor:pointer;
+	vertical-align:baseline;
+}
+.gitRefPrBadge:hover{
+	filter:brightness(1.12);
+	text-decoration:underline;
+}
+.gitRefPrBadge.ci-success{
+	background-color:rgba(46,160,67,0.24);
+	color:var(--vscode-gitDecoration-addedResourceForeground, #3fb950);
+}
+.gitRefPrBadge.ci-failure{
+	background-color:rgba(248,81,73,0.24);
+	color:var(--vscode-errorForeground, #f85149);
+}
+.gitRefPrBadge.ci-pending{
+	background-color:rgba(210,153,34,0.24);
+	color:var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
+}
+tr.commit.dragDropTarget > td{
+	background-color:var(--vscode-list-dropBackground, rgba(0,122,204,0.22)) !important;
+	box-shadow:inset 0 1px 0 var(--vscode-focusBorder), inset 0 -1px 0 var(--vscode-focusBorder);
+}
+
+#cdvInlineCommitBox{
+	margin-top:10px;
+	padding-top:10px;
+	border-top:1px solid rgba(128,128,128,0.22);
+}
+.cdvStagingBar{
+	display:flex;
+	align-items:center;
+	justify-content:space-between;
+	gap:6px;
+	margin-bottom:6px;
+	font-size:11.5px;
+	color:var(--vscode-descriptionForeground);
+}
+.cdvStagingBtns{
+	display:inline-flex;
+	gap:4px;
+}
+.cdvMiniBtn{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	gap:3px;
+	padding:2px 6px;
+	border-radius:4px;
+	border:1px solid var(--vscode-button-border, rgba(128,128,128,0.32));
+	background-color:var(--vscode-button-secondaryBackground, rgba(128,128,128,0.14));
+	color:var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+	font-size:11px;
+	line-height:1.3;
+	cursor:pointer;
+}
+.cdvMiniBtn:hover{
+	background-color:var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.26));
+}
+.cdvMiniBtn.primary, .cdvMiniBtn.active{
+	background-color:var(--vscode-button-background);
+	color:var(--vscode-button-foreground);
+	border-color:transparent;
+}
+.cdvMiniBtn.danger, .cdvLinkBtn.danger{
+	color:var(--vscode-errorForeground, #f85149);
+}
+.cdvLinkBtn{
+	padding:0;
+	border:none;
+	background:transparent;
+	font:inherit;
+	text-decoration:underline;
+	cursor:pointer;
+}
+.cdvQuickStageList{
+	max-height:132px;
+	overflow-y:auto;
+	margin-bottom:8px;
+	padding:3px 4px;
+	border-radius:5px;
+	border:1px solid rgba(128,128,128,0.2);
+	background-color:rgba(128,128,128,0.06);
+}
+.cdvQuickStageRow{
+	display:flex;
+	align-items:center;
+	gap:4px;
+	padding:2px 2px;
+	font-size:11.5px;
+}
+.cdvQuickStageBadge{
+	flex:0 0 auto;
+	min-width:18px;
+	text-align:center;
+	font-family:var(--vscode-editor-font-family);
+	font-size:10px;
+	font-weight:700;
+	border-radius:3px;
+	padding:0 3px;
+	background-color:rgba(128,128,128,0.2);
+}
+.cdvQuickStageBadge.status-s{
+	color:var(--vscode-gitDecoration-addedResourceForeground, #3fb950);
+}
+.cdvQuickStageBadge.status-m, .cdvQuickStageBadge.status-sm{
+	color:var(--vscode-gitDecoration-modifiedResourceForeground, #d29922);
+}
+.cdvQuickStageBadge.status-\!{
+	color:var(--vscode-errorForeground, #f85149);
+}
+.cdvQuickStagePath{
+	flex:1;
+	min-width:0;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+	font-family:var(--vscode-editor-font-family);
+	font-size:11px;
+}
+.cdvCommitForm{
+	display:flex;
+	flex-direction:column;
+	gap:6px;
+}
+.cdvCommitInput{
+	width:100%;
+	box-sizing:border-box;
+	resize:vertical;
+	min-height:54px;
+	padding:6px 8px;
+	border-radius:5px;
+	border:1px solid var(--vscode-input-border, rgba(128,128,128,0.35));
+	background-color:var(--vscode-input-background);
+	color:var(--vscode-input-foreground);
+	font-family:var(--vscode-font-family);
+	font-size:12px;
+}
+.cdvCommitInput:focus{
+	outline:1px solid var(--vscode-focusBorder);
+}
+.cdvCommitControls{
+	display:flex;
+	align-items:center;
+	gap:6px;
+	flex-wrap:wrap;
+}
+.cdvAmendLabel{
+	display:inline-flex;
+	align-items:center;
+	gap:5px;
+	font-size:11.5px;
+	cursor:pointer;
+	user-select:none;
+}
+.cdvCommitSpacer{
+	flex:1;
+}
+
+#cdvHunkModal{
+	position:fixed;
+	inset:0;
+	z-index:120;
+	display:flex;
+	align-items:center;
+	justify-content:center;
+	padding:24px;
+	background-color:rgba(0,0,0,0.48);
+}
+.cdvHunkCard{
+	display:flex;
+	flex-direction:column;
+	width:min(820px, 94vw);
+	max-height:84vh;
+	border-radius:8px;
+	border:1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+	background-color:var(--vscode-editorWidget-background, var(--vscode-editor-background));
+	box-shadow:0 12px 36px rgba(0,0,0,0.45);
+	overflow:hidden;
+}
+.cdvHunkHeader{
+	display:flex;
+	align-items:center;
+	gap:8px;
+	padding:10px 14px;
+	border-bottom:1px solid rgba(128,128,128,0.24);
+}
+.cdvHunkTitle{
+	flex:1;
+	min-width:0;
+	overflow:hidden;
+	text-overflow:ellipsis;
+	white-space:nowrap;
+	font-family:var(--vscode-editor-font-family);
+	font-size:12.5px;
+	font-weight:600;
+}
+.cdvHunkTabs{
+	display:inline-flex;
+	gap:4px;
+}
+.cdvHunkBody{
+	flex:1;
+	overflow:auto;
+	padding:12px 14px;
+}
+.cdvHunkEmpty{
+	margin:12px 0;
+	color:var(--vscode-descriptionForeground);
+	text-align:center;
+}
+.cdvHunkBlock{
+	margin-bottom:12px;
+	border-radius:6px;
+	border:1px solid rgba(128,128,128,0.26);
+	overflow:hidden;
+}
+.cdvHunkBlockHdr{
+	display:flex;
+	align-items:center;
+	justify-content:space-between;
+	gap:8px;
+	padding:5px 10px;
+	background-color:rgba(128,128,128,0.12);
+	font-size:11.5px;
+}
+.cdvHunkBlockBtns{
+	display:inline-flex;
+	gap:5px;
+}
+.cdvHunkPre{
+	margin:0;
+	padding:6px 0;
+	overflow-x:auto;
+	font-family:var(--vscode-editor-font-family);
+	font-size:11.5px;
+	line-height:1.45;
+}
+.cdvHunkLine{
+	padding:0 10px;
+	white-space:pre;
+}
+.cdvHunkLine.add{
+	background-color:var(--vscode-diffEditor-insertedLineBackground, rgba(46,160,67,0.18));
+}
+.cdvHunkLine.del{
+	background-color:var(--vscode-diffEditor-removedLineBackground, rgba(248,81,73,0.18));
+}
+.cdvHunkHint{
+	margin-bottom:8px;
+	font-size:11.5px;
+	color:var(--vscode-descriptionForeground);
+}
+.cdvHunkLine.selectable{
+	cursor:pointer;
+	user-select:none;
+}
+.cdvHunkLine.selectable:hover{
+	filter:brightness(1.12);
+}
+.cdvHunkLine.selected{
+	box-shadow:inset 3px 0 0 var(--vscode-focusBorder);
+	background-color:var(--vscode-editor-selectionBackground, rgba(38,79,120,0.45));
+}
+
+/* Command Palette, PR Popover, Conventional Chips, Pre-Commit Guard, Notes & Signature Details */
+#graphCmdPalette{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;padding-top:10vh}
+.gcpCard{width:min(600px,92vw);max-height:70vh;display:flex;flex-direction:column;border-radius:8px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));background:var(--vscode-editorWidget-background,var(--vscode-editor-background));box-shadow:0 12px 32px rgba(0,0,0,.45);overflow:hidden}
+.gcpInput{width:100%;height:38px;padding:0 12px;border:0;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.25));background:transparent;color:inherit;font-size:13px;outline:none}
+.gcpList{overflow-y:auto;max-height:calc(70vh - 40px);padding:4px}
+.gcpRow{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:5px;cursor:pointer;font-size:12.5px}
+.gcpRow:hover,.gcpRow.active{background:var(--vscode-list-activeSelectionBackground,rgba(128,128,128,.24));color:var(--vscode-list-activeSelectionForeground,inherit)}
+.gcpBadge{padding:1px 6px;border-radius:4px;font-size:10.5px;background:rgba(128,128,128,.22);font-family:var(--vscode-editor-font-family);flex:0 0 auto}
+.gcpTitle{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gcpDetail{margin-left:auto;font-size:11px;color:var(--vscode-descriptionForeground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:45%}
+.gcpEmpty{padding:14px;text-align:center;color:var(--vscode-descriptionForeground)}
+#prDetailPopover{position:fixed;z-index:115;width:min(360px,90vw);border-radius:8px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.4));background:var(--vscode-editorWidget-background,var(--vscode-editor-background));box-shadow:0 10px 28px rgba(0,0,0,.42);padding:10px 12px;display:flex;flex-direction:column;gap:8px;font-size:12px}
+.prPopHdr{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.prPopMeta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;color:var(--vscode-descriptionForeground)}
+.prPopBody{max-height:110px;overflow-y:auto;white-space:pre-wrap;font-size:11.5px;line-height:1.45;padding:6px 8px;border-radius:5px;background:rgba(128,128,128,.08)}
+.prPopChecks{display:flex;flex-wrap:wrap;gap:4px}
+.prPopCheck{padding:1px 6px;border-radius:4px;font-size:10.5px;background:rgba(128,128,128,.16)}
+.prPopBtns{display:flex;flex-wrap:wrap;gap:6px}
+.cdvConvChips{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-bottom:5px}
+.cdvConvChip{height:20px;padding:0 6px;border-radius:4px;border:1px solid var(--vscode-dropdown-border,rgba(128,128,128,.35));background:transparent;color:inherit;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:3px}
+.cdvConvChip:hover{background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.2))}
+.cdvConvChip.aiSplit{margin-left:auto}
+.cdvHooksBadge{padding:1px 7px;border:0;border-radius:10px;font-size:10.5px;background:rgba(128,128,128,.18);color:var(--vscode-descriptionForeground);cursor:pointer;font-family:inherit}
+.cdvHooksBadge:hover{background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.28));color:var(--vscode-foreground)}
+.cdvPreCommitBanner{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px;margin-bottom:6px;border-radius:5px;border:1px solid rgba(210,153,34,.5);background:rgba(210,153,34,.12);font-size:11.5px}
+.cdvPreCommitBanner.high{border-color:rgba(248,81,73,.55);background:rgba(248,81,73,.14)}
+.cdvNoteBox{margin:6px 0;padding:6px 8px;border-radius:5px;border-left:3px solid var(--vscode-focusBorder,#0e7afe);background:rgba(128,128,128,.1);font-size:12px;white-space:pre-wrap}
+.cdvSigMeta{font-size:11px;color:var(--vscode-descriptionForeground);margin:2px 0 6px;font-family:var(--vscode-editor-font-family)}
+.fileTreeFileRecord.lastViewed, .comparePanelFile.lastViewed{background-color:color-mix(in srgb,var(--vscode-list-activeSelectionBackground,var(--vscode-focusBorder,#3794ff)) 34%,var(--vscode-list-inactiveSelectionBackground,rgba(128,128,128,.22)));box-shadow:inset 3px 0 0 var(--vscode-list-highlightForeground,var(--vscode-focusBorder,#3794ff))}
+.fileTreeFileRecord.lastViewed:hover, .fileTreeFileRecord.lastViewed.contextMenuActive, .fileTreeFileRecord.lastViewed.dialogActive, .comparePanelFile.lastViewed:hover{background-color:color-mix(in srgb,var(--vscode-list-activeSelectionBackground,var(--vscode-focusBorder,#3794ff)) 46%,var(--vscode-list-hoverBackground,rgba(128,128,128,.26)))}
+.fileTreeFileRecord.lastViewed .gitFileName, .comparePanelFile.lastViewed .comparePanelFileName{font-weight:600;color:var(--vscode-list-highlightForeground,var(--vscode-foreground))}
+#cdvLastFileViewed svg, .fileTreeFileRecord:hover #cdvLastFileViewed svg{fill:var(--vscode-list-highlightForeground,var(--vscode-focusBorder,#3794ff));fill-opacity:1}
+#branchCommitCompareModal{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:24px}
+.bccCard{width:min(880px,94vw);max-height:82vh;display:flex;flex-direction:column;border-radius:10px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));background:var(--vscode-editor-background);box-shadow:0 16px 40px rgba(0,0,0,.48);overflow:hidden}
+.bccHeader{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.25));background:var(--vscode-sideBar-background,var(--vscode-editor-background))}
+.bccTitle{flex:1 1 auto;display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:13.5px}
+.bccCols{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 14px;flex:1 1 auto;min-height:0;overflow:hidden}
+@media (max-width:700px){.bccCols{grid-template-columns:1fr}}
+.bccCol{display:flex;flex-direction:column;gap:6px;min-height:0}
+.bccLabel{font-size:11.5px;font-weight:600;color:var(--vscode-descriptionForeground)}
+.bccSelect,.bccSearch{height:28px;padding:0 8px;border-radius:5px;border:1px solid var(--vscode-input-border,rgba(128,128,128,.38));background:var(--vscode-input-background);color:var(--vscode-input-foreground,inherit);font:inherit;font-size:12px}
+.bccList{flex:1 1 auto;min-height:220px;max-height:46vh;overflow-y:auto;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.25));border-radius:6px;display:flex;flex-direction:column}
+.bccCommitRow{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto auto;column-gap:8px;row-gap:2px;padding:6px 9px;border:0;border-bottom:1px solid rgba(128,128,128,.12);background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
+.bccCommitRow:last-child{border-bottom:0}
+.bccCommitRow:hover{background:var(--vscode-list-hoverBackground,rgba(128,128,128,.14))}
+.bccCommitRow.selected{background:color-mix(in srgb,var(--vscode-list-activeSelectionBackground,var(--vscode-focusBorder,#3794ff)) 34%,var(--vscode-list-inactiveSelectionBackground,rgba(128,128,128,.22)));box-shadow:inset 3px 0 0 var(--vscode-list-highlightForeground,var(--vscode-focusBorder,#3794ff))}
+.bccHash{font-family:var(--vscode-editor-font-family);font-size:11px;padding:1px 5px;border-radius:4px;background:rgba(128,128,128,.18);align-self:start}
+.bccSubject{font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bccMeta{grid-column:2;font-size:11px;color:var(--vscode-descriptionForeground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bccEmpty{padding:18px;text-align:center;color:var(--vscode-descriptionForeground);font-size:12px}
+.bccFooter{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid var(--vscode-panel-border,rgba(128,128,128,.25))}
+.bccSummary{flex:1 1 auto;font-size:12px;font-family:var(--vscode-editor-font-family);color:var(--vscode-descriptionForeground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bccWarn{color:var(--vscode-editorWarning-foreground,#bf8700);font-family:var(--vscode-font-family)}
+
+/* v2.6.0: Collapsible Graph Navigator Sidebar */
+#sidebarToggleBtn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--vscode-icon-foreground,inherit);cursor:pointer;flex:0 0 auto}
+#sidebarToggleBtn:hover{background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.18))}
+#sidebarToggleBtn.active{background:var(--vscode-button-secondaryBackground,rgba(128,128,128,.24));border-color:var(--vscode-focusBorder,rgba(55,148,255,.5))}
+#graphSidebar{position:fixed;top:0;left:0;bottom:0;width:236px;z-index:26;display:none;flex-direction:column;background:var(--vscode-sideBar-background,var(--vscode-editor-background));border-right:1px solid var(--vscode-panel-border,rgba(128,128,128,.3));color:var(--vscode-foreground);font-size:12.5px;box-sizing:border-box}
+#graphSidebar.active{display:flex}
+.graphSidebarHeader{display:flex;align-items:center;justify-content:space-between;padding:8px 10px 8px 12px;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.22));font-weight:600}
+.graphSidebarTitle{display:inline-flex;align-items:center;gap:6px}
+.graphSidebarCloseBtn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:none;border-radius:4px;background:transparent;color:inherit;cursor:pointer;opacity:.75}
+.graphSidebarCloseBtn:hover{background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.2));opacity:1}
+.graphSidebarSearchWrap{padding:8px 10px;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.18))}
+.graphSidebarSearch{width:100%;height:26px;padding:0 8px;box-sizing:border-box;border-radius:5px;border:1px solid var(--vscode-input-border,rgba(128,128,128,.35));background:var(--vscode-input-background,var(--vscode-editor-background));color:inherit;font:inherit;font-size:12px;outline:none}
+.graphSidebarSearch:focus{border-color:var(--vscode-focusBorder)}
+.graphSidebarBody{flex:1 1 auto;overflow-y:auto;padding:6px 0 16px}
+.gsSection{margin-bottom:4px}
+.gsSectionHeader{display:flex;align-items:center;gap:6px;padding:5px 10px;cursor:pointer;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--vscode-descriptionForeground);user-select:none}
+.gsSectionHeader:hover{background:var(--vscode-list-hoverBackground,rgba(128,128,128,.1));color:var(--vscode-foreground)}
+.gsSectionCount{margin-left:auto;padding:0 5px;border-radius:999px;background:rgba(128,128,128,.18);font-size:10.5px;font-weight:600}
+.gsSectionList{display:flex;flex-direction:column}
+.gsItem{display:flex;align-items:center;gap:6px;padding:4px 8px 4px 16px;cursor:pointer;min-height:24px;box-sizing:border-box}
+.gsItem:hover{background:var(--vscode-list-hoverBackground,rgba(128,128,128,.14))}
+.gsItem.head{font-weight:600}
+.gsItem.head .gsItemIcon{color:var(--vscode-testing-iconPassed,#2da44e)}
+.gsItemIcon{flex:0 0 auto;font-size:11px;opacity:.78;width:13px;text-align:center}
+.gsItemLabel{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gsBadge{flex:0 0 auto;font-size:10.5px;padding:0 5px;border-radius:4px;background:rgba(128,128,128,.16);color:var(--vscode-descriptionForeground);font-family:var(--vscode-editor-font-family)}
+.gsBadgePr{background:rgba(55,148,255,.16);color:var(--vscode-textLink-foreground,#3794ff)}
+.gsBadgeWip{background:rgba(210,153,34,.2);color:var(--vscode-editorWarning-foreground,#d29922);font-weight:600}
+.gsBadgeWarn{background:rgba(248,81,73,.18);color:var(--vscode-errorForeground,#f85149)}
+.gsPinBtn,.gsMiniBtn{flex:0 0 auto;border:none;background:transparent;color:var(--vscode-descriptionForeground);cursor:pointer;padding:0 3px;font-size:12px;opacity:.45;border-radius:3px}
+.gsItem:hover .gsPinBtn,.gsItem:hover .gsMiniBtn,.gsPinBtn.pinned{opacity:1}
+.gsPinBtn.pinned{color:var(--vscode-editorWarning-foreground,#e3b341)}
+.gsEmpty{padding:4px 18px;font-size:11.5px;color:var(--vscode-descriptionForeground);opacity:.75}
+
+/* v2.6.0: CDV Multi-File Selection & Bulk Action Bar */
+.fileTreeFileRecord.cdvFileMultiSelected{background:color-mix(in srgb,var(--vscode-list-activeSelectionBackground,var(--vscode-focusBorder,#3794ff)) 28%,transparent) !important;box-shadow:inset 3px 0 0 var(--vscode-focusBorder,#3794ff)}
+.cdvFileBulkBar{position:sticky;top:0;z-index:8;display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 10px;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.3));background:var(--vscode-sideBar-background,var(--vscode-editor-background))}
+.cdvBulkCount{font-size:12px;font-weight:600;margin-right:4px}
+
+/* v2.6.0: Worktree WIP Badge & Stacked PR / Merge Queue Badges */
+.gitRefWipBadge{display:inline-flex;align-items:center;margin-left:5px;padding:0 5px;border-radius:4px;font-size:10px;font-weight:700;background:rgba(210,153,34,.22);color:var(--vscode-editorWarning-foreground,#d29922);border:1px solid rgba(210,153,34,.45);cursor:pointer;line-height:15px}
+.gitRefWipBadge:hover{background:rgba(210,153,34,.35)}
+.worktreeWipBadge{background:rgba(210,153,34,.2) !important;color:var(--vscode-editorWarning-foreground,#d29922) !important}
+.gitRefPrBadge.inQueue{box-shadow:0 0 0 1px rgba(137,87,229,.65)}
+.prMergeQueueBadge{background:rgba(137,87,229,.22) !important;color:#a371f7 !important;border:1px solid rgba(137,87,229,.45)}
+.prPopStack{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 0 2px;font-size:11.5px}
+.prStackTag{font-weight:600;color:var(--vscode-descriptionForeground)}
+.prStackLink{border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));border-radius:4px;padding:1px 6px;background:rgba(128,128,128,.12);color:var(--vscode-textLink-foreground,#3794ff);cursor:pointer;font-size:11px;font-family:var(--vscode-editor-font-family)}
+.prStackLink:hover{background:rgba(55,148,255,.18)}
+
+/* v2.6.0: AI Search & Inline Dialog AI Button */
+#findAiBtn{display:inline-flex;align-items:center;justify-content:center;font-size:12px;padding:0 5px}
+#findAiBtn svg.uiIcon{width:14px !important;height:14px !important}
+#findAiBtn.loading{opacity:.5;pointer-events:none}
+.dialogInlineAiBtn{display:inline-flex;align-items:center;gap:4px;margin-left:6px;height:24px;padding:0 8px;border-radius:5px;border:1px solid var(--vscode-button-border,rgba(128,128,128,.35));background:var(--vscode-button-secondaryBackground,rgba(128,128,128,.18));color:var(--vscode-button-secondaryForeground,inherit);cursor:pointer;font-size:11.5px;white-space:nowrap}
+.dialogInlineAiBtn:hover{background:var(--vscode-button-secondaryHoverBackground,rgba(128,128,128,.28))}
+svg.aiColorIcon{stroke:none !important;opacity:1 !important}
+.settingsNavIcon.aiNavIcon{opacity:1 !important}
+.gcpBadgeAi{display:inline-flex;align-items:center;gap:3px;border-color:rgba(168,85,247,.45) !important;background:rgba(168,85,247,.14) !important;color:#c084fc !important}
+body.vscode-light .gcpBadgeAi{color:#7e22ce !important;background:rgba(168,85,247,.12) !important}
+.gcpBadgeAi svg.uiIcon{width:12px !important;height:12px !important}
+
+/* v2.6.0: Interactive Review Session & Worktree WIP Modal */
+.reviewSessionOverlay{position:fixed;inset:0;z-index:122;background:rgba(0,0,0,.46);display:flex;align-items:center;justify-content:center;padding:24px}
+.rsPanel{width:min(920px,95vw);max-height:84vh;display:flex;flex-direction:column;border-radius:10px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));background:var(--vscode-editor-background);box-shadow:0 18px 44px rgba(0,0,0,.5);overflow:hidden}
+.rsPanelCompact{width:min(640px,92vw)}
+.rsHeader{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.25));background:var(--vscode-sideBar-background,var(--vscode-editor-background))}
+.rsTitle{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:13.5px}
+.rsScopes{display:inline-flex;gap:4px;margin-left:8px}
+.rsScopePill{height:24px;padding:0 10px;border-radius:999px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));background:transparent;color:var(--vscode-descriptionForeground);cursor:pointer;font-size:11.5px;font-weight:500}
+.rsScopePill:hover{color:var(--vscode-foreground);background:rgba(128,128,128,.12)}
+.rsScopePill.active{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border-color:transparent;font-weight:600}
+.rsCloseBtn{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:none;border-radius:5px;background:transparent;color:inherit;cursor:pointer;opacity:.8}
+.rsCloseBtn:hover{background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.2));opacity:1}
+.rsWtPathBar{padding:6px 14px;font-size:11.5px;color:var(--vscode-descriptionForeground);border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.18));background:rgba(128,128,128,.05)}
+.rsBody{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:12px 14px;gap:10px}
+.rsProgressRow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rsRangeLabel{font-family:var(--vscode-editor-font-family);font-size:12px;color:var(--vscode-descriptionForeground)}
+.rsProgressBarWrap{flex:1 1 120px;height:6px;border-radius:999px;background:rgba(128,128,128,.22);overflow:hidden}
+.rsProgressBar{height:100%;background:var(--vscode-testing-iconPassed,#2da44e);transition:width .18s ease}
+.rsProgressText{font-size:12px;font-weight:600}
+.rsGrid{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:1.15fr 1fr;gap:12px;overflow:hidden}
+@media (max-width:740px){.rsGrid{grid-template-columns:1fr}}
+.rsFileList{overflow-y:auto;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.25));border-radius:6px;max-height:48vh}
+.rsWtFileList{max-height:54vh}
+.rsFileItem{display:flex;align-items:center;gap:7px;padding:6px 10px;border-bottom:1px solid rgba(128,128,128,.12);cursor:pointer;font-size:12px}
+.rsFileItem:last-child{border-bottom:0}
+.rsFileItem:hover{background:var(--vscode-list-hoverBackground,rgba(128,128,128,.14))}
+.rsFileItem.selected{background:color-mix(in srgb,var(--vscode-list-activeSelectionBackground,var(--vscode-focusBorder,#3794ff)) 28%,transparent)}
+.rsFileItem.viewed .rsFilePath{opacity:.65;text-decoration:line-through}
+.rsFileCheck{cursor:pointer}
+.rsFileType{width:18px;text-align:center;font-family:var(--vscode-editor-font-family);font-weight:700;font-size:11px;flex:0 0 auto}
+.rsFilePath{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--vscode-editor-font-family)}
+.rsFileStats{flex:0 0 auto;font-family:var(--vscode-editor-font-family);font-size:11px}
+.rsFileStats .add{color:var(--vscode-gitDecoration-addedResourceForeground,#2da44e)}
+.rsFileStats .del{color:var(--vscode-gitDecoration-deletedResourceForeground,#f85149)}
+.rsCommentBadge{flex:0 0 auto;padding:0 6px;border-radius:999px;font-size:10.5px;background:rgba(55,148,255,.22);color:var(--vscode-textLink-foreground,#3794ff);font-weight:600}
+.rsNotesPane{display:flex;flex-direction:column;gap:8px;min-height:0;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.25));border-radius:6px;padding:8px 10px;max-height:48vh}
+.rsNotesHeader{font-size:12px;font-weight:600;color:var(--vscode-descriptionForeground)}
+.rsNotesList{flex:1 1 auto;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.rsNoComments{font-size:12px;color:var(--vscode-descriptionForeground);padding:10px 4px}
+.rsCommentCard{padding:7px 9px;border-radius:6px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.25));background:rgba(128,128,128,.06);font-size:12px}
+.rsCommentCard.sev-blocker{border-left:3px solid var(--vscode-errorForeground,#f85149)}
+.rsCommentCard.sev-suggestion{border-left:3px solid var(--vscode-editorWarning-foreground,#d29922)}
+.rsCommentCard.sev-note{border-left:3px solid var(--vscode-focusBorder,#3794ff)}
+.rsCommentMeta{display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:11px}
+.rsSevBadge{font-weight:700;font-size:10px}
+.rsCommentFile{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--vscode-editor-font-family);color:var(--vscode-descriptionForeground)}
+.rsDelComment{border:none;background:transparent;color:inherit;cursor:pointer;opacity:.65;padding:0 2px}
+.rsDelComment:hover{opacity:1}
+.rsCommentText{white-space:pre-wrap;word-break:break-word}
+.rsComposer{display:flex;flex-direction:column;gap:6px;padding-top:6px;border-top:1px solid rgba(128,128,128,.18)}
+.rsSeveritySelect,.rsCommentInput{border-radius:5px;border:1px solid var(--vscode-input-border,rgba(128,128,128,.35));background:var(--vscode-input-background);color:var(--vscode-input-foreground,inherit);font:inherit;font-size:12px;padding:4px 8px}
+.rsEmpty{padding:28px 14px;text-align:center;color:var(--vscode-descriptionForeground);font-size:12.5px}
+.rsError{color:var(--vscode-errorForeground,#f85149)}
+.rsFooter{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid var(--vscode-panel-border,rgba(128,128,128,.25))}
+.rsFooterSpacer{flex:1 1 auto}
+.rsBtn{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border-radius:6px;border:1px solid var(--vscode-dropdown-border,rgba(128,128,128,.38));background:var(--vscode-button-secondaryBackground,rgba(128,128,128,.16));color:var(--vscode-button-secondaryForeground,inherit);cursor:pointer;font-size:12px}
+.rsBtn:hover:not(:disabled){background:var(--vscode-button-secondaryHoverBackground,rgba(128,128,128,.28))}
+.rsBtn.primary{border-color:transparent;background:var(--vscode-button-background);color:var(--vscode-button-foreground);font-weight:600}
+.rsBtn:disabled{opacity:.48;cursor:default}
+
+/* v2.7.0: Unified Semantic Design Tokens, Motion Safety, Icon-Rail Sidebar, Grouped cmdk, Risk Evidence & Scroll-Jump Pill */
+:root{
+	--gm-surface:var(--vscode-editor-background);
+	--gm-surface-elevated:var(--vscode-sideBar-background,var(--vscode-editorWidget-background,var(--vscode-editor-background)));
+	--gm-surface-muted:rgba(128,128,128,0.10);
+	--gm-border:var(--vscode-panel-border,rgba(128,128,128,0.26));
+	--gm-border-strong:var(--vscode-dropdown-border,rgba(128,128,128,0.42));
+	--gm-radius-sm:4px;
+	--gm-radius-md:6px;
+	--gm-radius-lg:10px;
+	--gm-ring:var(--vscode-focusBorder,#3794ff);
+	--gm-shadow-sm:0 2px 8px rgba(0,0,0,0.24);
+	--gm-shadow-popover:0 10px 28px rgba(0,0,0,0.38);
+	--gm-shadow-modal:0 20px 52px rgba(0,0,0,0.52);
+}
+body.vscode-light{
+	--gm-surface-muted:rgba(15,23,42,0.05);
+	--gm-shadow-sm:0 2px 8px rgba(15,23,42,0.10);
+	--gm-shadow-popover:0 10px 26px rgba(15,23,42,0.16);
+	--gm-shadow-modal:0 18px 44px rgba(15,23,42,0.22);
+}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{
+	outline:2px solid var(--gm-ring);
+	outline-offset:1px;
+}
+
+/* Sidebar 3-State Icon-Rail Mode */
+#graphSidebar{transition:width 160ms cubic-bezier(.22,1,.36,1)}
+#graphSidebar.rail{width:44px}
+.graphSidebarHeaderBtns{display:inline-flex;align-items:center;gap:2px}
+.gsRailStack{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0;height:100%;box-sizing:border-box}
+.gsRailBtn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;border-radius:var(--gm-radius-md);background:transparent;color:var(--vscode-icon-foreground,inherit);cursor:pointer;transition:background-color 120ms ease,transform 120ms cubic-bezier(.22,1,.36,1)}
+.gsRailBtn:hover{background:var(--vscode-list-hoverBackground,rgba(128,128,128,.16))}
+.gsRailBtn:active{transform:scale(0.94)}
+.gsRailBtn svg{width:15px;height:15px}
+.gsRailBtn[data-tip]::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%) translateX(-4px);padding:4px 8px;border-radius:var(--gm-radius-sm);background:var(--vscode-editorHoverWidget-background,var(--gm-surface-elevated));border:1px solid var(--gm-border-strong);box-shadow:var(--gm-shadow-sm);color:var(--vscode-foreground);font-size:11.5px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity 100ms ease,transform 120ms ease;z-index:60}
+.gsRailBtn[data-tip]:hover::after{opacity:1;transform:translateY(-50%) translateX(0)}
+.gsRailBadge{position:absolute;right:2px;top:2px;min-width:13px;height:13px;padding:0 3px;border-radius:999px;background:rgba(128,128,128,.35);color:var(--vscode-foreground);font-size:9px;font-weight:700;line-height:13px;text-align:center}
+.gsRailBadge.warn{background:var(--vscode-editorWarning-foreground,#d29922);color:#111}
+.gsRailSep{width:22px;height:1px;background:var(--gm-border);margin:2px 0}
+.gsRailSpacer{flex:1 1 auto}
+
+/* cmdk-style Grouped Command Palette */
+.gcpInputWrap{display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--gm-border)}
+.gcpSearchIcon{display:inline-flex;opacity:.65}
+.gcpSearchIcon svg{width:14px;height:14px}
+.gcpInputWrap .gcpInput{border-bottom:0 !important;padding-left:0 !important}
+.gcpGroupHeader{padding:7px 12px 3px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--vscode-descriptionForeground);user-select:none}
+.gcpKbd{display:inline-flex;align-items:center;padding:1px 5px;border-radius:var(--gm-radius-sm);border:1px solid var(--gm-border-strong);background:var(--gm-surface-muted);font-family:var(--vscode-editor-font-family);font-size:10.5px;color:var(--vscode-descriptionForeground);flex:0 0 auto}
+.gcpFooter{display:flex;align-items:center;gap:14px;padding:6px 12px;border-top:1px solid var(--gm-border);background:var(--gm-surface-elevated);font-size:11px;color:var(--vscode-descriptionForeground)}
+.gcpFooter span{display:inline-flex;align-items:center;gap:4px}
+
+/* Saved Filter Presets in Find Results Bar */
+.findPresetBtn{display:inline-flex;align-items:center;gap:3px;height:20px;padding:0 7px;margin-left:4px;border-radius:var(--gm-radius-sm);border:1px solid var(--gm-border);background:var(--gm-surface-muted);color:var(--vscode-foreground);font-size:11px;cursor:pointer;user-select:none}
+.findPresetBtn:hover{background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.22));border-color:var(--gm-border-strong)}
+
+/* Review Session Risk Score Gauge, Explainable Evidence & Portable Templates */
+.rsRiskBar{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:var(--gm-radius-md);border:1px solid var(--gm-border);font-size:12px}
+.rsRiskBar.grade-safe{background:rgba(45,164,78,.12);border-color:rgba(45,164,78,.35)}
+.rsRiskBar.grade-caution{background:rgba(210,153,34,.14);border-color:rgba(210,153,34,.4)}
+.rsRiskBar.grade-high-risk{background:rgba(248,81,73,.14);border-color:rgba(248,81,73,.42)}
+.rsRiskScore{font-weight:700;font-family:var(--vscode-editor-font-family);padding:1px 7px;border-radius:999px;background:rgba(128,128,128,.18)}
+.rsRiskBar.grade-safe .rsRiskScore{color:var(--vscode-testing-iconPassed,#2da44e)}
+.rsRiskBar.grade-caution .rsRiskScore{color:var(--vscode-editorWarning-foreground,#d29922)}
+.rsRiskBar.grade-high-risk .rsRiskScore{color:var(--vscode-errorForeground,#f85149)}
+.rsRiskSummary{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--vscode-descriptionForeground)}
+.rsLinkBtn{border:none;background:transparent;color:var(--vscode-textLink-foreground,#3794ff);cursor:pointer;font-size:11.5px;padding:0 4px}
+.rsLinkBtn:hover{text-decoration:underline}
+.rsEvidenceList{display:flex;flex-direction:column;gap:4px;max-height:110px;overflow-y:auto;padding:6px 8px;border-radius:var(--gm-radius-md);border:1px solid var(--gm-border);background:var(--gm-surface-muted);font-size:11.5px}
+.rsEvidenceItem{display:flex;align-items:baseline;gap:6px}
+.rsEvScore{font-family:var(--vscode-editor-font-family);font-weight:700;min-width:26px;text-align:right}
+.rsEvidenceItem.sev-high .rsEvScore{color:var(--vscode-errorForeground,#f85149)}
+.rsEvidenceItem.sev-medium .rsEvScore{color:var(--vscode-editorWarning-foreground,#d29922)}
+.rsEvidenceItem.sev-info .rsEvScore{color:var(--vscode-testing-iconPassed,#2da44e)}
+.rsEvDetail{color:var(--vscode-descriptionForeground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rsNotesHeader{display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap}
+.rsTemplateBar{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap}
+.rsTinyBtn{height:20px;padding:0 6px;border-radius:var(--gm-radius-sm);border:1px solid var(--gm-border);background:transparent;color:var(--vscode-descriptionForeground);font-size:10.5px;cursor:pointer}
+.rsTinyBtn:hover{background:var(--gm-surface-muted);color:var(--vscode-foreground)}
+.rsProgressBar{transition:width 260ms cubic-bezier(.22,1,.36,1)}
+.rsFileCheck{transition:transform 140ms cubic-bezier(.22,1,.36,1)}
+.rsFileCheck:checked{transform:scale(1.1)}
+
+/* Expandable Floating Scroll Progress & Quick-Jump Pill */
+#scrollJumpPill{position:fixed;right:20px;bottom:34px;z-index:24;display:flex;flex-direction:column;align-items:flex-end;gap:6px;pointer-events:none;opacity:0;transform:translateY(8px);transition:opacity 160ms ease,transform 180ms cubic-bezier(.22,1,.36,1)}
+#scrollJumpPill.visible{opacity:1;transform:translateY(0);pointer-events:auto}
+.sjpTrigger{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:999px;border:1px solid var(--gm-border-strong);background:color-mix(in srgb,var(--gm-surface-elevated) 88%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:var(--gm-shadow-popover);color:var(--vscode-foreground);font-size:11.5px;font-family:var(--vscode-editor-font-family);cursor:pointer;transition:transform 120ms ease,border-color 120ms ease}
+.sjpTrigger:hover{border-color:var(--gm-ring);transform:translateY(-1px)}
+.sjpPct{font-weight:700;color:var(--vscode-textLink-foreground,#3794ff)}
+.sjpMenu{display:none;flex-direction:column;min-width:154px;padding:4px;border-radius:var(--gm-radius-lg);border:1px solid var(--gm-border-strong);background:var(--gm-surface-elevated);box-shadow:var(--gm-shadow-popover)}
+#scrollJumpPill.expanded .sjpMenu{display:flex}
+.sjpOpt{border:none;border-radius:var(--gm-radius-sm);background:transparent;color:var(--vscode-foreground);text-align:left;padding:5px 9px;font:inherit;font-size:12px;cursor:pointer}
+.sjpOpt:hover{background:var(--vscode-list-hoverBackground,rgba(128,128,128,.16))}
+
+/* Settings Sliding Active Indicator Accent */
+.settingsNavItem{position:relative;transition:background-color 140ms ease,color 140ms ease}
+.settingsNavItem.active::before{content:'';position:absolute;left:2px;top:6px;bottom:6px;width:3px;border-radius:999px;background:var(--gm-ring)}
+
+@media (prefers-reduced-motion:reduce){
+	#graphSidebar,.gsRailBtn,.gsRailBtn[data-tip]::after,.rsProgressBar,.rsFileCheck,#scrollJumpPill,.sjpTrigger,.settingsNavItem{transition:none !important;animation:none !important}
+}
+
+/* Ghost Refs on unlabelled commit rows */
+.ghostRefs{display:inline-flex;align-items:center;gap:4px;margin-left:8px;opacity:0;pointer-events:none;transition:opacity 120ms ease}
+.commit:hover .ghostRefs,.commit.current .ghostRefs,.ghostRefs:focus-within{opacity:1;pointer-events:auto}
+.ghostRefBtn{border:1px dashed var(--gm-border-strong);border-radius:var(--gm-radius-sm);background:transparent;color:var(--vscode-descriptionForeground);font-size:10.5px;line-height:16px;padding:0 5px;cursor:pointer}
+.ghostRefBtn:hover{border-style:solid;color:var(--vscode-foreground);background:var(--gm-surface-muted)}
+
+/* Granular clickable ScrollMarkers */
+#scrollMarkers .scrollMarker{pointer-events:auto;cursor:pointer}
+.scrollMarker.pr{height:3px;opacity:.95}
+.scrollMarker.worktree{height:3px;opacity:.95}
+.scrollMarker.stash{opacity:.85}
+.scrollMarker.remoteBranch{opacity:.7}
+
+/* Co-author picker inside inline commit box */
+.cdvCoauthorPicker{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 6px;padding:6px;border-radius:var(--gm-radius-sm);border:1px solid var(--gm-border);background:var(--gm-surface-muted);max-height:110px;overflow-y:auto}
+.cdvCoauthorItem{border:1px solid var(--gm-border);border-radius:var(--gm-radius-sm);background:var(--gm-surface-elevated);color:var(--vscode-foreground);font-size:11px;padding:2px 6px;cursor:pointer}
+.cdvCoauthorItem:hover{border-color:var(--gm-ring);background:var(--vscode-list-hoverBackground)}
+.cdvCoauthorEmpty{font-size:11px;color:var(--vscode-descriptionForeground)}
+
+/* CDV history back/forward disabled state */
+.cdvControlBtn.disabled{opacity:.35;pointer-events:none}
+
+/* Categorized Settings Rail with Status Dots & Enabled Ratios + Live Interactive Previews */
+.settingsNavGroup{padding:8px 8px 2px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--vscode-descriptionForeground);opacity:.85}
+.settingsNavItem{display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;text-align:left}
+.settingsNavItemLabel{display:inline-flex;align-items:center;gap:6px;min-width:0;overflow:hidden}
+.settingsNavDot{width:7px;height:7px;border-radius:50%;flex:0 0 7px;box-sizing:border-box;background:var(--vscode-descriptionForeground);opacity:.35}
+.settingsNavDot.on{background:#2da44e;opacity:1}
+.settingsNavDot.off{background:transparent;border:1.4px solid var(--vscode-descriptionForeground);opacity:.55}
+.settingsNavDot.none{visibility:hidden}
+.settingsNavIcon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 15px;opacity:.82}
+.settingsNavIcon svg.uiIcon{width:14px !important;height:14px !important}
+.settingsNavItem:hover .settingsNavIcon,.settingsNavItem.active .settingsNavIcon{opacity:1}
+.settingsNavText{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.settingsNavRatio{font-size:10px;font-family:var(--vscode-editor-font-family);color:var(--vscode-descriptionForeground);opacity:.85;flex:0 0 auto;margin-left:4px}
+.settingsLivePreview{margin:10px 0 12px;border:1px solid var(--gm-border-strong);border-radius:var(--gm-radius-md);background:var(--vscode-editor-background);overflow:hidden}
+.settingsLivePreviewHeader{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;border-bottom:1px solid var(--gm-border);background:var(--gm-surface-muted);font-size:11px;color:var(--vscode-descriptionForeground)}
+.settingsEditorPreviewCode{padding:8px 10px;font-family:var(--vscode-editor-font-family);font-size:12px;line-height:1.55}
+.settingsEditorCodeLens{font-size:11px;color:var(--vscode-editorCodeLens-foreground,#999);margin-left:22px}
+.settingsEditorLine{display:flex;align-items:center;gap:8px;padding:0 4px;border-left:3px solid transparent}
+.settingsEditorLine.hot{border-left-color:#f97316;background:rgba(249,115,22,.08)}
+.settingsEditorLine.changed{background:rgba(56,189,248,.09)}
+.settingsEditorLn{width:14px;text-align:right;color:var(--vscode-editorLineNumber-foreground,#6e7681);user-select:none}
+.settingsEditorInlineBlame{margin-left:16px;color:var(--vscode-editorCodeLens-foreground,#8b949e);font-style:italic;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.settingsGraphPreviewRows{padding:8px 10px;display:flex;flex-direction:column;gap:4px;font-size:12px}
+.settingsGraphPreviewRow{display:flex;align-items:center;gap:8px}
+.settingsGraphPreviewRow.compact{font-size:11px;line-height:1.2}
+.settingsGraphNodeDot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.settingsGraphNodeAvatar{width:16px;height:16px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex:0 0 auto}
+.settingsRuleRow{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+.settingsRuleList{display:flex;flex-direction:column;gap:5px;margin-bottom:8px}
+.settingsRuleChip{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 8px;border:1px solid var(--gm-border);border-radius:var(--gm-radius-sm);background:var(--gm-surface-muted);font-size:11.5px}
+
+/* Wave 2: Graph Overview Bar, +N Ref Overflow, Shortcuts Cheatsheet, Agents & SCM Matrix */
+#graphOverviewBar{display:none;flex:1 0 100%;align-items:center;justify-content:space-between;gap:8px;box-sizing:border-box;min-height:28px;margin:0 -12px;padding:3px 12px;border-top:1px solid var(--gm-border);background:var(--gm-surface-muted);font-size:11.5px}
+#graphOverviewBar.active{display:flex}
+.gobChips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.gobChip,.gobBtn{display:inline-flex;align-items:center;gap:4px;height:21px;padding:0 7px;border-radius:999px;border:1px solid var(--gm-border);background:var(--gm-surface-elevated);color:var(--vscode-foreground);font:inherit;font-size:11px;cursor:pointer}
+.gobChip:hover,.gobBtn:hover{border-color:var(--gm-ring);background:var(--vscode-list-hoverBackground,rgba(128,128,128,.16))}
+.gobChip svg{width:12px;height:12px;fill:currentColor;opacity:.85}
+.gobWip{color:var(--vscode-editorWarning-foreground,#d29922)}
+.gobSoloBadge{display:inline-flex;align-items:center;gap:4px;height:21px;padding:0 6px 0 8px;border-radius:999px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);font-size:11px;font-weight:600}
+.gobSoloExit{border:none;background:transparent;color:inherit;cursor:pointer;font-size:13px;line-height:1;padding:0 2px;opacity:.85}
+.gobSoloExit:hover{opacity:1}
+.gobBtn kbd{font-family:var(--vscode-editor-font-family);font-weight:700;font-size:10.5px;padding:0 3px;border-radius:3px;background:var(--gm-surface-muted)}
+
+.gitRefOverflow{display:inline-flex;align-items:center;height:18px;padding:0 6px;margin-left:3px;border-radius:999px;border:1px dashed var(--gm-border-strong);background:var(--gm-surface-muted);color:var(--vscode-descriptionForeground);font-family:var(--vscode-editor-font-family);font-size:10.5px;font-weight:600;cursor:pointer}
+.gitRefOverflow:hover{border-style:solid;color:var(--vscode-foreground);border-color:var(--gm-ring)}
+
+.shortcutsOverlay{position:fixed;inset:0;z-index:130;background:rgba(0,0,0,.46);display:flex;align-items:center;justify-content:center;padding:20px}
+.shortcutsPanel{width:min(480px,94vw);max-height:82vh;display:flex;flex-direction:column;border-radius:var(--gm-radius-lg);border:1px solid var(--gm-border-strong);background:var(--gm-surface);box-shadow:var(--gm-shadow-modal);overflow:hidden}
+.shortcutsHeader{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--gm-border);background:var(--gm-surface-elevated);font-weight:600;font-size:13px}
+.shortcutsBody{padding:10px 14px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.shortcutsRow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px solid rgba(128,128,128,.12);font-size:12px}
+.shortcutsRow:last-child{border-bottom:0}
+.shortcutsFooter{display:flex;justify-content:flex-end;padding:8px 14px;border-top:1px solid var(--gm-border);background:var(--gm-surface-elevated)}
+
+.settingsMatrixTable{width:100%;border-collapse:collapse;margin:8px 0 12px;font-size:12px}
+.settingsMatrixTable th,.settingsMatrixTable td{padding:6px 8px;border-bottom:1px solid var(--gm-border);text-align:left;vertical-align:middle}
+.settingsMatrixTable th{font-size:11px;font-weight:600;color:var(--vscode-descriptionForeground)}
+.settingsAgentPill{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;font-size:10px;background:var(--gm-surface-muted);color:var(--vscode-descriptionForeground)}
+.settingsAgentPill.detected{background:rgba(45,164,78,.18);color:var(--vscode-testing-iconPassed,#2da44e);font-weight:600}
+.settingsBtn.active{border-color:var(--gm-ring);background:color-mix(in srgb,var(--gm-ring) 18%,transparent)}
+.settingsSubGroup{margin:8px 0;padding:8px 10px;border-radius:var(--gm-radius-md);border:1px solid var(--gm-border);background:var(--gm-surface-muted)}
+.settingsSubLabel{font-size:11.5px;font-weight:600;margin-bottom:6px;color:var(--vscode-descriptionForeground)}
+.settingsCheckboxes.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.settingsShortcutOverrides{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.settingsShortcutChip{display:inline-flex;align-items:center;gap:4px;font-size:11.5px}
+.settingsShortcutChip input{width:32px;text-align:center;padding:2px 4px}
+.settingsFormatGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media (max-width:680px){.settingsFormatGrid{grid-template-columns:1fr}}
+.settingsFormatField{display:flex;flex-direction:column;gap:4px}
+.settingsFormatExample{font-size:11px;color:var(--vscode-descriptionForeground);font-style:italic}
+.settingsEditorStatusBarStrip{margin-top:6px;padding-top:4px;border-top:1px dashed var(--gm-border);font-size:11px;color:var(--vscode-descriptionForeground)}

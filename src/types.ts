@@ -300,6 +300,10 @@ export interface GitWorktree {
 	readonly isCurrent: boolean; // Is it the worktree shown in the Git Map View
 	readonly locked: boolean;
 	readonly prunable: boolean; // Its directory no longer exists
+	readonly dirtyCount?: number; // Total uncommitted files in this worktree
+	readonly stagedCount?: number;
+	readonly unstagedCount?: number;
+	readonly untrackedCount?: number;
 }
 
 export interface GitStash {
@@ -524,6 +528,147 @@ export interface AiProviderPresetInfo {
 	readonly defaultApiFormat: string;
 }
 
+export type AiTaskKey = 'commitMessage' | 'reviewChanges' | 'resolveConflicts' | 'explainAndSearch';
+
+export interface AiTaskModelOverride {
+	readonly provider?: string;
+	readonly baseUrl?: string;
+	readonly model?: string;
+}
+
+export interface AiTaskModelsConfig {
+	readonly commitMessage?: AiTaskModelOverride;
+	readonly reviewChanges?: AiTaskModelOverride;
+	readonly resolveConflicts?: AiTaskModelOverride;
+	readonly explainAndSearch?: AiTaskModelOverride;
+}
+
+export interface AiCustomInstructionsConfig {
+	readonly commitMessage: string;
+	readonly reviewChanges: string;
+	readonly resolveConflicts: string;
+	readonly explainChanges: string;
+	readonly generateChangelog: string;
+	readonly generateStashMessage: string;
+}
+
+export type CustomRemoteType = 'github' | 'gitlab' | 'bitbucket' | 'gitea' | 'azure' | 'custom';
+
+export interface CustomRemoteConfig {
+	readonly domain?: string;
+	readonly regex?: string;
+	readonly type: CustomRemoteType;
+	readonly protocol?: string;
+	readonly name?: string;
+	readonly avatarUrl?: string;
+	readonly urls?: {
+		readonly repository?: string;
+		readonly branches?: string;
+		readonly branch?: string;
+		readonly commit?: string;
+		readonly file?: string;
+		readonly fileInBranch?: string;
+		readonly fileInCommit?: string;
+		readonly fileLine?: string;
+		readonly fileRange?: string;
+	};
+}
+
+export interface AutolinkRule {
+	readonly prefix: string;
+	readonly url: string;
+	readonly title?: string;
+	readonly alphanumeric?: boolean;
+	readonly ignoreCase?: boolean;
+}
+
+export type GraphMarkerType = 'localBranches' | 'remoteBranches' | 'pullRequests' | 'stashes' | 'tags' | 'worktrees';
+export type GraphMultiSelectMode = 'off' | 'on' | 'topological';
+export type AnnotationLocation = 'gutter' | 'line' | 'overviewRuler';
+export type AnnotationToggleMode = 'file' | 'window';
+export type LaunchpadBucket = 'mergeable' | 'blocked' | 'needsReview' | 'followUp';
+export type EditorModeId = 'default' | 'zen' | 'review' | string;
+
+export interface GitMapModeConfig {
+	readonly name: string;
+	readonly description?: string;
+	readonly annotations?: 'blame' | 'changes' | 'heatmap' | 'off';
+	readonly codeLens?: boolean;
+	readonly currentLine?: boolean;
+	readonly statusBar?: boolean;
+	readonly hovers?: boolean;
+}
+
+export interface EditorAnnotationsSnapshot {
+	readonly currentLineEnabled: boolean;
+	readonly currentLinePullRequests: boolean;
+	readonly currentLineFormat: string;
+	readonly currentLineUncommittedFormat: string;
+	readonly currentLineScrollable: boolean;
+	readonly statusBarEnabled: boolean;
+	readonly statusBarAlignment: 'left' | 'right';
+	readonly statusBarFormat: string;
+	readonly statusBarReduceFlicker: boolean;
+	readonly codeLensEnabled: boolean;
+	readonly codeLensRecentChange: boolean;
+	readonly codeLensAuthors: boolean;
+	readonly codeLensScopes: ReadonlyArray<'document' | 'containers' | 'blocks'>;
+	readonly hoversEnabled: boolean;
+	readonly hoversCurrentLineOver: 'annotation' | 'line';
+	readonly hoversChanges: boolean;
+	readonly hoversAutolinks: boolean;
+	readonly fileBlameHeatmap: boolean;
+	readonly fileBlameHeatmapLocation: 'left' | 'right';
+	readonly fileBlameCompact: boolean;
+	readonly fileBlameHighlightSameCommit: boolean;
+	readonly fileBlameHighlightLocations: ReadonlyArray<AnnotationLocation>;
+	readonly fileChangesLocations: ReadonlyArray<AnnotationLocation>;
+	readonly fileHeatmapLocations: ReadonlyArray<AnnotationLocation>;
+	readonly fileHeatmapFadeLines: boolean;
+	readonly fileHeatmapAgeThreshold: number;
+	readonly fileHeatmapHotColor: string;
+	readonly fileHeatmapColdColor: string;
+	readonly activeMode: EditorModeId;
+	readonly customModes: ReadonlyArray<GitMapModeConfig>;
+}
+
+export type CodingAgentId = 'copilot-chat' | 'claude-code' | 'codex' | 'copilot-cli' | 'opencode';
+
+export interface CodingAgentStatus {
+	readonly id: CodingAgentId;
+	readonly name: string;
+	readonly kind: 'chat' | 'cli';
+	readonly detected: boolean;
+	readonly isDefault: boolean;
+	readonly mcpConfigured: boolean;
+	readonly hooksConfigured: boolean;
+}
+
+export interface ScmViewsConfigSnapshot {
+	readonly enabled: boolean;
+	readonly hiddenSections: ReadonlyArray<string>;
+	readonly defaultSection: string;
+	readonly commitLabelFormat: string;
+	readonly commitDescriptionFormat: string;
+	readonly stashLabelFormat: string;
+	readonly stashDescriptionFormat: string;
+	readonly fileLabelFormat: string;
+	readonly fileDescriptionFormat: string;
+}
+
+export interface TerminalLinksConfigSnapshot {
+	readonly enabled: boolean;
+	readonly showDetailsView: boolean;
+}
+
+export interface LaunchpadConfigSnapshot {
+	readonly indicatorEnabled: boolean;
+	readonly groups: ReadonlyArray<LaunchpadBucket>;
+	readonly useColors: boolean;
+	readonly pollingIntervalMinutes: number;
+	readonly staleThresholdDays: number;
+}
+
 export interface AiSettingsConfig {
 	readonly explainCommit: boolean;
 	readonly commitMessage: boolean;
@@ -532,20 +677,29 @@ export interface AiSettingsConfig {
 	readonly model: string;
 	readonly hasApiKey: boolean;
 	readonly presets: ReadonlyArray<AiProviderPresetInfo>;
+	readonly taskModels?: AiTaskModelsConfig;
+	readonly customInstructions?: AiCustomInstructionsConfig;
+	readonly excludeFiles?: ReadonlyArray<string>;
+	readonly largePromptWarningThreshold?: number;
+	readonly autoRebaseConfidenceThreshold?: number;
 }
 
 export interface GitGraphViewConfig {
 	readonly ai: AiSettingsConfig;
 	readonly appearance: AppearanceConfig;
+	readonly autolinks?: ReadonlyArray<AutolinkRule>;
 	readonly commitDetailsView: CommitDetailsViewConfig;
 	readonly commitOrdering: CommitOrdering;
 	readonly contextMenuActionsVisibility: ContextMenuActionsVisibility;
 	readonly customBranchGlobPatterns: ReadonlyArray<CustomBranchGlobPattern>;
 	readonly customEmojiShortcodeMappings: ReadonlyArray<CustomEmojiShortcodeMapping>;
 	readonly customPullRequestProviders: ReadonlyArray<CustomPullRequestProvider>;
+	readonly customRemotes?: ReadonlyArray<CustomRemoteConfig>;
 	readonly dateFormat: DateFormat;
+	readonly defaultAgent?: string;
 	readonly defaultColumnVisibility: DefaultColumnVisibility;
 	readonly dialogDefaults: DialogDefaults;
+	readonly editorAnnotations?: EditorAnnotationsSnapshot;
 	readonly enhancedAccessibility: boolean;
 	readonly explainCommit: boolean;
 	readonly fetchAndPrune: boolean;
@@ -554,16 +708,22 @@ export interface GitGraphViewConfig {
 	readonly graph: GraphConfig;
 	readonly includeCommitsMentionedByReflogs: boolean;
 	readonly initialLoadCommits: number;
-	readonly keybindings: KeybindingConfig
+	readonly keybindings: KeybindingConfig;
+	readonly launchpad?: LaunchpadConfigSnapshot;
 	readonly loadMoreCommits: number;
 	readonly loadMoreCommitsAutomatically: boolean;
 	readonly markdown: boolean;
 	readonly mute: MuteCommitsConfig;
 	readonly onlyFollowFirstParent: boolean;
 	readonly onRepoLoad: OnRepoLoadConfig;
+	readonly pullRequestStatusEnabled: boolean;
+	readonly rowActions: RowActionsConfig;
+	readonly scmViews?: ScmViewsConfigSnapshot;
+	readonly startWorkBranchFormat?: string;
+	readonly terminalLinks?: TerminalLinksConfigSnapshot;
+	readonly workflowMacros?: ReadonlyArray<{ readonly id: string, readonly name: string, readonly steps: ReadonlyArray<string> }>;
 	readonly referenceLabels: ReferenceLabelsConfig;
 	readonly repoDropdownOrder: RepoDropdownOrder;
-	readonly rowActions: RowActionsConfig;
 	readonly showRemoteBranches: boolean;
 	readonly showStashes: boolean;
 	readonly showTags: boolean;
@@ -577,6 +737,8 @@ export interface GitGraphViewGlobalState {
 	explainCommitAccepted?: boolean; // Has the person agreed to send the changes of commits to a language model
 	explainCommitAcceptedTarget?: string | null; // Which provider / endpoint was consented to (re-asks when the target changes)
 	explainCommitModel?: string | null; // The id of the language model chosen to explain commits
+	settingsWidgetWidth?: number;
+	settingsNavWidth?: number;
 }
 
 export interface GitGraphViewWorkspaceState {
@@ -585,9 +747,11 @@ export interface GitGraphViewWorkspaceState {
 	findOpenCommitDetailsView: boolean;
 }
 
+export type RowActionsPosition = 'Pointer' | 'Description' | 'Row';
+
 export interface RowActionsConfig {
 	readonly actions: ReadonlyArray<string>; // The buttons shown, in order (the other actions are in the "More Actions" menu)
-	readonly position: 'Pointer' | 'Description' | 'Row'; // Next to the pointer, at the end of the Description column, or at the end of the row
+	readonly position: RowActionsPosition; // Next to the pointer, at the end of the Description column, or at the end of the row
 }
 
 export interface CommitDetailsViewConfig {
@@ -602,10 +766,24 @@ export interface CommitDetailsViewConfig {
 export interface GraphConfig {
 	readonly colours: ReadonlyArray<string>;
 	readonly density: GraphDensity;
+	readonly followTerminal?: {
+		readonly enabled: boolean,
+		readonly allowRepositorySwitching: boolean
+	};
 	readonly freezeColumnHeaders: boolean;
 	readonly freezeFooter: boolean;
+	readonly maxVisibleRefsPerCommit?: number;
 	readonly minimap: boolean;
+	readonly minimapAdditionalTypes?: ReadonlyArray<GraphMarkerType>;
+	readonly multiselect?: GraphMultiSelectMode;
 	readonly nodeStyle: GraphNodeStyle;
+	readonly overviewBarEnabled?: boolean;
+	readonly scrollMarkers?: {
+		readonly enabled: boolean,
+		readonly types: ReadonlyArray<GraphMarkerType>
+	};
+	readonly shortcutOverrides?: { readonly [action: string]: string };
+	readonly showGhostRefsOnRowHover?: boolean;
 	readonly style: GraphStyle;
 	readonly grid: { x: number, y: number, offsetX: number, offsetY: number, expandY: number };
 	readonly uncommittedChanges: GraphUncommittedChangesStyle;
@@ -624,9 +802,14 @@ export type LoadGitGraphViewTo = {
 		readonly commitHash: string,
 		readonly compareWithHash: string | null
 	},
+	readonly ref?: string,
+	readonly worktreePath?: string,
 	readonly runCommandOnLoad?: 'fetch' | 'cleanUpBranches',
 	readonly fileHistory?: string | null, // The path of a file whose history is shown (NULL => all commits are shown)
-	readonly lineRange?: GitLineRange | null // The lines of the file whose history is shown (NULL => the whole file)
+	readonly lineRange?: GitLineRange | null, // The lines of the file whose history is shown (NULL => the whole file)
+	readonly authorFilter?: string | null, // Optional author filter (e.g. jumped from Repository Insights)
+	readonly dateRange?: { readonly after: string, readonly before: string } | null, // Optional date range filter (e.g. jumped from Repository Insights monthly bar)
+	readonly compareBranches?: { readonly left: string, readonly right: string } | null // Optional branch comparison (e.g. jumped from Branch Lifecycle Dashboard)
 } | null;
 
 export interface MuteCommitsConfig {
@@ -1539,7 +1722,7 @@ export interface ResponseMerge extends ResponseWithErrorInfo {
 
 export interface RequestUpdateExtensionSetting extends BaseMessage {
 	readonly command: 'updateExtensionSetting';
-	readonly key: 'ai.baseUrl' | 'ai.commitMessage.enabled' | 'ai.explainCommit.enabled' | 'ai.model' | 'ai.provider' | 'commitDetailsView.actions' | 'commitRow.actions' | 'commitRow.actionsPosition' | 'diff.hideUnchangedRegions' | 'graph.colourPreset' | 'graph.density' | 'graph.freezeColumnHeaders' | 'graph.freezeFooter' | 'graph.nodeStyle' | 'graph.style' | 'language' | 'statusBarItemDisplay';
+	readonly key: 'ai.baseUrl' | 'ai.commitMessage.enabled' | 'ai.explainCommit.enabled' | 'ai.model' | 'ai.provider' | 'commitDetailsView.actions' | 'commitRow.actions' | 'commitRow.actionsPosition' | 'diff.hideUnchangedRegions' | 'graph.colourPreset' | 'graph.density' | 'graph.freezeColumnHeaders' | 'graph.freezeFooter' | 'graph.nodeStyle' | 'graph.style' | 'integrations.pullRequestStatus.enabled' | 'language' | 'statusBarItemDisplay';
 	readonly value: string | boolean | ReadonlyArray<string>;
 }
 export interface ResponseUpdateExtensionSetting extends ResponseWithErrorInfo {
@@ -1548,7 +1731,7 @@ export interface ResponseUpdateExtensionSetting extends ResponseWithErrorInfo {
 
 export interface RequestOpenExtensionSettings extends BaseMessage {
 	readonly command: 'openExtensionSettings';
-	readonly section?: 'ai'; // Open the settings of this section
+	readonly section?: 'ai';
 }
 export interface ResponseOpenExtensionSettings extends ResponseWithErrorInfo {
 	readonly command: 'openExtensionSettings';
@@ -1899,8 +2082,10 @@ export interface RequestEditCommitMessage extends RepoRequest {
 	readonly commitHash: string;
 	readonly message: string;
 	readonly includeStaged?: boolean;
+	readonly stageAll?: boolean;
 	readonly author?: string | null;
 	readonly resetAuthorDate?: boolean;
+	readonly noVerify?: boolean;
 }
 export interface ResponseEditCommitMessage extends ResponseWithErrorInfo {
 	readonly command: 'editCommitMessage';
@@ -1909,6 +2094,7 @@ export interface ResponseEditCommitMessage extends ResponseWithErrorInfo {
 export interface RequestLoadCommitMessage extends RepoRequest {
 	readonly command: 'loadCommitMessage';
 	readonly commitHash: string;
+	readonly amendMode?: boolean;
 }
 export interface ResponseLoadCommitMessage extends ResponseWithErrorInfo {
 	readonly command: 'loadCommitMessage';
@@ -1916,7 +2102,10 @@ export interface ResponseLoadCommitMessage extends ResponseWithErrorInfo {
 	readonly message: string;
 	readonly pushedTo: string | null; // A remote branch that contains the commit (NULL if it hasn't been pushed)
 	readonly author?: string | null;
+	readonly isHead?: boolean;
 	readonly stagedCount?: number;
+	readonly unstagedCount?: number;
+	readonly amendMode?: boolean;
 }
 
 export interface RequestLoadImpactPreview extends RepoRequest {
@@ -2123,6 +2312,551 @@ export interface ResponseUseGeneratedCommitMessage extends ResponseWithErrorInfo
 	readonly copiedToClipboard: boolean;
 }
 
+export interface RequestFetchAiModels extends BaseMessage {
+	readonly command: 'fetchAiModels';
+}
+export interface ResponseFetchAiModels extends ResponseWithErrorInfo {
+	readonly command: 'fetchAiModels';
+	readonly models: ReadonlyArray<string>;
+}
+
+export interface BranchCommitSummary {
+	readonly hash: string;
+	readonly subject: string;
+	readonly author: string;
+	readonly date: number;
+}
+
+export interface PullRequestBadgeInfo {
+	readonly number: number;
+	readonly title: string;
+	readonly url: string;
+	readonly state: 'open' | 'draft';
+	readonly ciStatus: 'success' | 'failure' | 'pending' | 'unknown';
+	readonly baseBranch: string;
+	readonly author?: string;
+	readonly updatedAt?: string;
+	readonly reviewDecision?: 'approved' | 'changes_requested' | 'review_required' | 'none';
+	readonly isRequestedReviewer?: boolean;
+	readonly mergeable?: boolean | null;
+	readonly mergeQueueState?: 'queued' | 'merging' | 'awaiting_checks' | null;
+	readonly stackDepth?: number;
+	readonly stackSize?: number;
+	readonly stackParentBranch?: string | null;
+	readonly stackChildBranches?: ReadonlyArray<string>;
+}
+
+export interface WorkingTreeStatusItem {
+	readonly path: string;
+	readonly oldPath: string | null;
+	readonly indexStatus: string;
+	readonly workTreeStatus: string;
+	readonly staged: boolean;
+	readonly unstaged: boolean;
+	readonly untracked: boolean;
+	readonly conflicted: boolean;
+}
+
+export interface PreCommitIssue {
+	readonly severity: 'high' | 'medium' | 'low';
+	readonly kind: 'secret' | 'debug' | 'marker';
+	readonly file: string;
+	readonly line: number;
+	readonly message: string;
+	readonly snippet: string;
+}
+
+export interface RepoHookInfo {
+	readonly name: string;
+	readonly path: string;
+}
+
+export interface CommitSignatureDetails {
+	readonly status: string;
+	readonly signer: string;
+	readonly keyId: string;
+	readonly fingerprint: string;
+}
+
+export interface PullRequestDetailsInfo {
+	readonly number: number;
+	readonly title: string;
+	readonly body: string;
+	readonly author: string;
+	readonly state: 'open' | 'draft' | 'merged' | 'closed';
+	readonly url: string;
+	readonly baseBranch: string;
+	readonly headBranch: string;
+	readonly ciStatus: 'success' | 'failure' | 'pending' | 'unknown';
+	readonly checks: ReadonlyArray<{ readonly name: string, readonly status: string }>;
+	readonly reviewSummary: string;
+	readonly mergeQueueState?: 'queued' | 'merging' | 'awaiting_checks' | null;
+	readonly stackDepth?: number;
+	readonly stackSize?: number;
+	readonly stackParentBranch?: string | null;
+	readonly stackChildBranches?: ReadonlyArray<string>;
+}
+
+export interface WorkflowMacroConfig {
+	readonly id: string;
+	readonly name: string;
+	readonly steps: ReadonlyArray<string>;
+}
+
+export interface RequestLoadWorkingTreeStatus extends RepoRequest {
+	readonly command: 'loadWorkingTreeStatus';
+}
+export interface ResponseLoadWorkingTreeStatus extends ResponseWithErrorInfo {
+	readonly command: 'loadWorkingTreeStatus';
+	readonly repo: string;
+	readonly files: ReadonlyArray<WorkingTreeStatusItem>;
+	readonly headMessage: string | null;
+	readonly hooks?: ReadonlyArray<RepoHookInfo>;
+	readonly commitTemplate?: string | null;
+	readonly preCommitIssues?: ReadonlyArray<PreCommitIssue>;
+}
+
+export interface RequestStageFiles extends RepoRequest {
+	readonly command: 'stageFiles';
+	readonly paths: ReadonlyArray<string> | null;
+}
+export interface ResponseStageFiles extends ResponseWithErrorInfo {
+	readonly command: 'stageFiles';
+}
+
+export interface RequestUnstageFiles extends RepoRequest {
+	readonly command: 'unstageFiles';
+	readonly paths: ReadonlyArray<string> | null;
+}
+export interface ResponseUnstageFiles extends ResponseWithErrorInfo {
+	readonly command: 'unstageFiles';
+}
+
+export interface RequestDiscardWorkingChanges extends RepoRequest {
+	readonly command: 'discardWorkingChanges';
+	readonly trackedPaths: ReadonlyArray<string>;
+	readonly untrackedPaths: ReadonlyArray<string>;
+}
+export interface ResponseDiscardWorkingChanges extends ResponseWithErrorInfo {
+	readonly command: 'discardWorkingChanges';
+}
+
+export interface RequestLoadFileHunkDiff extends RepoRequest {
+	readonly command: 'loadFileHunkDiff';
+	readonly filePath: string;
+	readonly staged: boolean;
+}
+export interface ResponseLoadFileHunkDiff extends ResponseWithErrorInfo {
+	readonly command: 'loadFileHunkDiff';
+	readonly filePath: string;
+	readonly staged: boolean;
+	readonly diff: string;
+}
+
+export interface RequestApplyHunkPatch extends RepoRequest {
+	readonly command: 'applyHunkPatch';
+	readonly filePath: string;
+	readonly staged: boolean;
+	readonly patch?: string;
+	readonly partialSelection?: {
+		readonly diffHeader: string;
+		readonly hunkHeaderLine: string;
+		readonly hunkLines: ReadonlyArray<string>;
+		readonly selectedIndices: ReadonlyArray<number>;
+	};
+	readonly action: 'stage' | 'unstage' | 'discard';
+}
+export interface ResponseApplyHunkPatch extends ResponseWithErrorInfo {
+	readonly command: 'applyHunkPatch';
+	readonly filePath: string;
+	readonly staged: boolean;
+}
+
+export interface RequestCommitStagedChanges extends RepoRequest {
+	readonly command: 'commitStagedChanges';
+	readonly message: string;
+	readonly amend: boolean;
+	readonly stageAllIfEmpty: boolean;
+	readonly noVerify?: boolean;
+	readonly signoff?: boolean;
+	readonly gpgSign?: boolean;
+}
+export interface ResponseCommitStagedChanges extends ResponseWithErrorInfo {
+	readonly command: 'commitStagedChanges';
+}
+
+export interface RequestMoveBranch extends RepoRequest {
+	readonly command: 'moveBranch';
+	readonly branchName: string;
+	readonly targetHash: string;
+}
+export interface ResponseMoveBranch extends ResponseWithErrorInfo {
+	readonly command: 'moveBranch';
+}
+
+export interface RequestLoadPullRequestBadges extends RepoRequest {
+	readonly command: 'loadPullRequestBadges';
+	readonly force?: boolean;
+}
+export interface ResponseLoadPullRequestBadges extends BaseMessage {
+	readonly command: 'loadPullRequestBadges';
+	readonly repo: string;
+	readonly badges: { readonly [branch: string]: PullRequestBadgeInfo };
+}
+
+export interface RequestLoadPullRequestDetails extends RepoRequest {
+	readonly command: 'loadPullRequestDetails';
+	readonly branch: string;
+	readonly prNumber: number;
+}
+export interface ResponseLoadPullRequestDetails extends ResponseWithErrorInfo {
+	readonly command: 'loadPullRequestDetails';
+	readonly branch: string;
+	readonly prNumber: number;
+	readonly details: PullRequestDetailsInfo | null;
+}
+
+export interface RequestLoadCommitExtras extends RepoRequest {
+	readonly command: 'loadCommitExtras';
+	readonly commitHash: string;
+}
+export interface ResponseLoadCommitExtras extends BaseMessage {
+	readonly command: 'loadCommitExtras';
+	readonly commitHash: string;
+	readonly note: string | null;
+	readonly signatureDetails: CommitSignatureDetails | null;
+}
+
+export interface RequestSetCommitNote extends RepoRequest {
+	readonly command: 'setCommitNote';
+	readonly commitHash: string;
+	readonly note: string | null;
+}
+export interface ResponseSetCommitNote extends ResponseWithErrorInfo {
+	readonly command: 'setCommitNote';
+	readonly commitHash: string;
+	readonly note: string | null;
+}
+
+export interface RequestRunWorkflowMacro extends RepoRequest {
+	readonly command: 'runWorkflowMacro';
+	readonly macroId: string;
+}
+export interface ResponseRunWorkflowMacro extends ResponseWithErrorInfo {
+	readonly command: 'runWorkflowMacro';
+	readonly macroId: string;
+	readonly summary: string;
+}
+
+export interface RequestExportGraphSvg extends RepoRequest {
+	readonly command: 'exportGraphSvg';
+	readonly svg: string;
+}
+
+export interface RequestOpenHookFile extends RepoRequest {
+	readonly command: 'openHookFile';
+	readonly hookPath?: string;
+}
+
+export interface RequestLoadBranchCommits extends RepoRequest {
+	readonly command: 'loadBranchCommits';
+	readonly branch: string;
+	readonly maxCommits?: number;
+}
+export interface ResponseLoadBranchCommits extends ResponseWithErrorInfo {
+	readonly command: 'loadBranchCommits';
+	readonly branch: string;
+	readonly commits: ReadonlyArray<BranchCommitSummary>;
+}
+
+export type ReviewSessionScope = 'uncommitted' | 'unpushed' | 'branch';
+
+export interface ReviewSessionComment {
+	readonly id: string;
+	readonly filePath: string;
+	readonly severity: 'blocker' | 'suggestion' | 'note';
+	readonly text: string;
+	readonly createdAt: number;
+}
+
+export interface ReviewSessionState {
+	readonly scopeKey: string;
+	readonly viewedFiles: ReadonlyArray<string>;
+	readonly comments: ReadonlyArray<ReviewSessionComment>;
+	readonly updatedAt: number;
+}
+
+export interface SavedFilterPreset {
+	readonly id: string;
+	readonly name: string;
+	readonly query: string;
+}
+
+export interface GuardRiskEvidence {
+	readonly severity: 'high' | 'medium' | 'low' | 'info';
+	readonly label: string;
+	readonly detail: string;
+	readonly deduction: number;
+	readonly file?: string;
+	readonly line?: number;
+}
+
+export interface GuardRiskReport {
+	readonly score: number; // 0 (critical) .. 100 (clean)
+	readonly grade: 'safe' | 'caution' | 'high-risk';
+	readonly evidence: ReadonlyArray<GuardRiskEvidence>;
+}
+
+export interface RepoLocalMetadata {
+	readonly pinnedBranches: ReadonlyArray<string>;
+	readonly reviewSessions: { readonly [scopeKey: string]: ReviewSessionState };
+	readonly savedFilters?: ReadonlyArray<SavedFilterPreset>;
+}
+
+export interface RequestLoadRepoMetadata extends RepoRequest {
+	readonly command: 'loadRepoMetadata';
+}
+export interface ResponseLoadRepoMetadata extends BaseMessage {
+	readonly command: 'loadRepoMetadata';
+	readonly repo: string;
+	readonly pinnedBranches: ReadonlyArray<string>;
+	readonly savedFilters?: ReadonlyArray<SavedFilterPreset>;
+}
+
+export interface RequestSaveFilterPreset extends RepoRequest {
+	readonly command: 'saveFilterPreset';
+	readonly name: string;
+	readonly query: string;
+}
+export interface RequestDeleteFilterPreset extends RepoRequest {
+	readonly command: 'deleteFilterPreset';
+	readonly id: string;
+}
+export interface ResponseSavedFilterPresets extends BaseMessage {
+	readonly command: 'savedFilterPresets';
+	readonly repo: string;
+	readonly savedFilters: ReadonlyArray<SavedFilterPreset>;
+}
+
+export interface RequestTogglePinBranch extends RepoRequest {
+	readonly command: 'togglePinBranch';
+	readonly branch: string;
+}
+export interface ResponseTogglePinBranch extends BaseMessage {
+	readonly command: 'togglePinBranch';
+	readonly repo: string;
+	readonly pinnedBranches: ReadonlyArray<string>;
+}
+
+export interface RequestLoadWorktreeWip extends BaseMessage {
+	readonly command: 'loadWorktreeWip';
+	readonly worktreePath: string;
+}
+export interface ResponseLoadWorktreeWip extends ResponseWithErrorInfo {
+	readonly command: 'loadWorktreeWip';
+	readonly worktreePath: string;
+	readonly files: ReadonlyArray<WorkingTreeStatusItem>;
+}
+
+export interface RequestLoadReviewSession extends RepoRequest {
+	readonly command: 'loadReviewSession';
+	readonly scope: ReviewSessionScope;
+}
+export interface ResponseLoadReviewSession extends ResponseWithErrorInfo {
+	readonly command: 'loadReviewSession';
+	readonly repo: string;
+	readonly scope: ReviewSessionScope;
+	readonly scopeKey: string;
+	readonly baseLabel: string;
+	readonly headLabel: string;
+	readonly fromHash: string;
+	readonly toHash: string;
+	readonly commitCount: number;
+	readonly files: ReadonlyArray<GitFileChange>;
+	readonly session: ReviewSessionState;
+	readonly riskReport?: GuardRiskReport;
+}
+
+export interface RequestUpdateReviewSession extends RepoRequest {
+	readonly command: 'updateReviewSession';
+	readonly scopeKey: string;
+	readonly viewedFiles?: ReadonlyArray<string>;
+	readonly comments?: ReadonlyArray<ReviewSessionComment>;
+	readonly clear?: boolean;
+}
+export interface ResponseUpdateReviewSession extends BaseMessage {
+	readonly command: 'updateReviewSession';
+	readonly repo: string;
+	readonly session: ReviewSessionState;
+}
+
+export interface RequestAiSearchCommits extends RepoRequest {
+	readonly command: 'aiSearchCommits';
+	readonly naturalQuery: string;
+	readonly authors: ReadonlyArray<string>;
+	readonly branches: ReadonlyArray<string>;
+	readonly modelId?: string | null;
+}
+export interface ResponseAiSearchCommits extends ResponseWithErrorInfo {
+	readonly command: 'aiSearchCommits';
+	readonly naturalQuery: string;
+	readonly query: string;
+	readonly model: string;
+}
+
+export interface RequestGenerateStashMessage extends RepoRequest {
+	readonly command: 'generateStashMessage';
+	readonly modelId?: string | null;
+}
+export interface ResponseGenerateStashMessage extends ResponseWithErrorInfo {
+	readonly command: 'generateStashMessage';
+	readonly message: string;
+	readonly model: string;
+}
+
+export interface RequestRestoreFilesFromCommit extends RepoRequest {
+	readonly command: 'restoreFilesFromCommit';
+	readonly commitHash: string;
+	readonly filePaths: ReadonlyArray<string>;
+}
+export interface ResponseRestoreFilesFromCommit extends ResponseWithErrorInfo {
+	readonly command: 'restoreFilesFromCommit';
+	readonly restoredCount: number;
+}
+
+export interface RequestExportAgentContext extends RepoRequest {
+	readonly command: 'exportAgentContext';
+	readonly selectedCommitHash?: string | null;
+}
+
+export interface ContributorSummary {
+	readonly name: string;
+	readonly email: string;
+	readonly commits: number;
+}
+
+export interface RequestPushToCommit extends RepoRequest {
+	readonly command: 'pushToCommit';
+	readonly commitHash: string;
+	readonly remote: string;
+	readonly branchName: string;
+	readonly mode: GitPushBranchMode;
+}
+export interface ResponsePushToCommit extends ResponseWithMultiErrorInfo {
+	readonly command: 'pushToCommit';
+}
+
+export interface RequestBatchSquashCommits extends RepoRequest {
+	readonly command: 'batchSquashCommits';
+	readonly baseHash: string;
+	readonly commitHashes: ReadonlyArray<string>; // Newest-first or oldest-first accepted by handler
+	readonly message: string;
+}
+export interface ResponseBatchSquashCommits extends ResponseWithErrorInfo {
+	readonly command: 'batchSquashCommits';
+}
+
+export interface RequestBatchDropCommits extends RepoRequest {
+	readonly command: 'batchDropCommits';
+	readonly baseHash: string;
+	readonly commitHashes: ReadonlyArray<string>;
+}
+export interface ResponseBatchDropCommits extends ResponseWithErrorInfo {
+	readonly command: 'batchDropCommits';
+}
+
+export interface RequestAiChangelogFromCommits extends RepoRequest {
+	readonly command: 'aiChangelogFromCommits';
+	readonly fromRef: string;
+	readonly toRef: string;
+	readonly label: string;
+}
+
+export interface RequestAddToGitignore extends RepoRequest {
+	readonly command: 'addToGitignore';
+	readonly paths: ReadonlyArray<string>;
+}
+export interface ResponseAddToGitignore extends ResponseWithErrorInfo {
+	readonly command: 'addToGitignore';
+	readonly addedCount: number;
+}
+
+export interface RequestLoadContributors extends RepoRequest {
+	readonly command: 'loadContributors';
+}
+export interface ResponseLoadContributors extends ResponseWithErrorInfo {
+	readonly command: 'loadContributors';
+	readonly repo: string;
+	readonly contributors: ReadonlyArray<ContributorSummary>;
+}
+
+export interface RequestStartWorkBranch extends RepoRequest {
+	readonly command: 'startWorkBranch';
+	readonly id: string;
+	readonly title: string;
+}
+
+export interface RequestLoadCodingAgents extends RepoRequest {
+	readonly command: 'loadCodingAgents';
+}
+export interface ResponseLoadCodingAgents extends BaseMessage {
+	readonly command: 'loadCodingAgents';
+	readonly repo: string;
+	readonly agents: ReadonlyArray<CodingAgentStatus>;
+}
+
+export interface RequestToggleCodingAgentMcp extends RepoRequest {
+	readonly command: 'toggleCodingAgentMcp';
+	readonly agentId: CodingAgentId;
+	readonly enable: boolean;
+}
+export interface ResponseToggleCodingAgentMcp extends ResponseWithErrorInfo {
+	readonly command: 'toggleCodingAgentMcp';
+	readonly repo: string;
+	readonly agents: ReadonlyArray<CodingAgentStatus>;
+}
+
+export interface RequestToggleCodingAgentHooks extends RepoRequest {
+	readonly command: 'toggleCodingAgentHooks';
+	readonly agentId: CodingAgentId;
+	readonly enable: boolean;
+}
+export interface ResponseToggleCodingAgentHooks extends ResponseWithErrorInfo {
+	readonly command: 'toggleCodingAgentHooks';
+	readonly repo: string;
+	readonly agents: ReadonlyArray<CodingAgentStatus>;
+}
+
+export interface RequestCopyWipToWorktree extends RepoRequest {
+	readonly command: 'copyWipToWorktree';
+	readonly targetWorktreePath: string;
+}
+export interface ResponseCopyWipToWorktree extends ResponseWithErrorInfo {
+	readonly command: 'copyWipToWorktree';
+	readonly copiedFiles: number;
+}
+
+export interface RequestOpenCompanionFeature extends BaseMessage {
+	readonly command: 'openCompanionFeature';
+	readonly feature: 'aiReview' | 'aiReleaseNotes' | 'aiExplainRegression' | 'conflictAssistant' | 'reflogExplorer' | 'repoInsights' | 'multiRepoOverview' | 'checkoutPullRequest' | 'setHostingToken' | 'clearHostingToken' | 'preCommitCheck' | 'aiSmartCommitSplit' | 'submoduleManager' | 'branchDashboard' | 'exportChangelog' | 'startWork' | 'openLaunchpad' | 'switchMode' | 'aiAutoRebase' | 'checkRepoHealth' | 'editSshAllowedSigners';
+	readonly repo?: string;
+	readonly mode?: 'uncommitted' | 'commit' | 'range';
+	readonly commitHash?: string;
+	readonly fromRef?: string;
+	readonly toRef?: string;
+	readonly label?: string;
+}
+
+export interface RequestSaveExtendedSettings extends BaseMessage {
+	readonly command: 'saveExtendedSettings';
+	readonly settings: { readonly [key: string]: unknown };
+}
+
+export interface ResponseSaveExtendedSettings extends ResponseWithErrorInfo {
+	readonly command: 'saveExtendedSettings';
+	readonly updatedKeys: ReadonlyArray<string>;
+}
+
 export type RequestMessage =
 	RequestAddRemote
 	| RequestAddTag
@@ -2212,6 +2946,7 @@ export type RequestMessage =
 	| RequestDeleteBranches
 	| RequestEditCommitMessage
 	| RequestLoadCommitMessage
+	| RequestLoadImpactPreview
 	| RequestUndoCommit
 	| RequestFixupCommit
 	| RequestBisect
@@ -2233,7 +2968,47 @@ export type RequestMessage =
 	| RequestCancelGenerateCommitMessage
 	| RequestGenerateCommitMessage
 	| RequestUseGeneratedCommitMessage
-	| RequestLoadImpactPreview;
+	| RequestFetchAiModels
+	| RequestLoadWorkingTreeStatus
+	| RequestStageFiles
+	| RequestUnstageFiles
+	| RequestDiscardWorkingChanges
+	| RequestLoadFileHunkDiff
+	| RequestApplyHunkPatch
+	| RequestCommitStagedChanges
+	| RequestMoveBranch
+	| RequestLoadPullRequestBadges
+	| RequestLoadPullRequestDetails
+	| RequestLoadCommitExtras
+	| RequestSetCommitNote
+	| RequestRunWorkflowMacro
+	| RequestExportGraphSvg
+	| RequestOpenHookFile
+	| RequestLoadBranchCommits
+	| RequestLoadRepoMetadata
+	| RequestTogglePinBranch
+	| RequestSaveFilterPreset
+	| RequestDeleteFilterPreset
+	| RequestLoadWorktreeWip
+	| RequestLoadReviewSession
+	| RequestUpdateReviewSession
+	| RequestAiSearchCommits
+	| RequestGenerateStashMessage
+	| RequestRestoreFilesFromCommit
+	| RequestExportAgentContext
+	| RequestPushToCommit
+	| RequestBatchSquashCommits
+	| RequestBatchDropCommits
+	| RequestAiChangelogFromCommits
+	| RequestAddToGitignore
+	| RequestLoadContributors
+	| RequestStartWorkBranch
+	| RequestLoadCodingAgents
+	| RequestToggleCodingAgentMcp
+	| RequestToggleCodingAgentHooks
+	| RequestCopyWipToWorktree
+	| RequestSaveExtendedSettings
+	| RequestOpenCompanionFeature;
 
 export type ResponseMessage =
 	ResponseAddRemote
@@ -2319,6 +3094,7 @@ export type ResponseMessage =
 	| ResponseDeleteBranches
 	| ResponseEditCommitMessage
 	| ResponseLoadCommitMessage
+	| ResponseLoadImpactPreview
 	| ResponseUndoCommit
 	| ResponseFixupCommit
 	| ResponseBisect
@@ -2335,12 +3111,46 @@ export type ResponseMessage =
 	| ResponseExplainCommit
 	| ResponseGenerateCommitMessage
 	| ResponseUseGeneratedCommitMessage
-	| ResponseLoadImpactPreview;
+	| ResponseFetchAiModels
+	| ResponseLoadWorkingTreeStatus
+	| ResponseStageFiles
+	| ResponseUnstageFiles
+	| ResponseDiscardWorkingChanges
+	| ResponseLoadFileHunkDiff
+	| ResponseApplyHunkPatch
+	| ResponseCommitStagedChanges
+	| ResponseMoveBranch
+	| ResponseLoadPullRequestBadges
+	| ResponseLoadPullRequestDetails
+	| ResponseLoadCommitExtras
+	| ResponseSetCommitNote
+	| ResponseRunWorkflowMacro
+	| ResponseLoadBranchCommits
+	| ResponseLoadRepoMetadata
+	| ResponseTogglePinBranch
+	| ResponseSavedFilterPresets
+	| ResponseLoadWorktreeWip
+	| ResponseLoadReviewSession
+	| ResponseUpdateReviewSession
+	| ResponseAiSearchCommits
+	| ResponseGenerateStashMessage
+	| ResponseRestoreFilesFromCommit
+	| ResponsePushToCommit
+	| ResponseBatchSquashCommits
+	| ResponseBatchDropCommits
+	| ResponseAddToGitignore
+	| ResponseLoadContributors
+	| ResponseLoadCodingAgents
+	| ResponseToggleCodingAgentMcp
+	| ResponseToggleCodingAgentHooks
+	| ResponseCopyWipToWorktree
+	| ResponseSaveExtendedSettings;
 
 export interface ResponseUpdateCdvConfig extends BaseMessage {
 	readonly command: 'updateCdvConfig';
 	readonly actions: ReadonlyArray<string>;
 	readonly hideUnchangedRegions: boolean;
+	readonly pullRequestStatusEnabled?: boolean;
 	readonly rowActions: RowActionsConfig;
 }
 

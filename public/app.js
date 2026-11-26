@@ -954,6 +954,14 @@
         openScmModal(msg.draftMessage || '');
         break;
 
+      case 'shell:focusGraphTab':
+        if (state.wsLayout === 'tabs') activateTab('graph');
+        break;
+
+      case 'graph:openCompanionFeature':
+        window.GitMapV28Workbench?.openCompanionFeature(msg.payload);
+        break;
+
       case 'settings:changed': {
         state.settings = msg.settings || state.settings;
         if (state.settings['gitmap.app.iconStyle'] && VALID_ICON_STYLE_IDS.has(state.settings['gitmap.app.iconStyle'])) {
@@ -4153,6 +4161,9 @@
       let blameDetectMoves = localStorage.getItem('gitmap.blame.detectMoves') === '1';
       let blameStack = [];
       let activeBlameView = null;
+      let annotData = null;
+      let annotMode = localStorage.getItem('gitmap.editor.mode') || state.settings['git-map.mode.active'] || 'default';
+      let showHeatmap = annotMode === 'review' || localStorage.getItem('gitmap.viewer.heatmap') === '1';
       let selStart = payload.lines ? payload.lines.start : null;
       let selEnd = payload.lines ? payload.lines.end : null;
       let wrapLines = localStorage.getItem('gitmap.viewer.wrapLines') !== '0';
@@ -4275,7 +4286,14 @@
               )}</button>` : ''}
               ${!isEditing && !richPreviewActive && !fileRes.isBinary ? `<label class="inline-check"><input type="checkbox" class="wrap-toggle" ${wrapLines ? 'checked' : ''} /> <span>${escapeHtml(tr('wrapLines'))}</span></label>` : ''}
               ${hasRepo && !isEditing ? `
-                ${!isBinaryPreviewable && !richPreviewActive ? `<button type="button" class="mini-btn act-blame ${showBlame ? 'primary' : ''}">${escapeHtml(tr('toggleBlame'))}</button>
+                ${!isBinaryPreviewable && !richPreviewActive ? `
+                  <select class="viewer-encoding-select gm-annot-mode-select" title="${escapeHtml(zh ? '切换编辑器 Git 注解模式 (Default / Zen / Review)' : 'Switch Editor Git Annotation Mode (Default / Zen / Review)')}">
+                    <option value="default"${annotMode === 'default' ? ' selected' : ''}>${escapeHtml(zh ? '模式: 标准' : 'Mode: Default')}</option>
+                    <option value="review"${annotMode === 'review' ? ' selected' : ''}>${escapeHtml(zh ? '模式: 评审' : 'Mode: Review')}</option>
+                    <option value="zen"${annotMode === 'zen' ? ' selected' : ''}>${escapeHtml(zh ? '模式: 专注' : 'Mode: Zen')}</option>
+                  </select>
+                  <button type="button" class="mini-btn act-heatmap ${showHeatmap && annotMode !== 'zen' ? 'primary' : ''}" title="${escapeHtml(zh ? '按代码修改新旧显示年龄热力条' : 'Toggle File Age Heatmap Gutter')}">${escapeHtml(zh ? '热力' : 'Heat')}</button>
+                  <button type="button" class="mini-btn act-blame ${showBlame ? 'primary' : ''}">${escapeHtml(tr('toggleBlame'))}</button>
                 <button type="button" class="mini-btn act-line-hist">${escapeHtml(tr('lineHistoryGraph'))}</button>` : ''}
                 <button type="button" class="mini-btn act-file-hist">${escapeHtml(tr('fileHistoryGraph'))}</button>
                 ${opts.isInlinePreview ? '' : `<button type="button" class="mini-btn act-vfh">${escapeHtml(tr('visualHistory'))}</button>`}
@@ -4310,6 +4328,18 @@
               </div>
             </div>
           ` : ''}
+          ${hasRepo && !isEditing && !isBinaryPreviewable && !richPreviewActive && annotMode !== 'zen' && annotData && (annotData.recentChangeSummary || (annotData.changedRanges && annotData.changedRanges.length > 0)) ? `
+            <div class="gm-file-codelens-bar">
+              <div class="gm-codelens-left">
+                <button type="button" class="gm-codelens-link act-codelens-hist" title="${escapeHtml(zh ? '在 Git Map 中查看该文件完整提交历史' : 'Open file commit history in Git Map')}">
+                  <span>👥 ${annotData.authorCount || 1} ${escapeHtml(zh ? '位贡献者' : 'authors')}</span>
+                  ${annotData.recentChangeSummary ? `<span>· ${escapeHtml(annotData.recentChangeSummary)}</span>` : ''}
+                </button>
+                ${annotData.changedRanges && annotData.changedRanges.length > 0 ? `<span class="gm-badge info" title="${escapeHtml(annotData.changesSourceLabel || '')}">${annotData.changedRanges.length} ${escapeHtml(zh ? '处改动块' : 'changed hunks')}</span>` : ''}
+              </div>
+              <div class="gm-codelens-right" data-role="inline-line-blame"></div>
+            </div>
+          ` : ''}
           <div class="diff-scroll-area"></div>
         `;
 
@@ -4331,12 +4361,29 @@
           });
         }
 
-        const encSelect = panel.querySelector('.viewer-encoding-select');
+        const encSelect = panel.querySelector('.viewer-encoding-select:not(.gm-annot-mode-select)');
         if (encSelect) {
           encSelect.addEventListener('change', () => {
             renderFileViewerInto(panel, { ...payload, encoding: encSelect.value }, opts);
           });
         }
+        panel.querySelector('.gm-annot-mode-select')?.addEventListener('change', (ev) => {
+          annotMode = ev.target.value;
+          try { localStorage.setItem('gitmap.editor.mode', annotMode); } catch (_) {}
+          if (annotMode === 'review') showHeatmap = true;
+          rpc('settings:update', { key: 'git-map.mode.active', value: annotMode }).catch(() => {});
+          mountViewer();
+        });
+        panel.querySelector('.act-heatmap')?.addEventListener('click', () => {
+          showHeatmap = !showHeatmap;
+          if (showHeatmap && annotMode === 'zen') annotMode = 'default';
+          try { localStorage.setItem('gitmap.viewer.heatmap', showHeatmap ? '1' : '0'); } catch (_) {}
+          mountViewer();
+        });
+        panel.querySelector('.act-codelens-hist')?.addEventListener('click', async () => {
+          await rpc('file:viewHistoryInGraph', { repo: fileRes.repo, filePath: fileRes.filePath });
+          activateTab('graph');
+        });
         const viewerOpenEdBtn = panel.querySelector('.act-viewer-open-editor');
         if (viewerOpenEdBtn && externalTarget) {
           viewerOpenEdBtn.addEventListener('click', () => {
@@ -4472,6 +4519,43 @@
         const fileSyntax = lines.length <= 20000 ? getSyntaxHighlighter(effectiveFilePath) : null;
         const syntaxLines = fileSyntax !== null ? fileSyntax.highlight(normalizedContent) : null;
 
+        const changedLineMap = new Map();
+        if (annotMode !== 'zen' && annotData && Array.isArray(annotData.changedRanges)) {
+          annotData.changedRanges.forEach((rng) => {
+            const s = Math.max(1, (typeof rng.start === 'number' ? rng.start + 1 : Number(rng.startLine) || 1));
+            const e = Math.max(s, (typeof rng.end === 'number' ? rng.end + 1 : Number(rng.endLine) || s));
+            for (let ln = s; ln <= e; ln++) changedLineMap.set(ln, rng.kind || 'modified');
+          });
+        }
+        const updateInlineLineBlame = (lineNo) => {
+          const slot = panel.querySelector('[data-role="inline-line-blame"]');
+          if (!slot) return;
+          const blSrc = effectiveBlame || (annotData && annotData.blame);
+          const blLine = blSrc && blSrc.lines ? blSrc.lines[lineNo - 1] : null;
+          const bc = blLine && blSrc.commits ? blSrc.commits[blLine.hash] : null;
+          if (!bc) {
+            slot.innerHTML = '';
+            return;
+          }
+          if (!bc.committed) {
+            slot.innerHTML = `<span class="gm-inline-blame-pill">L${lineNo} · ${escapeHtml(zh ? '你 · 未提交的更改' : 'You · Uncommitted changes')}</span>`;
+            return;
+          }
+          const shortSha = blLine.hash.slice(0, 7);
+          const dateStr = bc.authorDate ? new Date(bc.authorDate * 1000).toISOString().slice(0, 10) : '';
+          const autolinks = (annotData && annotData.autolinksByHash && annotData.autolinksByHash[blLine.hash]) || [];
+          const autoHtml = autolinks.slice(0, 2).map((al) => `<a class="gm-autolink" href="${escapeHtml(al.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(al.title)}">${escapeHtml(al.text)}</a>`).join(' ');
+          slot.innerHTML = `<button type="button" class="gm-inline-blame-pill act-jump-blame-commit" data-hash="${escapeHtml(blLine.hash)}" title="${escapeHtml(bc.summary || '')}">L${lineNo} · ${escapeHtml(bc.author)} · ${escapeHtml(dateStr)} · ${escapeHtml((bc.summary || '').slice(0, 48))} <code>${escapeHtml(shortSha)}</code></button>${autoHtml ? ' ' + autoHtml : ''}`;
+          slot.querySelector('.act-jump-blame-commit')?.addEventListener('click', () => {
+            sendWs({
+              type: 'graph:request',
+              payload: { command: 'commitDetails', repo: fileRes.repo, commitHash: blLine.hash, hasParents: true, stash: null, avatarEmail: null, refresh: false }
+            });
+            rpc('repos:select', { repo: fileRes.repo });
+            activateTab('graph');
+          });
+        };
+
         const buildRowHtml = (idx, prevBlameHash) => {
           const lineText = lines[idx];
           const lineNo = idx + 1;
@@ -4495,11 +4579,18 @@
           } else if (showBlame) {
             blameHtml = `<td class="blame-gutter"></td>`;
           }
+          const chgKind = changedLineMap.get(lineNo);
+          const heatBucket = showHeatmap && annotMode !== 'zen' && annotData && annotData.heatBuckets ? annotData.heatBuckets[idx] : null;
+          const lnClasses = [
+            'file-line-num',
+            chgKind ? `gm-ln-${chgKind}` : '',
+            heatBucket && heatBucket.level > 0 ? `gm-heat-${heatBucket.level}` : ''
+          ].filter(Boolean).join(' ');
           const codeCell = syntaxLines && window.GitMapSyntax
             ? window.GitMapSyntax.renderLine(syntaxLines[idx] || null, lineText, null, '')
             : escapeHtml(lineText);
           return {
-            html: `<tr class="file-line-row${isSelected ? ' selected-line' : ''}" data-line="${lineNo}">${blameHtml}<td class="file-line-num" data-line="${lineNo}">${lineNo}</td><td class="diff-code">${codeCell}</td></tr>`,
+            html: `<tr class="file-line-row${isSelected ? ' selected-line' : ''}" data-line="${lineNo}">${blameHtml}<td class="${lnClasses}" data-line="${lineNo}">${lineNo}</td><td class="diff-code">${codeCell}</td></tr>`,
             nextBlameHash
           };
         };
@@ -4577,7 +4668,12 @@
               const ln = Number(row.getAttribute('data-line'));
               row.classList.toggle('selected-line', ln >= selStart && ln <= selEnd);
             });
+            updateInlineLineBlame(selStart);
             return;
+          }
+          const clickedRow = ev.target.closest('tr.file-line-row');
+          if (clickedRow && !ev.target.closest('.blame-pen-btn') && !ev.target.closest('.blame-gutter[data-hash]')) {
+            updateInlineLineBlame(Number(clickedRow.getAttribute('data-line')) || 1);
           }
           const penBtn = ev.target.closest('.blame-pen-btn');
           if (penBtn) {
@@ -4726,6 +4822,7 @@
         }
 
         renderFileLines(true);
+        if (selStart !== null) updateInlineLineBlame(selStart);
         if (selStart !== null && selStart > 1) {
           setTimeout(() => {
             if (isVirtual) {
@@ -4741,6 +4838,19 @@
 
       panel.__rerenderViewer = mountViewer;
       mountViewer();
+      if (fileRes.repo && !fileRes.commit && !fileRes.isBinary && !isBinaryPreviewable) {
+        rpc('file:annotations', { repo: fileRes.repo, filePath: fileRes.filePath }).then((res) => {
+          if (loadSeq !== panel.__fileLoadSeq) return;
+          annotData = res;
+          if (!blameData && res.blame) blameData = res.blame;
+          if (!isEditorActive() && !richPreviewActive) {
+            const prevScroll = panel.querySelector('.diff-scroll-area')?.scrollTop || 0;
+            mountViewer();
+            const nextArea = panel.querySelector('.diff-scroll-area');
+            if (nextArea && prevScroll > 0) nextArea.scrollTop = prevScroll;
+          }
+        }).catch(() => {});
+      }
     } catch (err) {
       if (loadSeq === panel.__fileLoadSeq) {
         renderPreviewBarOnly(`<div class="browser-empty-state error-text">${escapeHtml(err.message)}</div>`);
@@ -4864,6 +4974,51 @@
       term.onData((data) => {
         sendWs({ type: 'term:input', id: info.id, data });
       });
+
+      if (typeof term.registerLinkProvider === 'function') {
+        term.registerLinkProvider({
+          provideLinks(bufferLineNumber, callback) {
+            if (state.settings['git-map.terminalLinks.enabled'] === false) {
+              callback(undefined);
+              return;
+            }
+            const bufLine = term.buffer?.active?.getLine(bufferLineNumber - 1);
+            const text = bufLine ? bufLine.translateToString(true) : '';
+            if (!text || !text.trim() || (!/[0-9a-fA-F]{7,40}/.test(text) && !text.includes('..') && !/[A-Za-z0-9/_-]{2,}/.test(text))) {
+              callback(undefined);
+              return;
+            }
+            const targetRepo = (info.repo && state.repos[info.repo] ? info.repo : state.activeRepo) || '';
+            if (!targetRepo) {
+              callback(undefined);
+              return;
+            }
+            rpc('terminal:extractLinks', { repo: targetRepo, line: text }).then((res) => {
+              const matches = (res && res.links) || [];
+              if (matches.length === 0) {
+                callback(undefined);
+                return;
+              }
+              callback(matches.map((m) => ({
+                text: m.text,
+                range: {
+                  start: { x: m.startIndex + 1, y: bufferLineNumber },
+                  end: { x: m.startIndex + m.length, y: bufferLineNumber }
+                },
+                activate() {
+                  rpc('terminal:openLink', {
+                    repo: targetRepo,
+                    kind: m.kind,
+                    text: m.text,
+                    fromRef: m.fromRef,
+                    toRef: m.toRef
+                  }).catch((err) => showToast(err.message, 'warning'));
+                }
+              })));
+            }).catch(() => callback(undefined));
+          }
+        });
+      }
 
       const tabEl = document.createElement('div');
       tabEl.className = 'term-tab';

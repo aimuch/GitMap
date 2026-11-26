@@ -17,6 +17,8 @@
   }
 
   function getPreviewKind(filePath) {
+    const base = (String(filePath || '').split(/[\\/]/).pop() || '').toLowerCase();
+    if (base === 'git-rebase-todo' || base.endsWith('.git-rebase-todo')) return 'rebase-todo';
     const ext = detectExt(filePath);
     if (['md', 'markdown', 'mdx'].includes(ext)) return 'markdown';
     if (['xlsx', 'xlsm', 'xls', 'ods'].includes(ext)) return 'excel';
@@ -40,7 +42,7 @@
   }
 
   function shouldDefaultRichPreview(kind) {
-    return ['markdown', 'excel', 'csv', 'jsonl', 'docx', 'pptx', 'archive', 'image', 'svg', 'pdf', 'audio', 'video'].includes(kind || '');
+    return ['rebase-todo', 'markdown', 'excel', 'csv', 'jsonl', 'docx', 'pptx', 'archive', 'image', 'svg', 'pdf', 'audio', 'video'].includes(kind || '');
   }
 
   function buildRawFileUrl(meta) {
@@ -2128,6 +2130,132 @@
       box.className = 'gm-media-preview';
       box.appendChild(iframe);
       container.appendChild(box);
+      return true;
+    }
+    if (kind === 'rebase-todo') {
+      const zh = window.GitMapApp?.state?.lang === 'zh';
+      const SHORT_MAP = { p: 'pick', pick: 'pick', r: 'reword', reword: 'reword', e: 'edit', edit: 'edit', s: 'squash', squash: 'squash', f: 'fixup', fixup: 'fixup', d: 'drop', drop: 'drop' };
+      const CMD_MAP = { x: 'exec', exec: 'exec', b: 'break', break: 'break', l: 'label', label: 'label', t: 'reset', reset: 'reset', m: 'merge', merge: 'merge', u: 'update-ref', 'update-ref': 'update-ref' };
+      const entries = String(content || '').split(/\r?\n/).map((rawLine) => {
+        const t = rawLine.trim();
+        if (!t || t.startsWith('#')) return { kind: 'comment', action: '', hash: '', subject: '', rawLine };
+        const cm = t.match(/^([a-zA-Z-]+)\s+([0-9a-fA-F]{4,64})(?:\s+(.*))?$/);
+        if (cm && SHORT_MAP[cm[1].toLowerCase()]) {
+          return { kind: 'commit', action: SHORT_MAP[cm[1].toLowerCase()], hash: cm[2], subject: cm[3] || '', rawLine };
+        }
+        const xm = t.match(/^([a-zA-Z-]+)(?:\s+(.*))?$/);
+        if (xm && CMD_MAP[xm[1].toLowerCase()]) {
+          return { kind: 'command', action: CMD_MAP[xm[1].toLowerCase()], hash: '', subject: xm[2] || '', rawLine };
+        }
+        return { kind: 'comment', action: '', hash: '', subject: '', rawLine };
+      });
+
+      const serialize = () => entries.map((e) => {
+        if (e.kind === 'commit') return e.subject ? `${e.action} ${e.hash} ${e.subject}` : `${e.action} ${e.hash}`;
+        if (e.kind === 'command') return e.subject ? `${e.action} ${e.subject}` : e.action;
+        return e.rawLine;
+      }).join('\n');
+
+      const renderTodo = () => {
+        const activeRows = entries.map((e, idx) => ({ e, idx })).filter((x) => x.e.kind !== 'comment');
+        container.innerHTML = `
+          <div class="gm-rebase-todo-shell">
+            <div class="gm-rebase-todo-head">
+              <div>
+                <strong>${escapeHtml(zh ? '交互式变基编排器 (git-rebase-todo)' : 'Visual Interactive Rebase Todo Editor')}</strong>
+                <span class="gm-rebase-todo-sub">${escapeHtml(zh ? `共 ${activeRows.length} 条变基指令 · 支持调整顺序、切换动作与插入命令` : `${activeRows.length} rebase steps · Reorder, change actions, or insert commands`)}</span>
+              </div>
+              <div class="gm-rebase-todo-actions">
+                <button type="button" class="mini-btn act-rt-exec">+ exec</button>
+                <button type="button" class="mini-btn act-rt-break">+ break</button>
+                <button type="button" class="mini-btn primary act-rt-save">${escapeHtml(zh ? '保存变基计划' : 'Save Rebase Todo')}</button>
+              </div>
+            </div>
+            <div class="gm-rebase-todo-list">
+              ${activeRows.length === 0 ? `<div class="scm-empty">${escapeHtml(zh ? '当前变基计划没有可编辑的提交行' : 'No editable commit steps in this rebase-todo file')}</div>` : activeRows.map(({ e, idx }, pos) => `
+                <div class="gm-rebase-row act-${escapeHtml(e.action)}" data-idx="${idx}">
+                  <div class="gm-rebase-order">
+                    <button type="button" class="mini-icon-btn act-rt-up" data-pos="${pos}" ${pos === 0 ? 'disabled' : ''} title="Move Up">↑</button>
+                    <button type="button" class="mini-icon-btn act-rt-down" data-pos="${pos}" ${pos === activeRows.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
+                  </div>
+                  ${e.kind === 'commit' ? `
+                    <select class="gm-rebase-act-select" data-idx="${idx}">
+                      ${['pick', 'reword', 'edit', 'squash', 'fixup', 'drop'].map((a) => `<option value="${a}"${e.action === a ? ' selected' : ''}>${a}</option>`).join('')}
+                    </select>
+                    <code class="gm-rebase-sha">${escapeHtml(e.hash.slice(0, 8))}</code>
+                    <input type="text" class="gm-rebase-subj-input" data-idx="${idx}" value="${escapeHtml(e.subject)}" />
+                  ` : `
+                    <span class="gm-badge info">${escapeHtml(e.action)}</span>
+                    <input type="text" class="gm-rebase-subj-input" data-idx="${idx}" value="${escapeHtml(e.subject)}" placeholder="${escapeHtml(e.action === 'exec' ? 'npm test' : '')}" />
+                    <button type="button" class="mini-icon-btn act-rt-del" data-idx="${idx}" title="Remove">✕</button>
+                  `}
+                </div>
+              `).join('')}
+            </div>
+            <details class="gm-rebase-raw-details">
+              <summary>${escapeHtml(zh ? '预览生成的 git-rebase-todo 文本' : 'Preview generated git-rebase-todo text')}</summary>
+              <pre class="gm-rebase-raw-pre">${escapeHtml(serialize())}</pre>
+            </details>
+          </div>
+        `;
+
+        container.querySelectorAll('.gm-rebase-act-select').forEach((sel) => {
+          sel.addEventListener('change', () => {
+            const i = Number(sel.getAttribute('data-idx'));
+            if (entries[i]) entries[i].action = sel.value;
+            renderTodo();
+          });
+        });
+        container.querySelectorAll('.gm-rebase-subj-input').forEach((inp) => {
+          inp.addEventListener('input', () => {
+            const i = Number(inp.getAttribute('data-idx'));
+            if (entries[i]) entries[i].subject = inp.value;
+            const pre = container.querySelector('.gm-rebase-raw-pre');
+            if (pre) pre.textContent = serialize();
+          });
+        });
+        const swapPos = (posA, posB) => {
+          const idxA = activeRows[posA]?.idx;
+          const idxB = activeRows[posB]?.idx;
+          if (typeof idxA !== 'number' || typeof idxB !== 'number') return;
+          const tmp = entries[idxA];
+          entries[idxA] = entries[idxB];
+          entries[idxB] = tmp;
+          renderTodo();
+        };
+        container.querySelectorAll('.act-rt-up').forEach((btn) => btn.addEventListener('click', () => swapPos(Number(btn.getAttribute('data-pos')), Number(btn.getAttribute('data-pos')) - 1)));
+        container.querySelectorAll('.act-rt-down').forEach((btn) => btn.addEventListener('click', () => swapPos(Number(btn.getAttribute('data-pos')), Number(btn.getAttribute('data-pos')) + 1)));
+        container.querySelectorAll('.act-rt-del').forEach((btn) => btn.addEventListener('click', () => {
+          entries.splice(Number(btn.getAttribute('data-idx')), 1);
+          renderTodo();
+        }));
+        container.querySelector('.act-rt-exec')?.addEventListener('click', () => {
+          const insertAt = activeRows.length > 0 ? activeRows[activeRows.length - 1].idx + 1 : 0;
+          entries.splice(insertAt, 0, { kind: 'command', action: 'exec', hash: '', subject: 'echo "check"', rawLine: 'exec echo "check"' });
+          renderTodo();
+        });
+        container.querySelector('.act-rt-break')?.addEventListener('click', () => {
+          const insertAt = activeRows.length > 0 ? activeRows[activeRows.length - 1].idx + 1 : 0;
+          entries.splice(insertAt, 0, { kind: 'command', action: 'break', hash: '', subject: '', rawLine: 'break' });
+          renderTodo();
+        });
+        container.querySelector('.act-rt-save')?.addEventListener('click', async () => {
+          const app = window.GitMapApp;
+          if (!app) return;
+          try {
+            const nextText = serialize();
+            await app.rpc('file:write', {
+              repo: rawMeta.repo || '',
+              filePath: rawMeta.repo ? rawMeta.filePath : (rawMeta.sourceUri || filePath),
+              content: nextText
+            });
+            app.showToast(zh ? '变基计划已保存' : 'Rebase todo saved', 'info');
+          } catch (err) {
+            app.showToast(err.message, 'error');
+          }
+        });
+      };
+      renderTodo();
       return true;
     }
     if (kind === 'pdf' || kind === 'audio' || kind === 'video') {

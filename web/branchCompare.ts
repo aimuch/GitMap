@@ -1,3 +1,13 @@
+type BranchCompareMachineState =
+	| { readonly status: 'inactive' }
+	| { readonly status: 'loading'; readonly previousBranches: string[] | null }
+	| { readonly status: 'active'; readonly previousBranches: string[] | null };
+
+type BranchCompareMachineEvent =
+	| { readonly type: 'START'; readonly previousBranches: string[] | null }
+	| { readonly type: 'LOADED' }
+	| { readonly type: 'RESET' };
+
 /**
  * Compares two branches in the Git Map View ("Compare with Branch…"): a bar below the control bar shows the branches, their merge base and
  * how many commits each has that the other doesn't, the graph shows only those commits (marked with the colour of their branch), and a
@@ -5,14 +15,15 @@
  */
 class BranchCompare {
 	private readonly view: GitGraphView;
+	private readonly machine: WebStateMachine<BranchCompareMachineState, BranchCompareMachineEvent>;
 	private left: string | null = null;
 	private right: string | null = null;
 	private comparison: GG.GitBranchComparison | null = null;
 	private fileChanges: ReadonlyArray<GG.GitFileChange> = [];
 	private mode: 'left' | 'right' | 'both' = 'both';
-	private previousBranches: string[] | null | undefined = undefined; // The branches shown before the comparison started (undefined => not comparing)
 	private panelOpen: boolean = false;
 	private fromMergeBase: boolean = true; // Are the changes since the merge base (A...B) shown, otherwise between the latest commits (A..B)
+	private lastViewedFile: string | null = null;
 	private readonly sides: Map<string, 'left' | 'right' | 'base'> = new Map();
 
 	/**
@@ -21,6 +32,22 @@ class BranchCompare {
 	 */
 	constructor(view: GitGraphView) {
 		this.view = view;
+		this.machine = new WebStateMachine<BranchCompareMachineState, BranchCompareMachineEvent>(
+			{ status: 'inactive' },
+			(state, event) => {
+				switch (event.type) {
+					case 'START':
+						return {
+							status: 'loading',
+							previousBranches: state.status === 'inactive' ? event.previousBranches : state.previousBranches
+						};
+					case 'LOADED':
+						return state.status === 'inactive' ? state : { status: 'active', previousBranches: state.previousBranches };
+					case 'RESET':
+						return state.status === 'inactive' ? state : { status: 'inactive' };
+				}
+			}
+		).bindDataset(document.body, 'smCompare');
 		document.getElementById('compareBar')!.addEventListener('click', (e) => {
 			const target = e.target instanceof Element ? <HTMLElement | null>e.target.closest('[data-compare]') : null;
 			if (target === null) return;
@@ -35,14 +62,7 @@ class BranchCompare {
 					this.setPanelOpen(!this.panelOpen);
 					break;
 				case 'pickCommits':
-					if (this.left !== null && this.right !== null) {
-						window.parent.postMessage({
-							type: 'gitmap-shell-action',
-							action: 'open-commit-compare',
-							leftRef: this.left,
-							rightRef: this.right
-						}, window.location.origin || '*');
-					}
+					this.view.openBranchCommitCompareModal(this.left, this.right);
 					break;
 				case 'exit':
 					this.exit();
@@ -73,12 +93,13 @@ class BranchCompare {
 	 * @param right The branch it's compared with (e.g. the branch it would be merged into).
 	 */
 	public start(left: string, right: string) {
-		if (this.previousBranches === undefined) this.previousBranches = this.view.getShownBranches();
+		this.machine.send({ type: 'START', previousBranches: this.view.getShownBranches() });
 		this.left = left;
 		this.right = right;
 		this.comparison = null;
 		this.fileChanges = [];
 		this.mode = 'both';
+		this.lastViewedFile = null;
 		this.sides.clear();
 		this.view.setCompareFilter(null);
 		this.view.setShownBranches([this.getDropdownValue(left), this.getDropdownValue(right)]);
@@ -96,13 +117,14 @@ class BranchCompare {
 	 * @param msg The message containing the comparison.
 	 */
 	public processCompareBranchesResponse(msg: GG.ResponseCompareBranches) {
-		if (this.previousBranches === undefined || msg.comparison === null || msg.comparison.left !== this.left || msg.comparison.right !== this.right) {
-			if (msg.error !== null && this.previousBranches !== undefined) {
+		if (this.machine.status === 'inactive' || msg.comparison === null || msg.comparison.left !== this.left || msg.comparison.right !== this.right) {
+			if (msg.error !== null && this.machine.status !== 'inactive') {
 				dialog.showError(t('Unable to Compare Branches'), msg.error, null, null);
 				this.exit();
 			}
 			return;
 		}
+		this.machine.send({ type: 'LOADED' });
 		this.comparison = msg.comparison;
 		this.fileChanges = msg.fileChanges;
 		this.sides.clear();
@@ -118,11 +140,13 @@ class BranchCompare {
 	 * Stop comparing the branches, showing the branches that were shown before.
 	 */
 	public exit() {
-		if (this.previousBranches === undefined) return;
-		const previousBranches = this.previousBranches;
-		this.previousBranches = undefined;
+		const cur = this.machine.state;
+		if (cur.status === 'inactive') return;
+		const previousBranches = cur.previousBranches;
+		this.machine.send({ type: 'RESET' });
 		this.left = this.right = this.comparison = null;
 		this.fileChanges = [];
+		this.lastViewedFile = null;
 		this.sides.clear();
 		this.setPanelOpen(false);
 		this.render();
@@ -134,8 +158,9 @@ class BranchCompare {
 	 * Stop comparing the branches without reloading the view (e.g. when another repository is loaded).
 	 */
 	public reset() {
-		this.previousBranches = undefined;
+		this.machine.send({ type: 'RESET' });
 		this.left = this.right = this.comparison = null;
+		this.lastViewedFile = null;
 		this.sides.clear();
 		this.setPanelOpen(false);
 		this.render();
@@ -145,27 +170,30 @@ class BranchCompare {
 	 * Are branches being compared.
 	 */
 	public isActive() {
-		return this.previousBranches !== undefined;
+		return this.machine.status !== 'inactive';
 	}
 
 	/**
 	 * Get the serialisable state of the comparison, or NULL if no comparison is active.
 	 */
-	public getState(): { left: string, right: string, previousBranches: string[] | null, mode: 'left' | 'right' | 'both', fromMergeBase: boolean } | null {
-		if (this.previousBranches === undefined || this.left === null || this.right === null) return null;
-		return { left: this.left, right: this.right, previousBranches: this.previousBranches, mode: this.mode, fromMergeBase: this.fromMergeBase };
+	public getState(): { left: string, right: string, previousBranches: string[] | null, mode: 'left' | 'right' | 'both', fromMergeBase: boolean, lastViewedFile: string | null } | null {
+		const cur = this.machine.state;
+		if (cur.status === 'inactive' || this.left === null || this.right === null) return null;
+		return { left: this.left, right: this.right, previousBranches: cur.previousBranches, mode: this.mode, fromMergeBase: this.fromMergeBase, lastViewedFile: this.lastViewedFile };
 	}
 
 	/**
 	 * Restore a previously active branch comparison.
 	 */
-	public restoreState(state: { left: string, right: string, previousBranches: string[] | null, mode: 'left' | 'right' | 'both', fromMergeBase: boolean } | null | undefined) {
+	public restoreState(state: { left: string, right: string, previousBranches: string[] | null, mode: 'left' | 'right' | 'both', fromMergeBase: boolean, lastViewedFile?: string | null } | null | undefined) {
 		if (!state || typeof state.left !== 'string' || typeof state.right !== 'string') return;
-		this.previousBranches = state.previousBranches;
+		this.machine.send({ type: 'RESET' });
+		this.machine.send({ type: 'START', previousBranches: state.previousBranches });
 		this.left = state.left;
 		this.right = state.right;
 		this.mode = state.mode || 'both';
 		this.fromMergeBase = typeof state.fromMergeBase === 'boolean' ? state.fromMergeBase : true;
+		this.lastViewedFile = typeof state.lastViewedFile === 'string' ? state.lastViewedFile : null;
 		this.comparison = null;
 		this.fileChanges = [];
 		this.sides.clear();
@@ -226,8 +254,9 @@ class BranchCompare {
 	 */
 	private render() {
 		const elem = document.getElementById('compareBar')!;
-		alterClass(elem, CLASS_ACTIVE, this.previousBranches !== undefined);
-		if (this.previousBranches === undefined || this.left === null || this.right === null) {
+		const active = this.isActive();
+		alterClass(elem, CLASS_ACTIVE, active);
+		if (!active || this.left === null || this.right === null) {
 			elem.innerHTML = '';
 			return;
 		}
@@ -245,7 +274,7 @@ class BranchCompare {
 				segment('right', t('Only in {0}', escapeHtml(this.right)), comparison.rightOnly.length) +
 				segment('both', t('Both'), comparison.leftOnly.length + comparison.rightOnly.length) + '</span>') +
 			'<span class="compareSpacer"></span>' +
-			'<button type="button" class="compareBtn" data-compare="pickCommits" title="' + t('Pick specific commits on each branch to compare') + '">' + SVG_ICONS.compare + t('Pick Commits') + ELLIPSIS + '</button>' +
+			(comparison !== null ? '<button type="button" class="compareBtn" data-compare="pickCommits">' + SVG_ICONS.compare + t('Pick Commits') + ELLIPSIS + '</button>' : '') +
 			(comparison !== null ? '<button type="button" class="compareBtn' + (this.panelOpen ? ' ' + CLASS_ACTIVE : '') + '" data-compare="files">' + SVG_ICONS.fileList + t('Changed Files') + ' <b>' + this.fileChanges.length + '</b></button>' : '') +
 			'<button type="button" class="compareBtn" data-compare="exit">' + SVG_ICONS.close + t('Exit Comparison') + '</button>';
 	}
@@ -316,12 +345,14 @@ class BranchCompare {
 			(comparison.mergeBase !== null ? '<label class="compareFromBase"><input type="checkbox" data-panel="fromMergeBase"' + (this.fromMergeBase ? ' checked' : '') + '><span class="customCheckbox"></span>' + t('Compare from the merge base (A...B)') + '</label>' : '') +
 			'<div class="comparePanelFiles">' + (this.fileChanges.length > 0 ? this.fileChanges.map((file, index) => {
 			const slash = file.newFilePath.lastIndexOf('/');
-			return '<button type="button" class="comparePanelFile" data-index="' + index + '" title="' + escapeHtml(file.newFilePath) + '"><span class="comparePanelStatus status' + file.type + '">' + file.type + '</span>' +
+			return '<button type="button" class="comparePanelFile' + (file.newFilePath === this.lastViewedFile ? ' ' + CLASS_LAST_VIEWED_FILE : '') + '" data-index="' + index + '" title="' + escapeHtml(file.newFilePath) + '"><span class="comparePanelStatus status' + file.type + '">' + file.type + '</span>' +
 					'<span class="comparePanelFileName">' + escapeHtml(file.newFilePath.substring(slash + 1)) + ' <span>' + escapeHtml(file.type === GG.GitFileStatus.Renamed ? t('{0} (from {1})', file.newFilePath.substring(0, slash + 1), file.oldFilePath) : file.newFilePath.substring(0, slash + 1)) + '</span></span>' +
 					(file.additions !== null && file.deletions !== null ? '<span class="comparePanelStats"><span class="fileTreeFileAdd">+' + file.additions + '</span> <span class="fileTreeFileDel">−' + file.deletions + '</span></span>' : '') + '</button>';
 		}).join('') : '<div class="comparePanelEmpty">' + t('No files are changed.') + '</div>') + '</div>' +
 			'<div class="comparePanelActions">' +
 			(this.fileChanges.length > 0 ? '<button type="button" class="cdvActionBtn primary" data-panel="openAll">' + MENU_ICONS.diff + t('Open All Changes') + '</button>' : '') +
+			(this.fileChanges.length > 0 ? '<button type="button" class="cdvActionBtn" data-panel="aiReview">' + MENU_ICONS.sparkle + t('AI Code Review') + '</button>' : '') +
+			'<button type="button" class="cdvActionBtn" data-panel="releaseNotes">' + MENU_ICONS.sparkle + t('AI PR / Release Notes') + '</button>' +
 			(canCreatePullRequest ? '<button type="button" class="cdvActionBtn" data-panel="pullRequest">' + MENU_ICONS.pullRequest + t('Create Pull Request') + ELLIPSIS + '</button>' : '') +
 			'<button type="button" class="cdvActionBtn" data-panel="copy">' + MENU_ICONS.copy + t('Copy Summary') + '</button></div>';
 	}
@@ -334,6 +365,13 @@ class BranchCompare {
 		if (fileElem !== null) {
 			const file = this.fileChanges[parseInt(fileElem.dataset.index!)];
 			if (typeof file === 'undefined') return;
+			this.lastViewedFile = file.newFilePath;
+			const panel = document.getElementById('comparePanel');
+			if (panel !== null) {
+				alterClassOfCollection(<HTMLCollectionOf<HTMLElement>>panel.getElementsByClassName(CLASS_LAST_VIEWED_FILE), CLASS_LAST_VIEWED_FILE, false);
+			}
+			fileElem.classList.add(CLASS_LAST_VIEWED_FILE);
+			this.view.saveStateNow();
 			sendMessage({ command: 'viewDiff', repo: this.view.currentRepo, fromHash: fromHash, toHash: comparison.leftHash, oldFilePath: file.oldFilePath, newFilePath: file.newFilePath, type: file.type });
 		} else if (actionElem !== null) {
 			switch (actionElem.dataset.panel) {
@@ -342,6 +380,12 @@ class BranchCompare {
 					break;
 				case 'openAll':
 					sendMessage({ command: 'openAllChanges', repo: this.view.currentRepo, title: this.left + ' ↔ ' + this.right, fromHash: fromHash, toHash: comparison.leftHash, fileChanges: this.fileChanges });
+					break;
+				case 'aiReview':
+					sendMessage({ command: 'openCompanionFeature', feature: 'aiReview', repo: this.view.currentRepo, mode: 'range', fromRef: fromHash, toRef: comparison.leftHash, label: this.left + ' ↔ ' + this.right });
+					break;
+				case 'releaseNotes':
+					sendMessage({ command: 'openCompanionFeature', feature: 'aiReleaseNotes', repo: this.view.currentRepo, fromRef: fromHash, toRef: comparison.leftHash, label: this.right + ' → ' + this.left });
 					break;
 				case 'pullRequest': {
 					const config = this.view.gitRepos[this.view.currentRepo].pullRequestConfig;
