@@ -312,12 +312,13 @@
       <div class="settings-layout">
         <nav class="settings-nav" role="tablist">
           <button type="button" class="settings-nav-item active" data-section="appearance"><span class="icon-slot" id="navAppearanceIcon" data-icon="sun"></span><span data-i18n="navAppearance">外观</span></button>
+          <button type="button" class="settings-nav-item" data-section="graph"><span class="icon-slot" data-icon="branch"></span><span data-i18n="navGraph">图谱与工作台</span></button>
           <button type="button" class="settings-nav-item" data-section="tools"><span class="icon-slot" data-icon="terminal"></span><span data-i18n="navTools">终端与编辑器</span></button>
           <button type="button" class="settings-nav-item" data-section="ai"><span class="icon-slot" data-icon="sparkle"></span><span data-i18n="navAi">AI</span></button>
         </nav>
         <div class="settings-modal-body">
           <section class="settings-section active" data-section="appearance">
-            <h4 data-i18n="appearanceAndGraph">界面与图形</h4>
+            <h4 data-i18n="appearanceAndGraph">界面与外观</h4>
             <div class="form-row-2">
               <label><span data-i18n="displayLang">界面语言</span>
                 <select id="cfgLanguage">
@@ -334,6 +335,60 @@
                 </select>
               </label>
             </div>
+
+            <div class="icon-picker-section settings-feature-card" id="iconColorStyleSection">
+              <div class="icon-picker-head">
+                <h4 data-i18n="iconColorStyleHeader" style="margin:0;">图标配色风格</h4>
+                <div class="icon-mode-seg" id="cfgIconColorStyleSeg" role="radiogroup" aria-label="Icon Color Style">
+                  <button type="button" class="icon-mode-btn active" data-icon-color="monochrome" data-i18n="iconColorMono">单色</button>
+                  <button type="button" class="icon-mode-btn" data-icon-color="colorful" data-i18n="iconColorColorful">彩色</button>
+                </div>
+              </div>
+              <p class="settings-hint" data-i18n="iconColorStyleHint" style="margin:4px 0 8px;">开启「彩色」后，顶栏、侧边栏、提交图谱与悬浮操作栏使用语义配色；AI 图标在两种模式下均保持彩色。</p>
+              <div class="icon-color-live-preview" aria-label="Icon Color Preview">
+                <span class="icon-color-chip"><span class="icon-slot" data-icon="branch"></span><span>Branch</span></span>
+                <span class="icon-color-chip"><span class="icon-slot" data-icon="commit"></span><span>Commit</span></span>
+                <span class="icon-color-chip"><span class="icon-slot" data-icon="folder"></span><span>Files</span></span>
+                <span class="icon-color-chip"><span class="icon-slot" data-icon="terminal"></span><span>Shell</span></span>
+                <span class="icon-color-chip"><span class="icon-slot" data-icon="layers"></span><span>Tools</span></span>
+                <span class="icon-color-chip"><span class="icon-slot" data-icon="sparkle"></span><span>AI</span></span>
+              </div>
+            </div>
+
+            <div class="icon-picker-section settings-feature-card" id="liquidGlassSection">
+              <div class="icon-picker-head">
+                <h4 data-i18n="liquidGlassHeader" style="margin:0;">液态玻璃外观 (macOS 27 Liquid Glass)</h4>
+                <div class="icon-mode-seg" id="cfgLiquidGlassSeg" role="radiogroup" aria-label="Liquid Glass Appearance">
+                  <button type="button" class="icon-mode-btn active" data-glass-mode="auto" data-i18n="glassAuto">自动</button>
+                  <button type="button" class="icon-mode-btn" data-glass-mode="on" data-i18n="glassOn">开启</button>
+                  <button type="button" class="icon-mode-btn" data-glass-mode="off" data-i18n="glassOff">关闭</button>
+                </div>
+              </div>
+              <p class="settings-hint" data-i18n="liquidGlassHint" style="margin:4px 0 0;">适配 macOS 26/27 液态玻璃材质：原生窗口通透毛玻璃、悬浮半透明侧边栏与高光边缘；系统开启“降低透明度”时自动降级。</p>
+            </div>
+
+            <div class="icon-picker-section" id="appIconPickerSection">
+              <div class="icon-picker-head">
+                <h4 data-i18n="appIconHeader" style="margin:0;">应用图标</h4>
+                <div class="icon-mode-seg" id="cfgIconThemeSeg" role="radiogroup" aria-label="Icon Brightness Mode">
+                  <button type="button" class="icon-mode-btn active" data-icon-theme="auto" data-i18n="iconThemeAuto">跟随主题</button>
+                  <button type="button" class="icon-mode-btn" data-icon-theme="dark" data-i18n="iconThemeDark">深色图标</button>
+                  <button type="button" class="icon-mode-btn" data-icon-theme="light" data-i18n="iconThemeLight">浅色图标</button>
+                </div>
+              </div>
+              <p class="settings-hint" data-i18n="appIconHint" style="margin:4px 0 8px;">点击任意款式立即应用到顶栏、浏览器标签页与桌面 Dock / 任务栏图标（每款均含深浅双色）。</p>
+              <div id="cfgIconStyleGrid" class="icon-style-grid"></div>
+            </div>
+
+            <div class="settings-inline-actions" style="margin-top:10px;">
+              <button type="button" id="btnOpenFullGraphSettings" class="mini-btn primary"><span class="icon-slot" data-icon="settings"></span><span data-i18n="openFullGraphSettings">打开完整图谱与实时预览设置…</span></button>
+              <button type="button" id="btnOpenLogsFromSettings" class="mini-btn"><span class="icon-slot" data-icon="terminal"></span><span data-i18n="viewLogs">查看诊断日志</span></button>
+              <button type="button" id="btnRestoreHistoryBackup" class="mini-btn"><span class="icon-slot" data-icon="undo"></span><span data-i18n="restoreHistoryBackup">恢复历史备份</span></button>
+            </div>
+          </section>
+
+          <section class="settings-section" data-section="graph">
+            <h4 data-i18n="graphVisualHeader">提交图谱与差异视图</h4>
             <div class="form-row-2">
               <label><span data-i18n="colourPreset">图形配色预设</span>
                 <select id="cfgColourPreset">
@@ -359,30 +414,59 @@
                   <option value="Avatar">Avatar</option>
                 </select>
               </label>
+              <label><span data-i18n="graphDensity">行高密度</span>
+                <select id="cfgGraphDensity">
+                  <option value="Comfortable" data-i18n="densityComfortable">舒适 (Comfortable)</option>
+                  <option value="Compact" data-i18n="densityCompact">紧凑 (Compact)</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-row-2">
               <label><span data-i18n="diffSyntax">Diff 语法高亮</span>
                 <select id="cfgSyntaxHighlight">
                   <option value="on" data-i18n="optOn">开启</option>
                   <option value="off" data-i18n="optOff">关闭</option>
                 </select>
               </label>
+              <label><span data-i18n="maxVisibleRefs">每行最多显示引用数（0 = 不限）</span>
+                <input type="number" id="cfgMaxVisibleRefs" min="0" max="20" step="1" />
+              </label>
             </div>
 
-            <div class="icon-picker-section" id="appIconPickerSection">
-              <div class="icon-picker-head">
-                <h4 data-i18n="appIconHeader" style="margin:0;">应用图标</h4>
-                <div class="icon-mode-seg" id="cfgIconThemeSeg" role="radiogroup" aria-label="Icon Brightness Mode">
-                  <button type="button" class="icon-mode-btn active" data-icon-theme="auto" data-i18n="iconThemeAuto">跟随主题</button>
-                  <button type="button" class="icon-mode-btn" data-icon-theme="dark" data-i18n="iconThemeDark">深色图标</button>
-                  <button type="button" class="icon-mode-btn" data-icon-theme="light" data-i18n="iconThemeLight">浅色图标</button>
-                </div>
-              </div>
-              <p class="settings-hint" data-i18n="appIconHint" style="margin:4px 0 8px;">点击任意款式立即应用到顶栏、浏览器标签页与桌面 Dock / 任务栏图标（每款均含深浅双色）。</p>
-              <div id="cfgIconStyleGrid" class="icon-style-grid"></div>
+            <div class="settings-check-grid">
+              <label class="inline-check"><input type="checkbox" id="cfgGraphOverviewBar" /> <span data-i18n="optGraphOverviewBar">显示顶部图谱概览栏</span></label>
+              <label class="inline-check"><input type="checkbox" id="cfgGraphMinimap" /> <span data-i18n="optGraphMinimap">显示分支活跃度迷你图</span></label>
+              <label class="inline-check"><input type="checkbox" id="cfgGraphScrollMarkers" /> <span data-i18n="optGraphScrollMarkers">显示滚动条分支/PR 标记</span></label>
+              <label class="inline-check"><input type="checkbox" id="cfgGraphUpstreamStatus" /> <span data-i18n="optGraphUpstreamStatus">显示上游领先/落后计数 (↑↓)</span></label>
+              <label class="inline-check"><input type="checkbox" id="cfgGraphGhostRefs" /> <span data-i18n="optGraphGhostRefs">提交行悬停显示快捷创建分支/标签</span></label>
+              <label class="inline-check"><input type="checkbox" id="cfgGraphMuteMerge" /> <span data-i18n="optGraphMuteMerge">淡化合并提交行</span></label>
             </div>
 
-            <div class="settings-inline-actions" style="margin-top:10px;">
-              <button type="button" id="btnOpenLogsFromSettings" class="mini-btn"><span class="icon-slot" data-icon="terminal"></span><span data-i18n="viewLogs">查看诊断日志</span></button>
-              <button type="button" id="btnRestoreHistoryBackup" class="mini-btn"><span class="icon-slot" data-icon="undo"></span><span data-i18n="restoreHistoryBackup">恢复历史备份</span></button>
+            <h4 data-i18n="launchpadSettingsHeader">PR Launchpad 状态胶囊</h4>
+            <div class="settings-check-grid">
+              <label class="inline-check"><input type="checkbox" id="cfgLpEnabled" /> <span data-i18n="optLpEnabled">显示顶栏 PR 工作台状态胶囊</span></label>
+              <label class="inline-check"><input type="checkbox" id="cfgLpUseColors" /> <span data-i18n="optLpUseColors">阻塞 / 待评审 PR 使用告警高亮色</span></label>
+            </div>
+            <div class="form-row-2">
+              <label><span data-i18n="lpLabelMode">胶囊文字显示方式</span>
+                <select id="cfgLpLabel">
+                  <option value="item" data-i18n="lpLabelItem">摘要文本（如 待评审 / 可合并）</option>
+                  <option value="counts" data-i18n="lpLabelCounts">仅分组数字计数</option>
+                  <option value="false" data-i18n="lpLabelIconOnly">仅显示图标</option>
+                </select>
+              </label>
+              <label><span data-i18n="lpIconMode">胶囊图标样式</span>
+                <select id="cfgLpIcon">
+                  <option value="default" data-i18n="lpIconDefault">火箭图标（随配色风格切换多色）</option>
+                  <option value="group" data-i18n="lpIconGroup">随最高优先级 PR 状态切换图标</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="settings-inline-actions" style="margin-top:6px;">
+              <button type="button" id="btnOpenFullGraphSettingsFromGraph" class="mini-btn primary"><span class="icon-slot" data-icon="settings"></span><span data-i18n="openFullGraphSettings">打开完整图谱与实时预览设置…</span></button>
+              <button type="button" id="btnOpenStatusBarPreview" class="mini-btn"><span class="icon-slot" data-icon="layers"></span><span data-i18n="openStatusBarPreview">状态栏与 Launchpad 实时预览…</span></button>
+              <button type="button" id="btnOpenCdvActionsFromSettings" class="mini-btn"><span class="icon-slot" data-icon="commit"></span><span data-i18n="openCdvActionsBtn">自定义提交操作按钮…</span></button>
             </div>
           </section>
 

@@ -1,10 +1,18 @@
 (function () {
   var targetOrigin = window.location.origin || '*';
 
+  function applyLiquidGlass(enabled) {
+    if (!document.body) return;
+    document.body.classList.toggle('gm-liquid-glass', !!enabled);
+  }
+
   function applyTheme(theme) {
     if (!document.body) return;
     document.body.classList.remove('vscode-dark', 'vscode-light');
     document.body.classList.add(theme === 'light' ? 'vscode-light' : 'vscode-dark');
+    try {
+      applyLiquidGlass(localStorage.getItem('gitmap.liquidGlassResolved') === '1');
+    } catch (_) {}
   }
 
   var initialTheme = 'system';
@@ -27,6 +35,9 @@
     if (window.location.origin && ev.origin && ev.origin !== window.location.origin) return;
     if (ev.data && ev.data.__gitmapTheme) {
       applyTheme(ev.data.__gitmapTheme);
+      ev.stopImmediatePropagation();
+    } else if (ev.data && typeof ev.data.__gitmapLiquidGlass === 'boolean') {
+      applyLiquidGlass(ev.data.__gitmapLiquidGlass);
       ev.stopImmediatePropagation();
     }
   }, true);

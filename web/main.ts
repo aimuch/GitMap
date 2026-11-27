@@ -520,6 +520,22 @@ class GitGraphView {
 				if (fp) this.findWidget.setQuery('file:' + fp);
 			}
 		});
+		window.addEventListener('gitmap-icon-style', (ev: Event) => {
+			const detail = (<CustomEvent<{ style?: string }>>ev).detail;
+			const style = detail && typeof detail.style === 'string' ? detail.style : 'monochrome';
+			applyIconColorStyle(style);
+			this.settingsWidget.syncIconColorStyle(style);
+		});
+		window.addEventListener('gitmap-open-settings', (ev: Event) => {
+			const detail = (<CustomEvent<{ category?: string }>>ev).detail;
+			const category = detail && typeof detail.category === 'string' ? detail.category : '';
+			this.settingsWidget.openCategory(this.currentRepo, category);
+		});
+		window.addEventListener('gitmap-open-cdv-actions', (ev: Event) => {
+			const detail = (<CustomEvent<{ mode?: string }>>ev).detail;
+			const mode = detail && detail.mode === 'row' ? 'row' : 'cdv';
+			this.openCdvActionsCustomizer(mode);
+		});
 	}
 
 

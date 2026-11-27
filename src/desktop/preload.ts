@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('gitMapDesktop', {
     ipcRenderer.invoke('gitmap:pickLocalFile', filters),
   setNativeTheme: (theme: 'system' | 'dark' | 'light'): Promise<void> =>
     ipcRenderer.invoke('gitmap:setNativeTheme', theme),
+  setLiquidGlass: (pref: 'auto' | 'on' | 'off'): Promise<void> =>
+    ipcRenderer.invoke('gitmap:setLiquidGlass', pref),
   setAppIcon: (opts: { style: string; iconTheme: 'auto' | 'dark' | 'light'; uiTheme?: 'system' | 'dark' | 'light'; persist?: boolean }): Promise<void> =>
     ipcRenderer.invoke('gitmap:setAppIcon', opts),
   closeOrHideWindow: (): Promise<void> => ipcRenderer.invoke('gitmap:closeOrHideWindow'),

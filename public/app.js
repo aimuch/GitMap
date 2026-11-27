@@ -161,7 +161,41 @@
       commitHistoryPane: '提交历史 (Git Map)',
       repoFilesPane: '仓库文件资源管理器',
       combinedSplitTab: 'Git Map · 仓库文件',
-      inlinePreview: '内联预览'
+      inlinePreview: '内联预览',
+      navGraph: '图谱与工作台',
+      iconColorStyleHeader: '图标配色风格',
+      iconColorStyleHint: '开启「彩色」后，顶栏、侧边栏、提交图谱与悬浮操作栏使用语义配色；AI 图标在两种模式下均保持彩色。',
+      iconColorMono: '单色',
+      iconColorColorful: '彩色',
+      liquidGlassHeader: '液态玻璃外观 (macOS 27 Liquid Glass)',
+      liquidGlassHint: '适配 macOS 26/27 液态玻璃材质：原生窗口通透毛玻璃、悬浮半透明侧边栏与高光边缘；系统开启“降低透明度”时自动降级。',
+      glassAuto: '自动',
+      glassOn: '开启',
+      glassOff: '关闭',
+      openFullGraphSettings: '打开完整图谱与实时预览设置…',
+      graphVisualHeader: '提交图谱与差异视图',
+      graphDensity: '行高密度',
+      densityComfortable: '舒适 (Comfortable)',
+      densityCompact: '紧凑 (Compact)',
+      maxVisibleRefs: '每行最多显示引用数（0 = 不限）',
+      optGraphOverviewBar: '显示顶部图谱概览栏',
+      optGraphMinimap: '显示分支活跃度迷你图',
+      optGraphScrollMarkers: '显示滚动条分支/PR 标记',
+      optGraphUpstreamStatus: '显示上游领先/落后计数 (↑↓)',
+      optGraphGhostRefs: '提交行悬停显示快捷创建分支/标签',
+      optGraphMuteMerge: '淡化合并提交行',
+      launchpadSettingsHeader: 'PR Launchpad 状态胶囊',
+      optLpEnabled: '显示顶栏 PR 工作台状态胶囊',
+      optLpUseColors: '阻塞 / 待评审 PR 使用告警高亮色',
+      lpLabelMode: '胶囊文字显示方式',
+      lpLabelItem: '摘要文本（如 待评审 / 可合并）',
+      lpLabelCounts: '仅分组数字计数',
+      lpLabelIconOnly: '仅显示图标',
+      lpIconMode: '胶囊图标样式',
+      lpIconDefault: '火箭图标（随配色风格切换多色）',
+      lpIconGroup: '随最高优先级 PR 状态切换图标',
+      openStatusBarPreview: '状态栏与 Launchpad 实时预览…',
+      openCdvActionsBtn: '自定义提交操作按钮…'
     },
     en: {
       addLocal: 'Local Repo',
@@ -321,7 +355,41 @@
       commitHistoryPane: 'Commit History (Git Map)',
       repoFilesPane: 'Repository File Explorer',
       combinedSplitTab: 'Git Map · Files',
-      inlinePreview: 'Inline Preview'
+      inlinePreview: 'Inline Preview',
+      navGraph: 'Graph & Workbench',
+      iconColorStyleHeader: 'Icon Color Style',
+      iconColorStyleHint: 'In "Colorful" mode, semantic multi-tone accents light up the toolbar, sidebar, graph, and floating controls; AI icons always stay colorful.',
+      iconColorMono: 'Monochrome',
+      iconColorColorful: 'Colorful',
+      liquidGlassHeader: 'Liquid Glass (macOS 27)',
+      liquidGlassHint: 'Native macOS 26/27 under-window vibrancy, floating translucent sidebar, capsule controls, and specular rim highlights (auto-adapts to Reduce Transparency).',
+      glassAuto: 'Auto',
+      glassOn: 'On',
+      glassOff: 'Off',
+      openFullGraphSettings: 'Open Full Graph & Live-Preview Settings…',
+      graphVisualHeader: 'Commit Graph & Diff View',
+      graphDensity: 'Row Density',
+      densityComfortable: 'Comfortable',
+      densityCompact: 'Compact',
+      maxVisibleRefs: 'Max Visible Refs per Commit (0 = Unlimited)',
+      optGraphOverviewBar: 'Show Graph Overview Bar',
+      optGraphMinimap: 'Show Branch Activity Minimap',
+      optGraphScrollMarkers: 'Show Scrollbar Markers',
+      optGraphUpstreamStatus: 'Show Upstream Ahead/Behind Counters (↑↓)',
+      optGraphGhostRefs: 'Show Quick +Branch / +Tag on Row Hover',
+      optGraphMuteMerge: 'Dim Merge Commits',
+      launchpadSettingsHeader: 'PR Launchpad Status Pill',
+      optLpEnabled: 'Show Top Bar PR Launchpad Pill',
+      optLpUseColors: 'Highlight Blocked / Needs Review PRs',
+      lpLabelMode: 'Pill Label Display',
+      lpLabelItem: 'Summary Text (e.g. Review / Mergeable)',
+      lpLabelCounts: 'Grouped Numeric Counts Only',
+      lpLabelIconOnly: 'Icon Only',
+      lpIconMode: 'Pill Icon Style',
+      lpIconDefault: 'Rocket Icon (Colorful when enabled)',
+      lpIconGroup: 'Match Highest-Priority PR Bucket',
+      openStatusBarPreview: 'Status Bar & Launchpad Live Preview…',
+      openCdvActionsBtn: 'Customize Commit Action Buttons…'
     }
   };
 
@@ -344,6 +412,9 @@
     theme: 'dark',
     iconStyle: localStorage.getItem('gitmap.iconStyle') || 'classic',
     iconTheme: localStorage.getItem('gitmap.iconTheme') || 'auto',
+    iconColorStyle: localStorage.getItem('gitmap.iconColorStyle') === 'colorful' ? 'colorful' : 'monochrome',
+    liquidGlassPref: ['auto', 'on', 'off'].includes(localStorage.getItem('gitmap.liquidGlassPref') || '') ? localStorage.getItem('gitmap.liquidGlassPref') : 'auto',
+    isMacLiquidGlassHost: false,
     repos: {},
     activeRepo: null,
     sshHosts: [],
@@ -630,6 +701,93 @@
     applyAppIcon();
   }
 
+  function resolveLiquidGlass(pref) {
+    if (pref === 'on') return true;
+    if (pref === 'off') return false;
+    return !!state.isMacLiquidGlassHost;
+  }
+
+  function applyIconColorStyle(style, persist = false) {
+    const next = style === 'colorful' ? 'colorful' : 'monochrome';
+    state.iconColorStyle = next;
+    try {
+      localStorage.setItem('gitmap.iconColorStyle', next);
+    } catch (_) {}
+    document.body.dataset.iconStyle = next;
+    if (state.settings && typeof state.settings === 'object') {
+      state.settings['git-map.ui.iconColorStyle'] = next;
+    }
+    const seg = document.getElementById('cfgIconColorStyleSeg');
+    if (seg) {
+      seg.querySelectorAll('.icon-mode-btn').forEach((btn) => {
+        btn.classList.toggle('active', btn.getAttribute('data-icon-color') === next);
+      });
+    }
+    document.querySelectorAll('iframe').forEach((frame) => {
+      try {
+        frame.contentWindow.postMessage({ __gitmapIconColorStyle: next }, window.location.origin);
+      } catch (_) {}
+    });
+    window.GitMapV28Workbench?.refreshLaunchpadPill?.(false);
+    if (persist) {
+      rpc('settings:updateBatch', { updates: { 'git-map.ui.iconColorStyle': next } })
+        .then((res) => {
+          if (res && res.settings) state.settings = res.settings;
+        })
+        .catch(() => {});
+    }
+  }
+
+  function applyLiquidGlass(pref, persist = false) {
+    const mode = pref === 'on' || pref === 'off' ? pref : 'auto';
+    state.liquidGlassPref = mode;
+    const active = resolveLiquidGlass(mode);
+    try {
+      localStorage.setItem('gitmap.liquidGlassPref', mode);
+      localStorage.setItem('gitmap.liquidGlassResolved', active ? '1' : '0');
+    } catch (_) {}
+    document.body.classList.toggle('liquid-glass', active);
+    const seg = document.getElementById('cfgLiquidGlassSeg');
+    if (seg) {
+      seg.querySelectorAll('.icon-mode-btn').forEach((btn) => {
+        btn.classList.toggle('active', btn.getAttribute('data-glass-mode') === mode);
+      });
+    }
+    if (desktopApi && desktopApi.setLiquidGlass) {
+      desktopApi.setLiquidGlass(mode).catch(() => {});
+    }
+    document.querySelectorAll('iframe').forEach((frame) => {
+      try {
+        frame.contentWindow.postMessage({ __gitmapLiquidGlass: active }, window.location.origin);
+      } catch (_) {}
+    });
+    if (persist) {
+      rpc('settings:updateBatch', { updates: { 'gitmap.app.liquidGlass': mode } })
+        .then((res) => {
+          if (res && res.settings) state.settings = res.settings;
+        })
+        .catch(() => {});
+    }
+  }
+
+  function openGraphFullSettings(categoryId = '') {
+    document.getElementById('appSettingsModal')?.classList.add('hidden');
+    if (state.wsLayout === 'tabs') activateTab('graph');
+    const frame = document.getElementById('gitMapFrame');
+    if (frame && frame.contentWindow) {
+      frame.contentWindow.postMessage({ __gitmapOpenSettings: String(categoryId || '') }, window.location.origin);
+    }
+  }
+
+  function openGraphCdvActionsCustomizer(mode = 'cdv') {
+    document.getElementById('appSettingsModal')?.classList.add('hidden');
+    if (state.wsLayout === 'tabs') activateTab('graph');
+    const frame = document.getElementById('gitMapFrame');
+    if (frame && frame.contentWindow) {
+      frame.contentWindow.postMessage({ __gitmapOpenCdvActions: mode === 'row' ? 'row' : 'cdv' }, window.location.origin);
+    }
+  }
+
   if (systemDarkQuery) {
     const onSystemThemeChange = () => {
       if (state.themePref === 'system') applyTheme('system');
@@ -846,6 +1004,7 @@
         state.initLoaded = true;
         wsMachine?.send('INIT');
         state.platform = msg.platform || state.platform;
+        state.isMacLiquidGlassHost = !!msg.isMacLiquidGlassHost;
         state.repos = msg.repos || {};
         state.activeRepo = msg.lastActiveRepo || Object.keys(state.repos)[0] || null;
         state.sshHosts = msg.sshHosts || [];
@@ -883,6 +1042,8 @@
         } else {
           applyAppIcon();
         }
+        applyIconColorStyle(state.settings['git-map.ui.iconColorStyle'] === 'colorful' ? 'colorful' : 'monochrome', false);
+        applyLiquidGlass(['auto', 'on', 'off'].includes(state.settings['gitmap.app.liquidGlass']) ? state.settings['gitmap.app.liquidGlass'] : state.liquidGlassPref, false);
         if (state.settings['git-map.language'] === 'Simplified Chinese' || state.settings['git-map.language'] === 'English') {
           const lang = state.settings['git-map.language'] === 'English' ? 'en' : 'zh';
           if (lang !== state.lang) {
@@ -972,6 +1133,10 @@
           state.iconTheme = state.settings['gitmap.app.iconTheme'];
         }
         applyAppIcon();
+        applyIconColorStyle(state.settings['git-map.ui.iconColorStyle'] === 'colorful' ? 'colorful' : 'monochrome', false);
+        if (['auto', 'on', 'off'].includes(state.settings['gitmap.app.liquidGlass'])) {
+          applyLiquidGlass(state.settings['gitmap.app.liquidGlass'], false);
+        }
         window.GitMapV28Workbench?.refreshLaunchpadPill?.(false);
         if (state.settings['git-map.language'] === 'Simplified Chinese' || state.settings['git-map.language'] === 'English') {
           const lang = state.settings['git-map.language'] === 'English' ? 'en' : 'zh';
@@ -8285,10 +8450,24 @@
         state.iconTheme = s['gitmap.app.iconTheme'];
       }
       renderIconStylePicker();
+      applyIconColorStyle(s['git-map.ui.iconColorStyle'] === 'colorful' ? 'colorful' : 'monochrome', false);
+      applyLiquidGlass(['auto', 'on', 'off'].includes(s['gitmap.app.liquidGlass']) ? s['gitmap.app.liquidGlass'] : state.liquidGlassPref, false);
       document.getElementById('cfgColourPreset').value = s['git-map.graph.colourPreset'] || 'Default';
       document.getElementById('cfgGraphStyle').value = s['git-map.graph.style'] || 'rounded';
       document.getElementById('cfgNodeStyle').value = s['git-map.graph.nodeStyle'] || 'Dot';
+      document.getElementById('cfgGraphDensity').value = s['git-map.graph.density'] || 'Comfortable';
       document.getElementById('cfgSyntaxHighlight').value = s['gitmap.diff.syntaxHighlight'] === false ? 'off' : 'on';
+      document.getElementById('cfgMaxVisibleRefs').value = String(Number.isFinite(Number(s['git-map.graph.maxVisibleRefsPerCommit'])) ? Number(s['git-map.graph.maxVisibleRefsPerCommit']) : 0);
+      document.getElementById('cfgGraphOverviewBar').checked = s['git-map.graph.overviewBar.enabled'] !== false;
+      document.getElementById('cfgGraphMinimap').checked = s['git-map.graph.minimap'] !== false;
+      document.getElementById('cfgGraphScrollMarkers').checked = s['git-map.graph.scrollMarkers.enabled'] !== false;
+      document.getElementById('cfgGraphUpstreamStatus').checked = s['git-map.graph.showUpstreamStatus'] !== false;
+      document.getElementById('cfgGraphGhostRefs').checked = s['git-map.graph.showGhostRefsOnRowHover'] !== false;
+      document.getElementById('cfgGraphMuteMerge').checked = s['git-map.repository.commits.mute.mergeCommits'] === true;
+      document.getElementById('cfgLpEnabled').checked = s['git-map.launchpad.indicator.enabled'] !== false;
+      document.getElementById('cfgLpUseColors').checked = s['git-map.launchpad.indicator.useColors'] !== false;
+      document.getElementById('cfgLpLabel').value = ['item', 'counts', 'false'].includes(String(s['git-map.launchpad.indicator.label'])) ? String(s['git-map.launchpad.indicator.label']) : 'item';
+      document.getElementById('cfgLpIcon').value = s['git-map.launchpad.indicator.icon'] === 'group' ? 'group' : 'default';
       document.getElementById('cfgTerminalCustom').value = s['gitmap.terminal.customCommand'] || '';
       document.getElementById('cfgEditorCustom').value = s['gitmap.editor.customCommand'] || '';
 
@@ -8337,10 +8516,24 @@
       ['gitmap.app.theme', document.getElementById('cfgTheme').value],
       ['gitmap.app.iconStyle', state.iconStyle],
       ['gitmap.app.iconTheme', state.iconTheme],
+      ['git-map.ui.iconColorStyle', state.iconColorStyle],
+      ['gitmap.app.liquidGlass', state.liquidGlassPref],
       ['git-map.graph.colourPreset', document.getElementById('cfgColourPreset').value],
       ['git-map.graph.style', document.getElementById('cfgGraphStyle').value],
       ['git-map.graph.nodeStyle', document.getElementById('cfgNodeStyle').value],
+      ['git-map.graph.density', document.getElementById('cfgGraphDensity').value],
       ['gitmap.diff.syntaxHighlight', nextSyntax],
+      ['git-map.graph.maxVisibleRefsPerCommit', Math.max(0, Math.min(20, parseInt(document.getElementById('cfgMaxVisibleRefs').value || '0', 10) || 0))],
+      ['git-map.graph.overviewBar.enabled', document.getElementById('cfgGraphOverviewBar').checked],
+      ['git-map.graph.minimap', document.getElementById('cfgGraphMinimap').checked],
+      ['git-map.graph.scrollMarkers.enabled', document.getElementById('cfgGraphScrollMarkers').checked],
+      ['git-map.graph.showUpstreamStatus', document.getElementById('cfgGraphUpstreamStatus').checked],
+      ['git-map.graph.showGhostRefsOnRowHover', document.getElementById('cfgGraphGhostRefs').checked],
+      ['git-map.repository.commits.mute.mergeCommits', document.getElementById('cfgGraphMuteMerge').checked],
+      ['git-map.launchpad.indicator.enabled', document.getElementById('cfgLpEnabled').checked],
+      ['git-map.launchpad.indicator.useColors', document.getElementById('cfgLpUseColors').checked],
+      ['git-map.launchpad.indicator.label', document.getElementById('cfgLpLabel').value],
+      ['git-map.launchpad.indicator.icon', document.getElementById('cfgLpIcon').value],
       ['gitmap.terminal.app', document.getElementById('cfgTerminalApp').value],
       ['gitmap.terminal.customCommand', document.getElementById('cfgTerminalCustom').value.trim()],
       ['gitmap.editor.app', document.getElementById('cfgEditorApp').value],
@@ -8406,6 +8599,22 @@
       setAppIconPrefs(state.iconStyle, mode, true);
     });
   });
+  document.querySelectorAll('#cfgIconColorStyleSeg .icon-mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const style = btn.getAttribute('data-icon-color');
+      applyIconColorStyle(style, true);
+    });
+  });
+  document.querySelectorAll('#cfgLiquidGlassSeg .icon-mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const mode = btn.getAttribute('data-glass-mode');
+      applyLiquidGlass(mode, true);
+    });
+  });
+  document.getElementById('btnOpenFullGraphSettings')?.addEventListener('click', () => openGraphFullSettings('commit-graph'));
+  document.getElementById('btnOpenFullGraphSettingsFromGraph')?.addEventListener('click', () => openGraphFullSettings('commit-graph'));
+  document.getElementById('btnOpenStatusBarPreview')?.addEventListener('click', () => openGraphFullSettings('status-bar-item'));
+  document.getElementById('btnOpenCdvActionsFromSettings')?.addEventListener('click', () => openGraphCdvActionsCustomizer('cdv'));
   const brandLogoBtn = document.getElementById('brandLogoBtn');
   if (brandLogoBtn) {
     brandLogoBtn.addEventListener('click', () => {
@@ -9792,9 +10001,24 @@
     refreshGraphView,
     refreshRepoGitStatus,
     applyTheme,
+    applyIconColorStyle,
+    applyLiquidGlass,
+    openGraphFullSettings,
     APP_ICON_STYLES,
     setAppIconPrefs
   };
+
+  // Sync theme, iconColorStyle, and Liquid Glass whenever gitMapFrame finishes (re)loading
+  document.getElementById('gitMapFrame')?.addEventListener('load', () => {
+    const frame = document.getElementById('gitMapFrame');
+    if (frame && frame.contentWindow) {
+      try {
+        frame.contentWindow.postMessage({ __gitmapTheme: state.theme }, window.location.origin);
+        frame.contentWindow.postMessage({ __gitmapIconColorStyle: state.iconColorStyle }, window.location.origin);
+        frame.contentWindow.postMessage({ __gitmapLiquidGlass: resolveLiquidGlass(state.liquidGlassPref) }, window.location.origin);
+      } catch (_) {}
+    }
+  });
 
   // Initialize UI
   document.querySelectorAll('[data-icon]').forEach((el) => {
@@ -9802,6 +10026,8 @@
     if (ICONS[name]) el.innerHTML = ICONS[name];
   });
   applyTheme(state.themePref);
+  applyIconColorStyle(state.iconColorStyle, false);
+  applyLiquidGlass(state.liquidGlassPref, false);
   applyLanguageUI();
   activateTab(state.activeTabId);
   connectWs();

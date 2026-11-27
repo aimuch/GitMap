@@ -2,11 +2,25 @@
   var STATE_KEY = 'gitmap.webview.state';
   var targetOrigin = window.location.origin || '*';
 
+  function applyIconColorStyle(style) {
+    if (!document.body) return;
+    document.body.dataset.iconStyle = style === 'colorful' ? 'colorful' : 'monochrome';
+  }
+
+  function applyLiquidGlass(enabled) {
+    if (!document.body) return;
+    document.body.classList.toggle('gm-liquid-glass', !!enabled);
+  }
+
   function applyTheme(theme) {
     if (!document.body) return;
     document.body.classList.add('gitmap-standalone');
     document.body.classList.remove('vscode-dark', 'vscode-light');
     document.body.classList.add(theme === 'light' ? 'vscode-light' : 'vscode-dark');
+    try {
+      applyIconColorStyle(localStorage.getItem('gitmap.iconColorStyle') || 'monochrome');
+      applyLiquidGlass(localStorage.getItem('gitmap.liquidGlassResolved') === '1');
+    } catch (_) {}
   }
 
   var initialTheme = 'system';
@@ -29,6 +43,19 @@
     if (window.location.origin && ev.origin && ev.origin !== window.location.origin) return;
     if (ev.data && ev.data.__gitmapTheme) {
       applyTheme(ev.data.__gitmapTheme);
+      ev.stopImmediatePropagation();
+    } else if (ev.data && typeof ev.data.__gitmapIconColorStyle === 'string') {
+      applyIconColorStyle(ev.data.__gitmapIconColorStyle);
+      window.dispatchEvent(new CustomEvent('gitmap-icon-style', { detail: { style: ev.data.__gitmapIconColorStyle } }));
+      ev.stopImmediatePropagation();
+    } else if (ev.data && typeof ev.data.__gitmapLiquidGlass === 'boolean') {
+      applyLiquidGlass(ev.data.__gitmapLiquidGlass);
+      ev.stopImmediatePropagation();
+    } else if (ev.data && typeof ev.data.__gitmapOpenSettings === 'string') {
+      window.dispatchEvent(new CustomEvent('gitmap-open-settings', { detail: { category: ev.data.__gitmapOpenSettings } }));
+      ev.stopImmediatePropagation();
+    } else if (ev.data && typeof ev.data.__gitmapOpenCdvActions === 'string') {
+      window.dispatchEvent(new CustomEvent('gitmap-open-cdv-actions', { detail: { mode: ev.data.__gitmapOpenCdvActions } }));
       ev.stopImmediatePropagation();
     } else if (ev.data && ev.data.__gitmapRevealLastViewed) {
       window.dispatchEvent(new CustomEvent('gitmap-reveal-last-viewed', {

@@ -202,4 +202,34 @@ describe('Ported v2.9 Features', () => {
     assert.equal(zhBundle['Monochrome'], '单色');
     assert.equal(zhBundle['Live Preview: Custom Remotes'], '实时预览：自定义远程');
   });
+
+  it('wires App Settings icon color style, graph controls, and macOS 27 Liquid Glass end-to-end', () => {
+    const rootDir = path.resolve(__dirname, '..', '..');
+    const indexHtml = fs.readFileSync(path.join(rootDir, 'public', 'index.html'), 'utf8');
+    for (const id of [
+      'cfgIconColorStyleSeg',
+      'cfgLiquidGlassSeg',
+      'btnOpenFullGraphSettings',
+      'data-section="graph"',
+      'cfgGraphDensity',
+      'cfgLpEnabled'
+    ]) {
+      assert.ok(indexHtml.includes(id), `public/index.html should contain ${id}`);
+    }
+
+    const bridgeJs = fs.readFileSync(path.join(rootDir, 'public', 'webview-bridge.js'), 'utf8');
+    for (const msgKey of [
+      '__gitmapIconColorStyle',
+      '__gitmapLiquidGlass',
+      '__gitmapOpenSettings',
+      '__gitmapOpenCdvActions'
+    ]) {
+      assert.ok(bridgeJs.includes(msgKey), `public/webview-bridge.js should handle ${msgKey}`);
+    }
+
+    const desktopMainTs = fs.readFileSync(path.join(rootDir, 'src', 'desktop', 'main.ts'), 'utf8');
+    assert.ok(desktopMainTs.includes("'gitmap:setLiquidGlass'"));
+    assert.ok(desktopMainTs.includes("setVibrancy('under-window')"));
+    assert.equal(desktopMainTs.includes('transparent: true'), false, 'use vibrancy + transparent backgroundColor without transparent:true so macOS shadows & rounded corners stay intact');
+  });
 });

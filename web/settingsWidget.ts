@@ -255,6 +255,44 @@ class SettingsWidget {
 		}
 	}
 
+	/**
+	 * Open the Settings Widget (or jump directly to a category ID when already open).
+	 */
+	public openCategory(currentRepo: string, categoryId: string) {
+		if (!this.isVisible()) {
+			this.show(currentRepo);
+		}
+		if (categoryId) {
+			if (this.searchQuery.trim() !== '') {
+				this.searchQuery = '';
+				this.searchInputElem.value = '';
+				document.getElementById('settingsSearchClear')?.classList.add('hidden');
+				this.applySearchFilter();
+			}
+			requestAnimationFrame(() => {
+				document.getElementById('settingsCategory-' + categoryId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			});
+		}
+	}
+
+	/**
+	 * Sync the `ui.iconColorStyle` setting when changed from the outer standalone Settings modal.
+	 */
+	public syncIconColorStyle(style: string) {
+		const next = style === 'colorful' ? 'colorful' : 'monochrome';
+		this.settingValues['ui.iconColorStyle'] = next;
+		applyIconColorStyle(next);
+		if (!this.isVisible()) return;
+		this.contentsElem.querySelectorAll<HTMLElement>('.settingsSegmentedCtl[data-skey="ui.iconColorStyle"]').forEach((ctl) => {
+			ctl.querySelectorAll<HTMLElement>('.settingsSegment').forEach((seg) => {
+				const selected = seg.dataset.value === next;
+				alterClass(seg, CLASS_SELECTED, selected);
+				seg.setAttribute('aria-checked', selected ? 'true' : 'false');
+			});
+		});
+		this.updateLivePreviews();
+	}
+
 	public processCodingAgentsResponse(agents: ReadonlyArray<GG.CodingAgentStatus>) {
 		this.codingAgents = agents;
 		this.codingAgentsLoaded = true;

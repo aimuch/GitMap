@@ -1030,6 +1030,8 @@ export class GitMapServer {
         sshHosts: sshManager.listHosts(),
         settings: getAllStandaloneSettings(),
         platform: process.platform,
+        osRelease: os.release(),
+        isMacLiquidGlassHost: process.platform === 'darwin' && parseInt(os.release().split('.')[0] || '0', 10) >= 25,
         homeDir: os.homedir(),
         canTrash: typeof this.desktopHooks.trashItem === 'function'
       })

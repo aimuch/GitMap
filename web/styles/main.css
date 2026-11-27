@@ -5478,3 +5478,72 @@ body[data-icon-style="colorful"] .settingsStatusBarItemPreview svg.iconFillTone-
 .cdvActionsPreviewChip.primary{border-color:var(--vscode-focusBorder);background:var(--vscode-button-background);color:var(--vscode-button-foreground)}
 .cdvActionsPreviewChip.primary svg{stroke:currentColor}
 .cdvActionsPreviewChip svg{width:12px;height:12px}
+
+/* macOS 27 Liquid Glass Harmonization inside GitMap Graph Webview */
+body.gm-liquid-glass #controls,
+body.gm-liquid-glass #graphOverviewBar{
+	background:rgba(28,31,40,.62);
+	backdrop-filter:blur(22px) saturate(180%);
+	-webkit-backdrop-filter:blur(22px) saturate(180%);
+	border-bottom-color:rgba(255,255,255,.12);
+}
+body.vscode-light.gm-liquid-glass #controls,
+body.vscode-light.gm-liquid-glass #graphOverviewBar{
+	background:rgba(246,248,252,.76);
+	border-bottom-color:rgba(15,23,42,.10);
+}
+body.gm-liquid-glass .controlBtn,
+body.gm-liquid-glass #fetchBtn,
+body.gm-liquid-glass #pullBtn,
+body.gm-liquid-glass #pushBtn,
+body.gm-liquid-glass #scrollToHeadBtn,
+body.gm-liquid-glass .gobPill{
+	border-radius:999px;
+}
+body.gm-liquid-glass #rowActions,
+body.gm-liquid-glass #cdvFileFloatingBar{
+	border-radius:999px;
+	background:rgba(32,36,46,.76);
+	backdrop-filter:blur(20px) saturate(190%);
+	-webkit-backdrop-filter:blur(20px) saturate(190%);
+	border:1px solid rgba(255,255,255,.18);
+	box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 8px 24px rgba(0,0,0,.38);
+}
+body.vscode-light.gm-liquid-glass #rowActions,
+body.vscode-light.gm-liquid-glass #cdvFileFloatingBar{
+	background:rgba(255,255,255,.82);
+	border-color:rgba(15,23,42,.12);
+	box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 8px 22px rgba(15,23,42,.14);
+}
+body.gm-liquid-glass #settingsWidget,
+body.gm-liquid-glass .contextMenu,
+body.gm-liquid-glass .cdvActionsModal,
+body.gm-liquid-glass #dialog{
+	border-radius:14px;
+	background:rgba(30,34,44,.78);
+	backdrop-filter:blur(30px) saturate(195%);
+	-webkit-backdrop-filter:blur(30px) saturate(195%);
+	border-color:rgba(255,255,255,.16);
+	box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 18px 46px rgba(0,0,0,.46);
+}
+body.vscode-light.gm-liquid-glass #settingsWidget,
+body.vscode-light.gm-liquid-glass .contextMenu,
+body.vscode-light.gm-liquid-glass .cdvActionsModal,
+body.vscode-light.gm-liquid-glass #dialog{
+	background:rgba(248,250,255,.84);
+	border-color:rgba(15,23,42,.12);
+	box-shadow:inset 0 1px 0 rgba(255,255,255,.92),0 18px 44px rgba(15,23,42,.16);
+}
+@media (prefers-reduced-transparency:reduce){
+	body.gm-liquid-glass #controls,
+	body.gm-liquid-glass #graphOverviewBar,
+	body.gm-liquid-glass #rowActions,
+	body.gm-liquid-glass #cdvFileFloatingBar,
+	body.gm-liquid-glass #settingsWidget,
+	body.gm-liquid-glass .contextMenu,
+	body.gm-liquid-glass .cdvActionsModal,
+	body.gm-liquid-glass #dialog{
+		backdrop-filter:none !important;
+		-webkit-backdrop-filter:none !important;
+	}
+}

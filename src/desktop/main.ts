@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, safeStorage, shell } from 'electron';
 import { execFile } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import { updateStandaloneSettingsBatch } from '../platform/vscode';
@@ -19,6 +20,30 @@ let queuedBundleIcon: { pngBuffer: Buffer; iconKey: string } | null = null;
 let bundleIconWorkerRunning = false;
 
 const VALID_ICON_STYLES = new Set(['classic', 'metro', 'neon', 'compass', 'isometric', 'minimal']);
+const DARWIN_MAJOR = process.platform === 'darwin' ? parseInt(os.release().split('.')[0] || '0', 10) : 0;
+const IS_MAC_LIQUID_GLASS_HOST = process.platform === 'darwin' && DARWIN_MAJOR >= 25; // macOS 26/27+
+let currentLiquidGlassPref: 'auto' | 'on' | 'off' = 'auto';
+
+function shouldEnableNativeVibrancy(pref: 'auto' | 'on' | 'off'): boolean {
+  if (process.platform !== 'darwin') return false;
+  if (pref === 'off') return false;
+  if (pref === 'on') return true;
+  return IS_MAC_LIQUID_GLASS_HOST;
+}
+
+function applyNativeWindowSurface() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (shouldEnableNativeVibrancy(currentLiquidGlassPref)) {
+    mainWindow.setBackgroundColor('#00000000');
+    mainWindow.setVibrancy('under-window');
+  } else {
+    if (process.platform === 'darwin') {
+      mainWindow.setVibrancy(null);
+    }
+    mainWindow.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#181818' : '#ffffff');
+  }
+}
+
 const currentIconPrefs: {
   style: string;
   iconTheme: 'auto' | 'dark' | 'light';
@@ -187,6 +212,9 @@ function loadSavedIconPrefsFromDisk() {
       if (data['gitmap.app.theme'] === 'dark' || data['gitmap.app.theme'] === 'light' || data['gitmap.app.theme'] === 'system') {
         currentIconPrefs.uiTheme = data['gitmap.app.theme'];
       }
+      if (data['gitmap.app.liquidGlass'] === 'auto' || data['gitmap.app.liquidGlass'] === 'on' || data['gitmap.app.liquidGlass'] === 'off') {
+        currentLiquidGlassPref = data['gitmap.app.liquidGlass'];
+      }
     }
   } catch (_) {}
 }
@@ -258,6 +286,7 @@ process.on('unhandledRejection', (reason) => {
 async function createWindow(authUrl: string, baseOrigin: string) {
   const iconImage = loadNativeIconImage(resolveNativeIconPath());
   const savedBounds = loadSavedBounds();
+  const useNativeGlass = shouldEnableNativeVibrancy(currentLiquidGlassPref);
 
   mainWindow = new BrowserWindow({
     width: savedBounds.width,
@@ -269,10 +298,13 @@ async function createWindow(authUrl: string, baseOrigin: string) {
     minHeight: 620,
     title: 'GitMap',
     ...(iconImage ? { icon: iconImage } : {}),
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#181818' : '#ffffff',
+    backgroundColor: useNativeGlass ? '#00000000' : (nativeTheme.shouldUseDarkColors ? '#181818' : '#ffffff'),
+    ...(useNativeGlass ? { vibrancy: 'under-window' as const, visualEffectState: 'followWindow' as const } : {}),
+    roundedCorners: true,
+    hasShadow: true,
     show: false,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    trafficLightPosition: process.platform === 'darwin' ? { x: 14, y: 15 } : undefined,
+    trafficLightPosition: process.platform === 'darwin' ? { x: 15, y: 15 } : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -564,10 +596,15 @@ ipcMain.handle('gitmap:setNativeTheme', (_event, theme: 'system' | 'dark' | 'lig
   if (theme === 'system' || theme === 'dark' || theme === 'light') {
     currentIconPrefs.uiTheme = theme;
     nativeTheme.themeSource = theme;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#181818' : '#ffffff');
-    }
+    applyNativeWindowSurface();
     applyNativeAppIcon();
+  }
+});
+
+ipcMain.handle('gitmap:setLiquidGlass', (_event, pref: 'auto' | 'on' | 'off') => {
+  if (pref === 'auto' || pref === 'on' || pref === 'off') {
+    currentLiquidGlassPref = pref;
+    applyNativeWindowSurface();
   }
 });
 
@@ -596,9 +633,7 @@ ipcMain.handle(
 );
 
 nativeTheme.on('updated', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#181818' : '#ffffff');
-  }
+  applyNativeWindowSurface();
   applyNativeAppIcon();
 });
 
