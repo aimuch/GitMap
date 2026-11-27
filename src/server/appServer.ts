@@ -96,6 +96,7 @@ import {
   parseBackupEnvelope,
   sanitizeSshHostsForExport
 } from './settingsBackupService';
+import { InsightsV29Service } from './insightsV29Service';
 import { TerminalManager } from './terminalManager';
 
 export interface DesktopNativeHooks {
@@ -197,6 +198,7 @@ export class GitMapServer {
   public repoManager!: RepoManager;
   public diffService!: DiffService;
   public gitFeatures!: GitFeatures;
+  public insightsV29!: InsightsV29Service;
   public workflowService!: GitWorkflowService;
   public enhancementsService!: EnhancementsService;
   public aiAssistantService!: AiAssistantService;
@@ -301,6 +303,7 @@ export class GitMapServer {
     this.repoManager = new RepoManager(this.dataSource, this.extensionState, configChangeEmitter.subscribe, this.logger);
     this.diffService = new DiffService(this.dataSource);
     this.gitFeatures = new GitFeatures(this.dataSource);
+    this.insightsV29 = new InsightsV29Service(this.dataSource, this.gitFeatures);
     this.workflowService = new GitWorkflowService(this.dataSource);
     this.workflowService.setTrash(this.desktopHooks.trashItem || null);
     this.enhancementsService = new EnhancementsService(this.dataSource);
@@ -2907,6 +2910,50 @@ export class GitMapServer {
           ? params.repos.map(String)
           : allRepos;
         return collectLaunchpadItems(this.dataSource, repos, !!params.force);
+      }
+
+      /* vscode-git-map 2.9: Explain Changes, Inspect & Files Treemap */
+      case 'explain:choices': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        return this.insightsV29.getExplainChoices(repo);
+      }
+
+      case 'ai:explainChanges': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        const mode = ['uncommitted', 'stash', 'branch', 'unpushed', 'range'].includes(params.mode) ? params.mode : 'uncommitted';
+        return this.insightsV29.explainChanges({
+          repo,
+          mode,
+          ref: params.ref ? String(params.ref) : undefined,
+          commitHash: params.commitHash ? String(params.commitHash) : undefined,
+          base: params.base ? String(params.base) : undefined,
+          fromRef: params.fromRef ? String(params.fromRef) : undefined,
+          toRef: params.toRef ? String(params.toRef) : undefined,
+          label: params.label ? String(params.label) : undefined,
+          lang: params.lang === 'en' ? 'en' : 'zh'
+        });
+      }
+
+      case 'inspect:commit': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        const commit = await this.insightsV29.inspectCommit(repo, String(params.commitHash || 'HEAD'));
+        if (commit === null) throw new Error('Unable to load the commit.');
+        return { commit };
+      }
+
+      case 'inspect:line': {
+        const repo = String(params.repo || '');
+        if (!repo) throw new Error('This file isn\'t in a Git repository known to Git Map.');
+        const commit = params.commit && params.commit !== '*' ? String(params.commit) : null;
+        return this.insightsV29.inspectLine(repo, String(params.filePath || ''), Number(params.line) || 0, commit);
+      }
+
+      case 'repo:filesTreemap': {
+        const repo = String(params.repo || this.extensionState.getLastActiveRepo() || '');
+        if (!repo) throw new Error('No active repository selected.');
+        return this.insightsV29.getFilesTreemap(repo);
       }
 
       case 'ai:explainRegression': {

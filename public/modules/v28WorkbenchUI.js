@@ -1034,13 +1034,16 @@
   function openCompanionFeature(payload) {
     if (!payload || !payload.feature) return;
     const app = getApp();
+    // Features ported from vscode-git-map 2.9 (Explain Changes, Inspect, Files Treemap, ...)
+    if (window.GitMapV29 && window.GitMapV29.openV29CompanionFeature(payload)) return;
     const feat = getFeat();
     if (payload.repo && app?.state?.repos?.[payload.repo]) {
       app.state.activeRepo = payload.repo;
       app.renderSidebar();
       app.renderActiveRepoBadge();
     }
-    const args = payload.args || {};
+    // The graph sends commitHash, ref, fromRef… at the top level of the payload
+    const args = payload.args || payload;
     switch (payload.feature) {
       case 'aiReview': feat?.openAiCodeReviewModal(); break;
       case 'aiExplainRegression': openAiExplainRegressionModal(args.commitHash); break;
@@ -1100,6 +1103,9 @@
       { label: T('🚀 从任务单创建工作分支 (Start Work)', '🚀 Start Work from Issue'), fn: () => openStartWorkModal() },
       { label: T('🤖 AI 自动变基与一键回滚', '🤖 AI Auto-Rebase & Undo'), fn: () => openAiAutoRebaseModal() },
       { label: T('🔬 AI 回归缺陷根因定位', '🔬 AI Explain Regression'), fn: () => openAiExplainRegressionModal() },
+      { label: T('✨ 用 AI 解释更改（工作区 / 分支 / 贮藏 / 未推送）', '✨ Explain Changes with AI'), fn: () => window.GitMapV29?.openExplainChangesModal({}) },
+      { label: T('🔍 检查提交 (Inspect)', '🔍 Inspect Commit'), fn: () => window.GitMapV29?.openInspectCommit({}) },
+      { label: T('🗺️ 文件树状图 (大小 / 修改热度)', '🗺️ Files Treemap (Size / Hotness)'), fn: () => window.GitMapV29?.openFilesTreemap({}) },
       { label: T('🩺 仓库健康体检与 SSH 签名验签', '🩺 Repo Health & SSH Signers'), fn: () => openRepoMaintenanceModal() },
       { label: T('🤝 编程智能体与 MCP Server 集成', '🤝 Coding Agents & MCP Server'), fn: () => openCodingAgentsModal() },
       { label: T('📝 导出 Markdown 周报 / 变更日志', '📝 Export Markdown Changelog'), fn: () => openChangelogExportModal() }

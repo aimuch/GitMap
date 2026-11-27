@@ -115,6 +115,7 @@ class GitGraphView {
 	public readonly rebaseEditor: RebaseEditor;
 	public readonly branchCompare: BranchCompare;
 	public readonly branchCleanup: BranchCleanup;
+	public readonly mergeTarget: MergeTarget;
 	public readonly commitExplainer: CommitExplainer;
 	public readonly hunkModal: HunkStagingModal;
 	public readonly branchCommitCompareModal: BranchCommitCompareModal;
@@ -125,7 +126,7 @@ class GitGraphView {
 	private readonly operationBar: OperationBar;
 	private readonly rowActions: RowActions;
 	private readonly findWidget: FindWidget;
-	private readonly settingsWidget: SettingsWidget;
+	public readonly settingsWidget: SettingsWidget;
 	private readonly minimap: Minimap;
 	private readonly scrollMarkers: ScrollMarkers;
 	private readonly repoDropdown: Dropdown;
@@ -177,6 +178,7 @@ class GitGraphView {
 		this.stashList = new StashList(this);
 		this.branchCompare = new BranchCompare(this);
 		this.branchCleanup = new BranchCleanup(this);
+		this.mergeTarget = new MergeTarget(this);
 		this.commitExplainer = new CommitExplainer(this);
 		this.hunkModal = new HunkStagingModal(this);
 		this.commandPalette = new GraphCommandPalette(this);
@@ -4946,6 +4948,18 @@ class GitGraphView {
 					icon: MENU_ICONS.files,
 					visible: true,
 					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'repoInsights', repo: this.currentRepo })
+				},
+				{
+					title: t('Files Treemap'),
+					icon: MENU_ICONS.layout,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'filesTreemap', repo: this.currentRepo })
+				},
+				{
+					title: t('Explain Changes with AI') + ELLIPSIS,
+					icon: MENU_ICONS.sparkle,
+					visible: true,
+					onClick: () => sendMessage({ command: 'openCompanionFeature', feature: 'aiExplainChanges', repo: this.currentRepo })
 				},
 				{
 					title: repoCount > 1 ? t('Multi-Repository Overview ({0})', repoCount) : t('Multi-Repository Overview'),

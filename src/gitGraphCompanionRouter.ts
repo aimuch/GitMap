@@ -9,7 +9,7 @@ import { GitFeatures, buildPartialHunkPatch } from './gitFeatures';
 import { getLanguage, t } from './l10n';
 import { hostBridge } from './platform/hostBridge';
 import { computeGuardRiskScore, scanRepoWorkingTreeForIssues } from './preCommitGuard';
-import { checkoutPullRequestCommand, clearHostingTokenCommand, fetchPullRequestDetails, fetchRepoPullRequestBadges, setHostingTokenCommand } from './prStatusIntegration';
+import { checkoutPullRequestCommand, clearHostingTokenCommand, fetchPullRequestDetails, fetchRepoPullRequestBadges, getHostingIntegrationStatuses, setHostingTokenCommand } from './prStatusIntegration';
 import { isRemoteRepo } from './remote/repoTransport';
 import { RepoManager } from './repoManager';
 import { RepoMetadataStore } from './repoMetadataStore';
@@ -428,8 +428,28 @@ export async function handleCompanionMessage(msg: RequestMessage, ctx: Companion
 			}
 			return true;
 		}
+		case 'runSettingsCommand':
+			// Only the commands of Git Map can be run from the Settings panel
+			if (/^git-map\.[A-Za-z.]+$/.test(msg.settingsCommand)) vscode.commands.executeCommand(msg.settingsCommand).then(() => { }, () => { });
+			return true;
+		case 'openSettingsSearch':
+			if (/^git-map(\.[A-Za-z]+)*$/.test(msg.query)) vscode.commands.executeCommand('workbench.action.openSettings', msg.query).then(() => { }, () => { });
+			return true;
+		case 'loadHostingIntegrations':
+			ctx.sendMessage({ command: 'loadHostingIntegrations', integrations: await getHostingIntegrationStatuses() });
+			return true;
 		case 'openCompanionFeature': {
 			const targetRepo = msg.repo || (ctx.getCurrentRepo ? ctx.getCurrentRepo() : null) || '';
+			if (msg.feature === 'connectIntegration' || msg.feature === 'disconnectIntegration') {
+				// Connect / disconnect a hosting service (Cloud Integrations): store or delete its token, then refresh the list
+				if (msg.feature === 'connectIntegration') {
+					await setHostingTokenCommand(typeof msg.ref === 'string' ? msg.ref : undefined);
+				} else {
+					await clearHostingTokenCommand(typeof msg.ref === 'string' ? msg.ref : undefined);
+				}
+				ctx.sendMessage({ command: 'loadHostingIntegrations', integrations: await getHostingIntegrationStatuses() });
+				return true;
+			}
 			if (msg.feature === 'setHostingToken' || msg.feature === 'clearHostingToken') {
 				if (msg.feature === 'setHostingToken') {
 					await setHostingTokenCommand();
@@ -475,6 +495,7 @@ export async function handleCompanionMessage(msg: RequestMessage, ctx: Companion
 					feature: msg.feature,
 					repo: targetRepo,
 					mode: msg.mode,
+					ref: msg.ref,
 					commitHash: msg.commitHash,
 					fromRef: msg.fromRef,
 					toRef: msg.toRef,

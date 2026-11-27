@@ -4653,6 +4653,14 @@
           });
         }
 
+        // Tell the Inspect panel (vscode-git-map 2.9 "Inspect view") which line is selected, so it can follow it
+        const notifyLineSelected = (line) => {
+          if (!fileRes.repo) return;
+          window.dispatchEvent(new CustomEvent('gitmap:file-line-selected', {
+            detail: { repo: fileRes.repo, filePath: effectiveFilePath, line, commit: fileRes.commit || null }
+          }));
+        };
+
         scrollArea.addEventListener('click', async (ev) => {
           const numEl = ev.target.closest('.file-line-num');
           if (numEl) {
@@ -4669,11 +4677,13 @@
               row.classList.toggle('selected-line', ln >= selStart && ln <= selEnd);
             });
             updateInlineLineBlame(selStart);
+            notifyLineSelected(selStart);
             return;
           }
           const clickedRow = ev.target.closest('tr.file-line-row');
           if (clickedRow && !ev.target.closest('.blame-pen-btn') && !ev.target.closest('.blame-gutter[data-hash]')) {
             updateInlineLineBlame(Number(clickedRow.getAttribute('data-line')) || 1);
+            notifyLineSelected(Number(clickedRow.getAttribute('data-line')) || 1);
           }
           const penBtn = ev.target.closest('.blame-pen-btn');
           if (penBtn) {

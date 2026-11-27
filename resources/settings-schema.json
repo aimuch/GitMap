@@ -1,0 +1,1546 @@
+{
+ "source": "vscode-git-map 2.9.0",
+ "properties": {
+  "git-map.advanced.maxConcurrentGitProcesses": {
+   "default": 8,
+   "type": "number"
+  },
+  "git-map.workflowMacros": {
+   "default": [],
+   "type": "array"
+  },
+  "git-map.ai.baseUrl": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.ai.commitMessage.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.ai.explainCommit.enabled": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.ai.model": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.ai.provider": {
+   "default": "VS Code",
+   "type": "string",
+   "enum": [
+    "VS Code",
+    "DeepSeek",
+    "Kimi",
+    "Doubao",
+    "Qwen",
+    "OpenAI",
+    "Ollama",
+    "Magpie",
+    "CC Switch",
+    "OpenAI Compatible"
+   ]
+  },
+  "git-map.ai.taskModels": {
+   "default": {},
+   "type": "object"
+  },
+  "git-map.ai.customInstructions": {
+   "default": {},
+   "type": "object"
+  },
+  "git-map.ai.exclude.files": {
+   "default": [],
+   "type": "array"
+  },
+  "git-map.ai.largePromptWarningThreshold": {
+   "default": 6000,
+   "type": "number"
+  },
+  "git-map.ai.autoRebase.confidenceThreshold": {
+   "default": 0.85,
+   "type": "number"
+  },
+  "git-map.autolinks": {
+   "default": [],
+   "type": "array"
+  },
+  "git-map.remotes": {
+   "default": [],
+   "type": "array"
+  },
+  "git-map.startWork.branchNameFormat": {
+   "default": "${id}-${title}",
+   "type": "string"
+  },
+  "git-map.terminalLinks.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.terminalLinks.showDetailsView": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.graph.followTerminal.enabled": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.graph.followTerminal.allowRepositorySwitching": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.graph.scrollMarkers.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.graph.scrollMarkers.types": {
+   "default": [
+    "localBranches",
+    "remoteBranches",
+    "pullRequests",
+    "stashes",
+    "tags",
+    "worktrees"
+   ],
+   "type": "array"
+  },
+  "git-map.graph.minimap.additionalTypes": {
+   "default": [
+    "pullRequests",
+    "stashes",
+    "worktrees"
+   ],
+   "type": "array"
+  },
+  "git-map.graph.showGhostRefsOnRowHover": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.graph.multiselect": {
+   "default": "on",
+   "type": "string",
+   "enum": [
+    "off",
+    "on",
+    "topological"
+   ]
+  },
+  "git-map.blame.currentLine": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.blame.currentLine.format": {
+   "default": "${author, }${agoOrDate}${' via 'pullRequest}${' • 'message}",
+   "type": "string"
+  },
+  "git-map.blame.currentLine.uncommittedFormat": {
+   "default": "You, Uncommitted changes (${ago})",
+   "type": "string"
+  },
+  "git-map.blame.currentLine.pullRequests.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.blame.currentLine.scrollable": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.defaultDateStyle": {
+   "default": "relative",
+   "type": "string",
+   "enum": [
+    "relative",
+    "absolute"
+   ]
+  },
+  "git-map.blame.currentLine.dateFormat": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.blame.statusBar.dateFormat": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.blame.statusBar.command": {
+   "default": "viewLineHistory",
+   "type": "string",
+   "enum": [
+    "viewLineHistory",
+    "inspect",
+    "viewCommitInGitMap",
+    "openLineChanges",
+    "viewFileHistory",
+    "toggleFileBlame",
+    "toggleFileHeatmap",
+    "toggleFileChanges",
+    "toggleCodeLens"
+   ]
+  },
+  "git-map.blame.statusBar.pullRequests.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.hovers.currentLine.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.hovers.pullRequests.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.hovers.annotations.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.fileBlame.format": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.fileBlame.dateFormat": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.blame.ignoreRevsFile": {
+   "default": ".git-blame-ignore-revs",
+   "type": "string"
+  },
+  "git-map.blame.ignoreWhitespace": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.blame.statusBar": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.blame.statusBar.format": {
+   "default": "${author, }${agoOrDate}",
+   "type": "string"
+  },
+  "git-map.blame.statusBar.alignment": {
+   "default": "right",
+   "type": "string",
+   "enum": [
+    "left",
+    "right"
+   ]
+  },
+  "git-map.blame.statusBar.reduceFlicker": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.codeLens.enabled": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.codeLens.recentChange.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.codeLens.authors.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.codeLens.recentChange.command": {
+   "default": "git-map.viewLineHistory",
+   "type": "string",
+   "enum": [
+    "git-map.viewLineHistory",
+    "git-map.inspect",
+    "git-map.viewCommitInGitMap",
+    "git-map.openLineChanges",
+    "git-map.viewFileHistory",
+    "git-map.toggleFileBlame",
+    "git-map.toggleFileHeatmap",
+    "git-map.toggleFileChanges",
+    "none"
+   ]
+  },
+  "git-map.codeLens.authors.command": {
+   "default": "git-map.viewLineHistory",
+   "type": "string",
+   "enum": [
+    "git-map.viewLineHistory",
+    "git-map.inspect",
+    "git-map.viewCommitInGitMap",
+    "git-map.openLineChanges",
+    "git-map.viewFileHistory",
+    "git-map.toggleFileBlame",
+    "git-map.toggleFileHeatmap",
+    "git-map.toggleFileChanges",
+    "none"
+   ]
+  },
+  "git-map.codeLens.scopes": {
+   "default": [
+    "containers",
+    "blocks"
+   ],
+   "type": "array"
+  },
+  "git-map.hovers.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.hovers.currentLine.over": {
+   "default": "line",
+   "type": "string",
+   "enum": [
+    "line",
+    "annotation"
+   ]
+  },
+  "git-map.hovers.currentLine.details": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.hovers.currentLine.changes": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.hovers.autolinks.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.fileBlame.compact": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.fileBlame.heatmap.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.fileBlame.heatmap.location": {
+   "default": "right",
+   "type": "string",
+   "enum": [
+    "left",
+    "right"
+   ]
+  },
+  "git-map.fileBlame.highlight.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.fileBlame.highlight.locations": {
+   "default": [
+    "gutter",
+    "line",
+    "overviewRuler"
+   ],
+   "type": "array"
+  },
+  "git-map.fileBlame.toggleMode": {
+   "default": "file",
+   "type": "string",
+   "enum": [
+    "file",
+    "window"
+   ]
+  },
+  "git-map.fileBlame.delayAfterEdit": {
+   "default": 5000,
+   "type": "number"
+  },
+  "git-map.fileBlame.sizeThresholdAfterEdit": {
+   "default": 5000,
+   "type": "number"
+  },
+  "git-map.fileChanges.locations": {
+   "default": [
+    "gutter",
+    "line",
+    "overviewRuler"
+   ],
+   "type": "array"
+  },
+  "git-map.fileChanges.toggleMode": {
+   "default": "file",
+   "type": "string",
+   "enum": [
+    "file",
+    "window"
+   ]
+  },
+  "git-map.fileHeatmap.locations": {
+   "default": [
+    "gutter",
+    "overviewRuler"
+   ],
+   "type": "array"
+  },
+  "git-map.fileHeatmap.toggleMode": {
+   "default": "file",
+   "type": "string",
+   "enum": [
+    "file",
+    "window"
+   ]
+  },
+  "git-map.fileHeatmap.ageThreshold": {
+   "default": 90,
+   "type": "number"
+  },
+  "git-map.fileHeatmap.fadeLines": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.fileHeatmap.hotColor": {
+   "default": "#f66a0a",
+   "type": "string"
+  },
+  "git-map.fileHeatmap.coldColor": {
+   "default": "#0a60f6",
+   "type": "string"
+  },
+  "git-map.launchpad.indicator.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.launchpad.indicator.groups": {
+   "default": [
+    "mergeable",
+    "blocked",
+    "needsReview",
+    "followUp"
+   ],
+   "type": "array"
+  },
+  "git-map.launchpad.indicator.useColors": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.launchpad.pollingIntervalMinutes": {
+   "default": 30,
+   "type": "number"
+  },
+  "git-map.launchpad.staleThresholdDays": {
+   "default": 14,
+   "type": "number"
+  },
+  "git-map.mode.active": {
+   "default": "default",
+   "type": "string"
+  },
+  "git-map.mode.statusBar.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.mode.statusBar.alignment": {
+   "default": "left",
+   "type": "string",
+   "enum": [
+    "left",
+    "right"
+   ]
+  },
+  "git-map.modes": {
+   "default": [],
+   "type": "array"
+  },
+  "git-map.views.scm.grouped.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.views.scm.grouped.hiddenSections": {
+   "default": [],
+   "type": "array"
+  },
+  "git-map.menus.editor.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorGroup.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.explorer.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.scm.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorTab.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.commitDetailsView.actions": {
+   "default": [
+    "checkout",
+    "createBranch",
+    "cherrypick"
+   ],
+   "type": "array"
+  },
+  "git-map.commitRow.actions": {
+   "default": [
+    "createBranch",
+    "checkout",
+    "cherrypick",
+    "copyHash"
+   ],
+   "type": "array"
+  },
+  "git-map.commitRow.actionsPosition": {
+   "default": "Pointer",
+   "type": "string",
+   "enum": [
+    "Pointer",
+    "Description",
+    "Row"
+   ]
+  },
+  "git-map.commitDetailsView.autoCenter": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.commitDetailsView.fileView.fileTree.compactFolders": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.commitDetailsView.fileView.type": {
+   "default": "File Tree",
+   "type": "string",
+   "enum": [
+    "File Tree",
+    "File List"
+   ]
+  },
+  "git-map.commitDetailsView.location": {
+   "default": "Docked to Right",
+   "type": "string",
+   "enum": [
+    "Inline",
+    "Docked to Bottom",
+    "Docked to Right"
+   ]
+  },
+  "git-map.contextMenuActionsVisibility": {
+   "default": {},
+   "type": "object"
+  },
+  "git-map.customBranchGlobPatterns": {
+   "default": [],
+   "type": "array"
+  },
+  "git-map.customEmojiShortcodeMappings": {
+   "default": [],
+   "type": "array"
+  },
+  "git-map.customPullRequestProviders": {
+   "default": [],
+   "type": "array"
+  },
+  "git-map.date.format": {
+   "default": "Date & Time",
+   "type": "string",
+   "enum": [
+    "Date & Time",
+    "Date Only",
+    "ISO Date & Time",
+    "ISO Date Only",
+    "Relative"
+   ]
+  },
+  "git-map.date.type": {
+   "default": "Author Date",
+   "type": "string",
+   "enum": [
+    "Author Date",
+    "Commit Date"
+   ]
+  },
+  "git-map.defaultColumnVisibility": {
+   "default": {
+    "Date": true,
+    "Author": true,
+    "Commit": true
+   },
+   "type": "object"
+  },
+  "git-map.dialog.addTag.pushToRemote": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.addTag.type": {
+   "default": "Annotated",
+   "type": "string",
+   "enum": [
+    "Annotated",
+    "Lightweight"
+   ]
+  },
+  "git-map.dialog.applyStash.reinstateIndex": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.cherryPick.noCommit": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.cherryPick.recordOrigin": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.createBranch.checkOut": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.deleteBranch.forceDelete": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.fetchIntoLocalBranch.forceFetch": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.fetchRemote.prune": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.fetchRemote.pruneTags": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.general.referenceInputSpaceSubstitution": {
+   "default": "None",
+   "type": "string",
+   "enum": [
+    "None",
+    "Hyphen",
+    "Underscore"
+   ]
+  },
+  "git-map.dialog.merge.noCommit": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.merge.noFastForward": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.dialog.merge.squashCommits": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.merge.squashMessageFormat": {
+   "default": "Default",
+   "type": "string",
+   "enum": [
+    "Default",
+    "Git SQUASH_MSG"
+   ]
+  },
+  "git-map.dialog.popStash.reinstateIndex": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.pullBranch.noFastForward": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.pullBranch.squashCommits": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.pullBranch.squashMessageFormat": {
+   "default": "Default",
+   "type": "string",
+   "enum": [
+    "Default",
+    "Git SQUASH_MSG"
+   ]
+  },
+  "git-map.dialog.rebase.ignoreDate": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.dialog.rebase.launchInteractiveRebase": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.dialog.resetCurrentBranchToCommit.mode": {
+   "default": "Mixed",
+   "type": "string",
+   "enum": [
+    "Soft",
+    "Mixed",
+    "Hard"
+   ]
+  },
+  "git-map.dialog.resetUncommittedChanges.mode": {
+   "default": "Mixed",
+   "type": "string",
+   "enum": [
+    "Mixed",
+    "Hard"
+   ]
+  },
+  "git-map.dialog.stashUncommittedChanges.includeUntracked": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.diff.hideUnchangedRegions": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.editorContextMenu": {
+   "default": {
+    "viewLineHistory": "Submenu",
+    "viewLineHistoryInGitMap": "Submenu",
+    "viewFileHistory": "Submenu",
+    "visualFileHistory": "Submenu",
+    "toggleFileBlame": "Submenu",
+    "toggleLineBlame": "Submenu",
+    "openPreviousRevision": "Submenu",
+    "copyRemoteLinkToLines": "Submenu",
+    "openLinesOnRemote": "Submenu"
+   },
+   "type": "object"
+  },
+  "git-map.enhancedAccessibility": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.fileEncoding": {
+   "default": "utf8",
+   "type": "string"
+  },
+  "git-map.graph.colourPreset": {
+   "default": "Default",
+   "type": "string",
+   "enum": [
+    "Default",
+    "Pastel",
+    "Vivid",
+    "High Contrast",
+    "Colour Blind Safe",
+    "Tokyo Subway"
+   ]
+  },
+  "git-map.graph.colours": {
+   "default": [
+    "#0085d9",
+    "#d9008f",
+    "#00d90a",
+    "#d98500",
+    "#a300d9",
+    "#ff0000",
+    "#00d9cc",
+    "#e138e8",
+    "#85d900",
+    "#dc5b23",
+    "#6f24d6",
+    "#ffcc00"
+   ],
+   "type": "array"
+  },
+  "git-map.graph.minimap": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.graph.freezeColumnHeaders": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.graph.freezeFooter": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.graph.density": {
+   "default": "Comfortable",
+   "type": "string",
+   "enum": [
+    "Comfortable",
+    "Compact"
+   ]
+  },
+  "git-map.graph.nodeStyle": {
+   "default": "Dot",
+   "type": "string",
+   "enum": [
+    "Dot",
+    "Avatar"
+   ]
+  },
+  "git-map.graph.style": {
+   "default": "rounded",
+   "type": "string",
+   "enum": [
+    "rounded",
+    "angular"
+   ]
+  },
+  "git-map.graph.uncommittedChanges": {
+   "default": "Open Circle at the Uncommitted Changes",
+   "type": "string",
+   "enum": [
+    "Open Circle at the Uncommitted Changes",
+    "Open Circle at the Checked Out Commit"
+   ]
+  },
+  "git-map.integratedTerminalShell": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.integrations.pullRequestStatus.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.keyboardShortcut.find": {
+   "default": "CTRL/CMD + F",
+   "type": "string",
+   "enum": [
+    "UNASSIGNED",
+    "CTRL/CMD + A",
+    "CTRL/CMD + B",
+    "CTRL/CMD + C",
+    "CTRL/CMD + D",
+    "CTRL/CMD + E",
+    "CTRL/CMD + F",
+    "CTRL/CMD + G",
+    "CTRL/CMD + H",
+    "CTRL/CMD + I",
+    "CTRL/CMD + J",
+    "CTRL/CMD + K",
+    "CTRL/CMD + L",
+    "CTRL/CMD + M",
+    "CTRL/CMD + N",
+    "CTRL/CMD + O",
+    "CTRL/CMD + P",
+    "CTRL/CMD + Q",
+    "CTRL/CMD + R",
+    "CTRL/CMD + S",
+    "CTRL/CMD + T",
+    "CTRL/CMD + U",
+    "CTRL/CMD + V",
+    "CTRL/CMD + W",
+    "CTRL/CMD + X",
+    "CTRL/CMD + Y",
+    "CTRL/CMD + Z"
+   ]
+  },
+  "git-map.keyboardShortcut.refresh": {
+   "default": "CTRL/CMD + R",
+   "type": "string",
+   "enum": [
+    "UNASSIGNED",
+    "CTRL/CMD + A",
+    "CTRL/CMD + B",
+    "CTRL/CMD + C",
+    "CTRL/CMD + D",
+    "CTRL/CMD + E",
+    "CTRL/CMD + F",
+    "CTRL/CMD + G",
+    "CTRL/CMD + H",
+    "CTRL/CMD + I",
+    "CTRL/CMD + J",
+    "CTRL/CMD + K",
+    "CTRL/CMD + L",
+    "CTRL/CMD + M",
+    "CTRL/CMD + N",
+    "CTRL/CMD + O",
+    "CTRL/CMD + P",
+    "CTRL/CMD + Q",
+    "CTRL/CMD + R",
+    "CTRL/CMD + S",
+    "CTRL/CMD + T",
+    "CTRL/CMD + U",
+    "CTRL/CMD + V",
+    "CTRL/CMD + W",
+    "CTRL/CMD + X",
+    "CTRL/CMD + Y",
+    "CTRL/CMD + Z"
+   ]
+  },
+  "git-map.keyboardShortcut.scrollToHead": {
+   "default": "CTRL/CMD + H",
+   "type": "string",
+   "enum": [
+    "UNASSIGNED",
+    "CTRL/CMD + A",
+    "CTRL/CMD + B",
+    "CTRL/CMD + C",
+    "CTRL/CMD + D",
+    "CTRL/CMD + E",
+    "CTRL/CMD + F",
+    "CTRL/CMD + G",
+    "CTRL/CMD + H",
+    "CTRL/CMD + I",
+    "CTRL/CMD + J",
+    "CTRL/CMD + K",
+    "CTRL/CMD + L",
+    "CTRL/CMD + M",
+    "CTRL/CMD + N",
+    "CTRL/CMD + O",
+    "CTRL/CMD + P",
+    "CTRL/CMD + Q",
+    "CTRL/CMD + R",
+    "CTRL/CMD + S",
+    "CTRL/CMD + T",
+    "CTRL/CMD + U",
+    "CTRL/CMD + V",
+    "CTRL/CMD + W",
+    "CTRL/CMD + X",
+    "CTRL/CMD + Y",
+    "CTRL/CMD + Z"
+   ]
+  },
+  "git-map.keyboardShortcut.scrollToStash": {
+   "default": "CTRL/CMD + S",
+   "type": "string",
+   "enum": [
+    "UNASSIGNED",
+    "CTRL/CMD + A",
+    "CTRL/CMD + B",
+    "CTRL/CMD + C",
+    "CTRL/CMD + D",
+    "CTRL/CMD + E",
+    "CTRL/CMD + F",
+    "CTRL/CMD + G",
+    "CTRL/CMD + H",
+    "CTRL/CMD + I",
+    "CTRL/CMD + J",
+    "CTRL/CMD + K",
+    "CTRL/CMD + L",
+    "CTRL/CMD + M",
+    "CTRL/CMD + N",
+    "CTRL/CMD + O",
+    "CTRL/CMD + P",
+    "CTRL/CMD + Q",
+    "CTRL/CMD + R",
+    "CTRL/CMD + S",
+    "CTRL/CMD + T",
+    "CTRL/CMD + U",
+    "CTRL/CMD + V",
+    "CTRL/CMD + W",
+    "CTRL/CMD + X",
+    "CTRL/CMD + Y",
+    "CTRL/CMD + Z"
+   ]
+  },
+  "git-map.language": {
+   "default": "Auto",
+   "type": "string",
+   "enum": [
+    "Auto",
+    "English",
+    "Simplified Chinese"
+   ]
+  },
+  "git-map.lineHistory.followCursor": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.lineHistory.location": {
+   "default": "Drawer",
+   "type": "string",
+   "enum": [
+    "Drawer",
+    "Inline Window"
+   ]
+  },
+  "git-map.markdown": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.maxDepthOfRepoSearch": {
+   "default": 0,
+   "type": "number"
+  },
+  "git-map.openNewTabEditorGroup": {
+   "default": "Active",
+   "type": "string",
+   "enum": [
+    "Active",
+    "Beside",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
+    "Six",
+    "Seven",
+    "Eight",
+    "Nine"
+   ]
+  },
+  "git-map.openToTheRepoOfTheActiveTextEditorDocument": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.referenceLabels.alignment": {
+   "default": "Branches & Tags (in a separate column)",
+   "type": "string",
+   "enum": [
+    "Normal",
+    "Branches (on the left) & Tags (on the right)",
+    "Branches (aligned to the graph) & Tags (on the right)",
+    "Branches & Tags (in a separate column)"
+   ]
+  },
+  "git-map.referenceLabels.combineLocalAndRemoteBranchLabels": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.repository.commits.fetchAvatars": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repository.commits.initialLoad": {
+   "default": 300,
+   "type": "number"
+  },
+  "git-map.repository.commits.loadMore": {
+   "default": 100,
+   "type": "number"
+  },
+  "git-map.repository.commits.loadMoreAutomatically": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.repository.commits.mute.commitsThatAreNotAncestorsOfHead": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repository.commits.mute.mergeCommits": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.repository.commits.order": {
+   "default": "date",
+   "type": "string",
+   "enum": [
+    "date",
+    "author-date",
+    "topo"
+   ]
+  },
+  "git-map.repository.commits.showSignatureStatus": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repository.fetchAndPrune": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repository.fetchAndPruneTags": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repository.includeCommitsMentionedByReflogs": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repository.onLoad.scrollToHead": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repository.onLoad.showCheckedOutBranch": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repository.onLoad.showSpecificBranches": {
+   "default": [],
+   "type": "array"
+  },
+  "git-map.repository.onlyFollowFirstParent": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repository.showCommitsOnlyReferencedByTags": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.repository.showRemoteBranches": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.repository.showRemoteHeads": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.repository.showStashes": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.repository.showTags": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.repository.showUncommittedChanges": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.repository.showUntrackedFiles": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.repository.sign.commits": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repository.sign.tags": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repository.useMailmap": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.repositoryDropdownOrder": {
+   "default": "Workspace Full Path",
+   "type": "string",
+   "enum": [
+    "Full Path",
+    "Name",
+    "Workspace Full Path"
+   ]
+  },
+  "git-map.retainContextWhenHidden": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.showStatusBarItem": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.sourceCodeProviderIntegrationLocation": {
+   "default": "Inline",
+   "type": "string",
+   "enum": [
+    "Inline",
+    "More Actions"
+   ]
+  },
+  "git-map.statusBarItemDisplay": {
+   "default": "Icon & Text",
+   "type": "string",
+   "enum": [
+    "Icon & Text",
+    "Icon",
+    "Text"
+   ]
+  },
+  "git-map.tabIconColourTheme": {
+   "default": "colour",
+   "type": "string",
+   "enum": [
+    "colour",
+    "grey"
+   ]
+  },
+  "git-map.autoCenterCommitDetailsView": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.combineLocalAndRemoteBranchLabels": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.commitDetailsViewFileTreeCompactFolders": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.commitDetailsViewLocation": {
+   "default": "Inline",
+   "type": "string",
+   "enum": [
+    "Inline",
+    "Docked to Bottom"
+   ]
+  },
+  "git-map.commitOrdering": {
+   "default": "date",
+   "type": "string",
+   "enum": [
+    "date",
+    "author-date",
+    "topo"
+   ]
+  },
+  "git-map.dateFormat": {
+   "default": "Date & Time",
+   "type": "string",
+   "enum": [
+    "Date & Time",
+    "Date Only",
+    "ISO Date & Time",
+    "ISO Date Only",
+    "Relative"
+   ]
+  },
+  "git-map.dateType": {
+   "default": "Author Date",
+   "type": "string",
+   "enum": [
+    "Author Date",
+    "Commit Date"
+   ]
+  },
+  "git-map.defaultFileViewType": {
+   "default": "File Tree",
+   "type": "string",
+   "enum": [
+    "File Tree",
+    "File List"
+   ]
+  },
+  "git-map.fetchAndPrune": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.fetchAvatars": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.graphColours": {
+   "default": [
+    "#0085d9",
+    "#d9008f",
+    "#00d90a",
+    "#d98500",
+    "#a300d9",
+    "#ff0000",
+    "#00d9cc",
+    "#e138e8",
+    "#85d900",
+    "#dc5b23",
+    "#6f24d6",
+    "#ffcc00"
+   ],
+   "type": "array"
+  },
+  "git-map.graphStyle": {
+   "default": "rounded",
+   "type": "string",
+   "enum": [
+    "rounded",
+    "angular"
+   ]
+  },
+  "git-map.includeCommitsMentionedByReflogs": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.initialLoadCommits": {
+   "default": 300,
+   "type": "number"
+  },
+  "git-map.loadMoreCommits": {
+   "default": 100,
+   "type": "number"
+  },
+  "git-map.loadMoreCommitsAutomatically": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.muteCommitsThatAreNotAncestorsOfHead": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.muteMergeCommits": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.onlyFollowFirstParent": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.openDiffTabLocation": {
+   "default": "Active",
+   "type": "string",
+   "enum": [
+    "Active",
+    "Beside",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
+    "Six",
+    "Seven",
+    "Eight",
+    "Nine"
+   ]
+  },
+  "git-map.openRepoToHead": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.referenceLabelAlignment": {
+   "default": "Normal",
+   "type": "string",
+   "enum": [
+    "Normal",
+    "Branches (on the left) & Tags (on the right)",
+    "Branches (aligned to the graph) & Tags (on the right)"
+   ]
+  },
+  "git-map.showCommitsOnlyReferencedByTags": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.showCurrentBranchByDefault": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.showSignatureStatus": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.showTags": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.showUncommittedChanges": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.showUntrackedFiles": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.agents.default": {
+   "default": "",
+   "type": "string",
+   "enum": [
+    "",
+    "copilot-chat",
+    "claude-code",
+    "codex",
+    "copilot-cli",
+    "opencode"
+   ]
+  },
+  "git-map.graph.overviewBar.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.graph.maxVisibleRefsPerCommit": {
+   "default": 0,
+   "type": "number"
+  },
+  "git-map.graph.shortcuts.overrides": {
+   "default": {},
+   "type": "object"
+  },
+  "git-map.views.scm.grouped.defaultSection": {
+   "default": "commits",
+   "type": "string"
+  },
+  "git-map.views.commits.labelFormat": {
+   "default": "${message}",
+   "type": "string"
+  },
+  "git-map.views.commits.descriptionFormat": {
+   "default": "${author, }${agoOrDate}",
+   "type": "string"
+  },
+  "git-map.views.stashes.labelFormat": {
+   "default": "${message}",
+   "type": "string"
+  },
+  "git-map.views.stashes.descriptionFormat": {
+   "default": "${agoOrDate}",
+   "type": "string"
+  },
+  "git-map.views.files.labelFormat": {
+   "default": "${file}",
+   "type": "string"
+  },
+  "git-map.views.files.descriptionFormat": {
+   "default": "${directory}",
+   "type": "string"
+  },
+  "git-map.useMailmap": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.menus.editorGutter.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorGroup.conflictAssistant": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorGroup.diffMode": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorGroup.fileAnnotations": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.menus.editorGroup.openFile": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorGroup.revisionNavigation": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorGroup.timeMachine": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorGutter.lineHistory": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorGutter.remote": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorTab.fileHistory": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorTab.timeMachine": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.editorTab.visualHistory": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.explorer.fileHistory": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.explorer.folderHistory": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.explorer.removeFromHistory": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.explorer.timeMachine": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.explorer.visualHistory": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.scm.conflictAssistant": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.scm.explainChanges": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.scm.generateCommitMessage": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.scm.reflogExplorer": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.scm.reviewChanges": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.menus.scm.view": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.fileAnnotations.command": {
+   "default": "submenu",
+   "type": "string",
+   "enum": [
+    "submenu",
+    "blame",
+    "heatmap",
+    "changes"
+   ]
+  },
+  "git-map.defaultDateFormat": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.defaultDateShortFormat": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.defaultTimeFormat": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.defaultDateLocale": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.blame.currentLine.useUncommittedFormat": {
+   "default": false,
+   "type": "boolean"
+  },
+  "git-map.blame.statusBar.tooltipFormat": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.codeLens.dateFormat": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.hovers.annotations.over": {
+   "default": "line",
+   "type": "string",
+   "enum": [
+    "line",
+    "annotation"
+   ]
+  },
+  "git-map.hovers.annotations.details": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.launchpad.indicator.icon": {
+   "default": "default",
+   "type": "string",
+   "enum": [
+    "default",
+    "group"
+   ]
+  },
+  "git-map.launchpad.indicator.label": {
+   "default": "item",
+   "type": "string",
+   "enum": [
+    "false",
+    "item",
+    "counts"
+   ]
+  },
+  "git-map.launchpad.indicator.polling.enabled": {
+   "default": true,
+   "type": "boolean"
+  },
+  "git-map.terminalLinks.showIn": {
+   "default": "graph",
+   "type": "string",
+   "enum": [
+    "graph",
+    "inspect",
+    "quickpick"
+   ]
+  },
+  "git-map.views.commits.tooltipFormat": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.views.stashes.tooltipFormat": {
+   "default": "",
+   "type": "string"
+  },
+  "git-map.graph.showUpstreamStatus": {
+   "default": true,
+   "type": "boolean"
+  }
+ }
+}

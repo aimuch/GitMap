@@ -2191,9 +2191,11 @@ export class DataSource extends Disposable {
 	 */
 	private getFileHistoryPaths(repo: string, filePath: string, revisionArgs: ReadonlyArray<string>, onlyFollowFirstParent: boolean) {
 		// Following a file walks all of its history, so the paths are cached while the revisions (and HEAD) are unchanged, as the view is refreshed often
-		return this.spawnGit(['rev-parse', 'HEAD'], repo, (stdout) => stdout.trim()).catch(() => '').then((head) => {
+		return this.spawnGit(['rev-parse', 'HEAD'], repo, (stdout) => stdout.trim()).catch(() => '').then(async (head) => {
 			const key = JSON.stringify([repo, filePath, revisionArgs, onlyFollowFirstParent, head]);
 			if (this.fileHistoryPathsCache !== null && this.fileHistoryPathsCache.key === key) return this.fileHistoryPathsCache.paths;
+			// A folder's history is the history of all of its files (Git can only follow a single file through renames)
+			if (await this.isDirectoryInRepo(repo, filePath)) return [filePath];
 			const args = ['-c', 'core.quotepath=false', '-c', 'log.showSignature=false', 'log', '--follow', '-M', '--diff-filter=R', '--name-status', '--format='];
 			if (onlyFollowFirstParent) args.push('--first-parent');
 			args.push(...revisionArgs, '--', filePath);
@@ -2440,7 +2442,7 @@ export class DataSource extends Disposable {
 		if (which === 'after') {
 			args.push('--reverse', '--ancestry-path', from + '..HEAD');
 		} else {
-			args.push('--follow', '--max-count=2', from);
+			args.push(...((await this.isDirectoryInRepo(repo, filePath)) ? [] : ['--follow']), '--max-count=2', from);
 		}
 		args.push('--', filePath);
 		const revisions = await this.spawnGit(args, repo, (stdout) => stdout.split('\x1e').slice(1).map((record) => {
@@ -3220,6 +3222,23 @@ export class DataSource extends Disposable {
 	 * @param repo The repository to run the command in.
 	 * @param resolveValue A callback invoked to resolve the data from `stdout`.
 	 */
+	/**
+	 * Is a path (relative to a repository) a folder? Checked in the working tree of local repositories, and at HEAD otherwise
+	 * (which also works for Remote-SSH repositories).
+	 */
+	private async isDirectoryInRepo(repo: string, filePath: string): Promise<boolean> {
+		const clean = filePath.replace(/\\/g, '/').replace(/\/+$/, '');
+		if (clean === '') return false;
+		if (!isRemoteRepo(repo)) {
+			try {
+				return fs.statSync(path.join(repo, clean)).isDirectory();
+			} catch (_) {
+				// Not in the working tree: check HEAD
+			}
+		}
+		return this.spawnGit(['cat-file', '-t', 'HEAD:' + clean], repo, (stdout) => stdout.trim() === 'tree').catch(() => false);
+	}
+
 	private spawnGit<T>(args: string[], repo: string, resolveValue: { (stdout: string): T }) {
 		return this._spawnGit(args, repo, (stdout) => resolveValue(stdout.toString()));
 	}

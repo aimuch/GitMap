@@ -942,7 +942,12 @@ export const workspace = {
     return {
       get<T>(key: string, defaultValue?: T): T {
         const val = getNestedOrFlatValue(prefix, key);
-        return val !== undefined ? (val as T) : (defaultValue as T);
+        if (val !== undefined) return val as T;
+        if (defaultValue !== undefined) return defaultValue;
+        // Like VS Code: a setting that isn't set has the default declared for it
+        const fullKey = prefix ? `${prefix}.${key}` : key;
+        const declared = getSettingsSchema()[fullKey];
+        return (declared && Object.prototype.hasOwnProperty.call(declared, 'default') ? declared.default : undefined) as T;
       },
       has(key: string): boolean {
         return getNestedOrFlatValue(prefix, key) !== undefined;
@@ -1296,9 +1301,27 @@ export const env = {
   }
 };
 
+/* Extension Settings schema (resources/settings-schema.json, generated from vscode-git-map's package.json) */
+
+let settingsSchemaCache: { [key: string]: { default?: unknown; type?: unknown; enum?: unknown[] } } | null = null;
+
+export function getSettingsSchema(): { [key: string]: { default?: unknown; type?: unknown; enum?: unknown[] } } {
+  if (settingsSchemaCache === null) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'settings-schema.json'), 'utf8'));
+      settingsSchemaCache = raw && typeof raw.properties === 'object' ? raw.properties : {};
+    } catch (_) {
+      settingsSchemaCache = {};
+    }
+  }
+  return settingsSchemaCache!;
+}
+
 export const extensions = {
   all: [] as any[],
-  getExtension(_id: string): any {
-    return undefined;
+  getExtension(id: string): any {
+    if (id !== 'aimdev.git-map') return undefined;
+    // Enough of the extension's manifest for code that enumerates its settings (e.g. the Settings panel)
+    return { id, packageJSON: { contributes: { configuration: [{ properties: getSettingsSchema() }] } } };
   }
 };

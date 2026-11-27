@@ -23,10 +23,10 @@ export const enum AiProvider {
 	OpenAICompatible = 'OpenAI Compatible'
 }
 
-interface AiProviderPreset {
-	readonly name: string;
-	readonly baseUrl: string;
-	readonly model: string;
+export interface AiProviderPreset {
+	readonly name: string; // The name shown to the person (e.g. in the consent before a commit is sent)
+	readonly baseUrl: string; // The default base URL of its API ('' => it must be set)
+	readonly model: string; // The default model ('' => it must be set)
 	readonly requiresApiKey: boolean;
 	readonly apiFormat?: AiApiFormat;
 }
@@ -120,7 +120,7 @@ export function parseAiRequestSettings(provider: string, settings: AiRequestSett
 	};
 }
 
-const PRESETS: { readonly [provider: string]: AiProviderPreset } = {
+export const PRESETS: { readonly [provider: string]: AiProviderPreset } = {
 	[AiProvider.DeepSeek]: { name: 'DeepSeek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', requiresApiKey: true },
 	[AiProvider.Kimi]: { name: 'Kimi (Moonshot AI)', baseUrl: 'https://api.moonshot.cn/v1', model: '', requiresApiKey: true },
 	[AiProvider.Doubao]: { name: 'Doubao (Volcengine Ark)', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: '', requiresApiKey: true },
@@ -284,7 +284,11 @@ export function estimateTokenCount(text: string): number {
 	return Math.ceil((typeof text === 'string' ? text.length : 0) / 4);
 }
 
-function getDefaultBaseUrl(provider: AiProvider) {
+/**
+ * Get the default base URL of a direct provider. Magpie's local gateway records the address it listens on in
+ * `~/.config/magpie/gateway.json` (`{"addr": "127.0.0.1:3425", ...}`), which is used when it's available.
+ */
+export function getDefaultBaseUrl(provider: AiProvider) {
 	if (provider === AiProvider.Magpie) {
 		const addr = readMagpieGatewayAddress();
 		if (addr !== null) return 'http://' + addr + '/v1';
