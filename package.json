@@ -1,7 +1,7 @@
 {
   "name": "gitmap",
   "productName": "GitMap",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "Standalone cross-platform Git graph & repository manager (Electron Desktop + Web Server) with Remote-SSH path browsing and Git operations.",
   "author": {
     "name": "Andy",

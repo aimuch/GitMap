@@ -231,5 +231,13 @@ describe('Ported v2.9 Features', () => {
     assert.ok(desktopMainTs.includes("'gitmap:setLiquidGlass'"));
     assert.ok(desktopMainTs.includes("setVibrancy('under-window')"));
     assert.equal(desktopMainTs.includes('transparent: true'), false, 'use vibrancy + transparent backgroundColor without transparent:true so macOS shadows & rounded corners stay intact');
+
+    const iconsJs = fs.readFileSync(path.join(rootDir, 'public', 'icons.js'), 'utf8');
+    for (const iconKey of ['history', 'filePlus', 'folderPlus', 'upload', 'download', 'pencil', 'trash', 'terminal', 'editor', 'sparkle']) {
+      assert.ok(new RegExp(`${iconKey}:\\s*svg\\([^)]+'(?:blue|purple|cyan|green|amber|red|indigo|ai)'\\)`).test(iconsJs), `public/icons.js should assign a tone class to ${iconKey}`);
+    }
+    const enhancementsCss = fs.readFileSync(path.join(rootDir, 'public', 'modules', 'enhancements.css'), 'utf8');
+    assert.ok(enhancementsCss.includes('body[data-icon-style="colorful"] svg.icon-tone-blue'));
+    assert.ok(enhancementsCss.includes('body.liquid-glass .fb-floating-bar'));
   });
 });

@@ -2457,11 +2457,13 @@ body.vscode-light .gm-hm-cell.lv-4 { background: #166534; border-color: #14532d;
    vscode-git-map 2.9.2–2.9.3 ports: Global Icon Colour Style & Launchpad Pill Tones
    =================================================================== */
 /* AI sparkle icon stays colorful in both monochrome & colorful modes unless inside filled/active controls */
-.icon-slot[data-icon="sparkle"] svg {
+svg.icon-tone-ai {
+  color: #c084fc;
   stroke: #c084fc;
 }
-body.vscode-light .icon-slot[data-icon="sparkle"] svg,
-body.theme-light .icon-slot[data-icon="sparkle"] svg {
+body.vscode-light svg.icon-tone-ai,
+body.theme-light svg.icon-tone-ai {
+  color: #9333ea;
   stroke: #9333ea;
 }
 
@@ -2484,83 +2486,45 @@ body.theme-light[data-icon-style="colorful"] {
   --gm-icon-red: #dc2626;
   --gm-icon-indigo: #4f46e5;
 }
-/* Blue: commits, commands, diffs, editor, workspace split layout, search */
-body[data-icon-style="colorful"] .icon-slot[data-icon="commit"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="command"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="diff"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="multiDiff"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="editor"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="layoutTabs"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="splitHorizontal"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="splitVertical"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="swapPanes"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="search"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="fileCode"] svg { stroke: var(--gm-icon-blue); }
 
-/* Green: branches, cloning, repos, pull requests, additions */
-body[data-icon-style="colorful"] .icon-slot[data-icon="branch"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="gitClone"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="gitRepo"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="plus"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="pullRequest"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="check"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="play"] svg { stroke: var(--gm-icon-green); }
+/* Universal semantic tone rules for every SVG in window.GITMAP_ICONS across toolbars, tabs, floating bars & modals */
+body[data-icon-style="colorful"] svg.icon-tone-blue { color: var(--gm-icon-blue); stroke: var(--gm-icon-blue); }
+body[data-icon-style="colorful"] svg.icon-tone-purple { color: var(--gm-icon-purple); stroke: var(--gm-icon-purple); }
+body[data-icon-style="colorful"] svg.icon-tone-cyan { color: var(--gm-icon-cyan); stroke: var(--gm-icon-cyan); }
+body[data-icon-style="colorful"] svg.icon-tone-green { color: var(--gm-icon-green); stroke: var(--gm-icon-green); }
+body[data-icon-style="colorful"] svg.icon-tone-amber { color: var(--gm-icon-amber); stroke: var(--gm-icon-amber); }
+body[data-icon-style="colorful"] svg.icon-tone-red { color: var(--gm-icon-red); stroke: var(--gm-icon-red); }
+body[data-icon-style="colorful"] svg.icon-tone-indigo { color: var(--gm-icon-indigo); stroke: var(--gm-icon-indigo); }
 
-/* Amber: folders, themes/sun, hot files, tags, time */
-body[data-icon-style="colorful"] .icon-slot[data-icon="folder"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="folderOpen"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="folderSearch"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="folderPlus"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="foldersTop"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="sun"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="flame"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="clock"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="tag"] svg { stroke: var(--gm-icon-amber); }
+/* Keep disclosure chevrons neutral elsewhere, but give the row floating bar expand toggle an indigo accent in colorful mode */
+body[data-icon-style="colorful"] .fb-floating-bar button svg.ui-icon:not([class*="icon-tone-"]) {
+  color: var(--gm-icon-indigo);
+  stroke: var(--gm-icon-indigo);
+}
+body[data-icon-style="colorful"] .fb-filter .ui-icon,
+body[data-icon-style="colorful"] .ctree-search-bar .ui-icon {
+  opacity: 1;
+}
+body[data-icon-style="colorful"] .fb-floating-bar button:hover svg.ui-icon,
+body[data-icon-style="colorful"] .mini-btn:hover svg.ui-icon,
+body[data-icon-style="colorful"] .icon-btn:hover svg.ui-icon {
+  filter: brightness(1.16);
+}
 
-/* Cyan: terminals, sync/refresh, transfers, upload/download, history */
-body[data-icon-style="colorful"] .icon-slot[data-icon="terminal"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="externalTerminal"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="refresh"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="transfers"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="download"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="upload"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="scan"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="history"] svg { stroke: var(--gm-icon-cyan); }
-
-/* Purple: settings, servers, merge, patch, moon, cpu */
-body[data-icon-style="colorful"] .icon-slot[data-icon="settings"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="serverPlus"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="merge"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="patch"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="cpu"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="moon"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="fileArchive"] svg { stroke: var(--gm-icon-purple); }
-
-/* Indigo: toolbox layers, sidebar, compass, analytics chart */
-body[data-icon-style="colorful"] .icon-slot[data-icon="layers"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="sidebar"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="compass"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="chart"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="fileImage"] svg { stroke: var(--gm-icon-indigo); }
-
-/* Red: delete, disconnect, alerts, stop */
-body[data-icon-style="colorful"] .icon-slot[data-icon="trash"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="disconnect"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="alert"] svg,
-body[data-icon-style="colorful"] .icon-slot[data-icon="stop"] svg { stroke: var(--gm-icon-red); }
-
-/* Contrast guard inside accent-filled or selected controls */
-.primary-pill .icon-slot svg,
-.mini-btn.primary .icon-slot svg,
-.settings-nav-item.active .icon-slot svg,
-.repo-item.active .icon-slot svg,
-.icon-mode-btn.active .icon-slot svg,
-body[data-icon-style="colorful"] .primary-pill .icon-slot svg,
-body[data-icon-style="colorful"] .mini-btn.primary .icon-slot svg,
-body[data-icon-style="colorful"] .settings-nav-item.active .icon-slot svg,
-body[data-icon-style="colorful"] .repo-item.active .icon-slot svg,
-body[data-icon-style="colorful"] .icon-mode-btn.active .icon-slot svg {
+/* Contrast guard ONLY inside solid-filled primary / active-selection controls (keep .ws-tab.active colorful!) */
+.primary-pill svg.ui-icon,
+.mini-btn.primary svg.ui-icon,
+.settings-nav-item.active svg.ui-icon,
+.repo-item.active svg.ui-icon,
+.icon-mode-btn.active svg.ui-icon,
+body[data-icon-style="colorful"] .primary-pill svg.ui-icon,
+body[data-icon-style="colorful"] .mini-btn.primary svg.ui-icon,
+body[data-icon-style="colorful"] .settings-nav-item.active svg.ui-icon,
+body[data-icon-style="colorful"] .repo-item.active svg.ui-icon,
+body[data-icon-style="colorful"] .icon-mode-btn.active svg.ui-icon {
+  color: currentColor !important;
   stroke: currentColor !important;
+  filter: none !important;
 }
 
 /* Settings Modal Extensions: Live Icon Preview & Graph Switch Grid */
@@ -2893,6 +2857,33 @@ body.liquid-glass #terminalDrawer {
   border-top-color: var(--lg-border-subtle);
 }
 
+/* Liquid Glass Polish for File Explorer Controls & Floating Row Hover Bar */
+body.liquid-glass .fb-floating-bar {
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: var(--lg-overlay-bg);
+  backdrop-filter: blur(22px) saturate(190%);
+  -webkit-backdrop-filter: blur(22px) saturate(190%);
+  border: 1px solid var(--lg-border);
+  box-shadow: inset 0 1px 0 var(--lg-specular-top), 0 8px 24px rgba(0, 0, 0, 0.36);
+}
+body.liquid-glass .fb-floating-bar .mini-icon-btn,
+body.liquid-glass .fb-floating-bar .fb-float-pill {
+  border-radius: 999px;
+}
+body.liquid-glass .fb-path,
+body.liquid-glass .fb-filter,
+body.liquid-glass .fb-conn-actions .mini-btn:not(.primary),
+body.liquid-glass .fb-actions .mini-btn:not(.primary) {
+  background: var(--lg-pill-bg);
+  border-color: var(--lg-border-subtle);
+}
+body.liquid-glass .fb-conn-actions .mini-btn:not(.primary):hover,
+body.liquid-glass .fb-actions .mini-btn:not(.primary):hover {
+  background: var(--lg-pill-hover-bg);
+  border-color: var(--lg-border);
+}
+
 @media (prefers-reduced-transparency: reduce) {
   body.liquid-glass {
     --lg-chrome-bg: var(--vscode-sideBar-background);
@@ -2911,6 +2902,7 @@ body.liquid-glass #terminalDrawer {
   body.liquid-glass .transfer-panel,
   body.liquid-glass .ws-context-menu,
   body.liquid-glass .wt-scope-popover,
+  body.liquid-glass .fb-floating-bar,
   body.liquid-glass #terminalDrawer {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
