@@ -1,5 +1,5 @@
 {
- "source": "vscode-git-map 2.9.0",
+ "source": "vscode-git-map 2.9.3",
  "properties": {
   "git-map.advanced.maxConcurrentGitProcesses": {
    "default": 8,
@@ -1541,6 +1541,14 @@
   "git-map.graph.showUpstreamStatus": {
    "default": true,
    "type": "boolean"
+  },
+  "git-map.ui.iconColorStyle": {
+   "default": "monochrome",
+   "type": "string",
+   "enum": [
+    "monochrome",
+    "colorful"
+   ]
   }
  }
 }

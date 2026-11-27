@@ -1183,6 +1183,13 @@ class Config {
 				: StatusBarItemDisplay.IconAndText;
 	}
 
+	/**
+	 * Get the value of the `git-map.ui.iconColorStyle` Extension Setting.
+	 */
+	get iconColorStyle(): 'monochrome' | 'colorful' {
+		return this.config.get<string>('ui.iconColorStyle', 'monochrome') === 'colorful' ? 'colorful' : 'monochrome';
+	}
+
 	get tabIconColourTheme() {
 		return this.config.get<string>('tabIconColourTheme', 'colour') === 'grey'
 			? TabIconColourTheme.Grey

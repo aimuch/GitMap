@@ -1,8 +1,22 @@
 import * as cp from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { isRemoteRepo, parseRemoteRepo } from './remote/repoTransport';
 import { sshManager } from './remote/sshManager';
+
+function resolveMcpVersion(): string {
+	try {
+		const raw = fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8');
+		const parsed = JSON.parse(raw);
+		if (parsed && typeof parsed.version === 'string' && parsed.version.trim() !== '') {
+			return parsed.version.trim();
+		}
+	} catch (_) {
+		// Fall back when package.json cannot be read
+	}
+	return '1.3.0';
+}
 
 interface JsonRpcRequest {
 	readonly jsonrpc: string;
@@ -124,7 +138,7 @@ export function startMcpStdioServer(repo: string): void {
 					result: {
 						protocolVersion: '2024-11-05',
 						capabilities: { tools: {} },
-						serverInfo: { name: 'git-map-mcp', version: '1.2.0' }
+						serverInfo: { name: 'git-map-mcp', version: resolveMcpVersion() }
 					}
 				});
 			} else if (req.method === 'tools/list') {

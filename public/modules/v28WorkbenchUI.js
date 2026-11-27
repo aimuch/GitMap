@@ -19,32 +19,91 @@
 
   /* ── 1. PR Launchpad Status Pill & Triage Modal ── */
   let lastLaunchpadRefresh = 0;
+  let lastLaunchpadCounts = { total: 0, mergeable: 0, blocked: 0, needsReview: 0, followUp: 0 };
+
+  const LP_ICONS = {
+    rocketMono: '<svg class="gm-lp-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 11.5L4.5 6.5C6.5 3 10.5 2 14 2c0 3.5-1 7.5-4.5 9.5zM4.5 6.5L2 8l1.5 2.5M9.5 11.5L8 14l-2.5-1.5M10 6h.01"/><path d="M4.5 11.5c-1.2.4-2.5 2.5-2.5 2.5s2.1-1.3 2.5-2.5z"/></svg>',
+    rocketColor: '<svg class="gm-lp-svg gmColorSvg" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 11.5c-1.2.4-2.5 2.5-2.5 2.5s2.1-1.3 2.5-2.5z" stroke="#f97316" fill="#fb923c" fill-opacity=".35"/><path d="M4.5 6.5L2 8l1.5 2.5M9.5 11.5L8 14l-2.5-1.5" stroke="#a78bfa"/><path d="M9.5 11.5L4.5 6.5C6.5 3 10.5 2 14 2c0 3.5-1 7.5-4.5 9.5z" stroke="#38bdf8"/><circle cx="10" cy="6" r="1" fill="#fbbf24" stroke="none"/></svg>',
+    warning: '<svg class="gm-lp-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2L1.5 13.5h13L8 2zM8 6.5v3.5M8 12h.01"/></svg>',
+    pullRequest: '<svg class="gm-lp-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4.5" cy="4" r="1.75"/><circle cx="4.5" cy="12" r="1.75"/><circle cx="11.5" cy="12" r="1.75"/><path d="M4.5 5.75v4.5M11.5 10.25V6.5a2 2 0 0 0-2-2H8M9.5 2.75L7.75 4.5 9.5 6.25"/></svg>'
+  };
+
+  function renderLaunchpadPillFromCounts(counts) {
+    const app = getApp();
+    const pill = document.getElementById('btnLaunchpadPill');
+    if (!app || !pill) return;
+    const s = app.state.settings || {};
+    const repos = Object.keys(app.state.repos || {});
+    const indicatorOn = s['git-map.launchpad.indicator.enabled'] !== false;
+    const prsOn = s['git-map.pullRequests.enabled'] !== false && s['git-map.integrations.pullRequestStatus.enabled'] !== false;
+    const rawGroups = Array.isArray(s['git-map.launchpad.indicator.groups'])
+      ? s['git-map.launchpad.indicator.groups']
+      : ['mergeable', 'blocked', 'needsReview', 'followUp'];
+    const groupTotal = rawGroups.reduce((acc, g) => acc + (Number(counts[g]) || 0), 0);
+    if (repos.length === 0 || !indicatorOn || !prsOn || (counts.total <= 0 && groupTotal <= 0)) {
+      pill.classList.add('hidden');
+      pill.classList.remove('gm-lp-error', 'gm-lp-warning');
+      return;
+    }
+    const colorful = s['git-map.ui.iconColorStyle'] === 'colorful';
+    const useColors = s['git-map.launchpad.indicator.useColors'] !== false || colorful;
+    const iconMode = String(s['git-map.launchpad.indicator.icon'] || 'default');
+    const labelMode = String(s['git-map.launchpad.indicator.label'] || 'item');
+    const topGroup = rawGroups.includes('blocked') && counts.blocked > 0 ? 'blocked'
+      : rawGroups.includes('needsReview') && counts.needsReview > 0 ? 'needsReview'
+        : rawGroups.includes('mergeable') && counts.mergeable > 0 ? 'mergeable'
+          : 'followUp';
+    let iconSvg = colorful ? LP_ICONS.rocketColor : LP_ICONS.rocketMono;
+    if (iconMode === 'group') {
+      iconSvg = topGroup === 'blocked' ? LP_ICONS.warning : topGroup === 'needsReview' ? LP_ICONS.pullRequest : iconSvg;
+    }
+    pill.classList.remove('hidden', 'gm-lp-error', 'gm-lp-warning');
+    if (useColors) {
+      if (rawGroups.includes('blocked') && counts.blocked > 0) pill.classList.add('gm-lp-error');
+      else if (rawGroups.includes('needsReview') && counts.needsReview > 0) pill.classList.add('gm-lp-warning');
+    }
+    let labelText = '';
+    if (labelMode === 'counts') {
+      const parts = [
+        rawGroups.includes('blocked') && counts.blocked > 0 ? String(counts.blocked) : '',
+        rawGroups.includes('needsReview') && counts.needsReview > 0 ? String(counts.needsReview) : '',
+        rawGroups.includes('mergeable') && counts.mergeable > 0 ? String(counts.mergeable) : '',
+        rawGroups.includes('followUp') && counts.followUp > 0 ? String(counts.followUp) : ''
+      ].filter(Boolean);
+      labelText = parts.join(' · ') || String(counts.total);
+    } else if (labelMode !== 'false') {
+      labelText = topGroup === 'blocked' ? T(`${counts.blocked} 阻塞 PR`, `${counts.blocked} Blocked`)
+        : topGroup === 'needsReview' ? T(`${counts.needsReview} 待评审`, `${counts.needsReview} Review`)
+          : topGroup === 'mergeable' ? T(`${counts.mergeable} 可合并`, `${counts.mergeable} Mergeable`)
+            : `PR ${counts.total}`;
+    }
+    pill.innerHTML = `${iconSvg}${labelMode === 'false' ? '' : `<span id="launchpadPillCounts" class="inline-count-badge">${esc(labelText)}</span>`}`;
+    pill.title = T(
+      `PR 工作台：${counts.mergeable} 可合并 · ${counts.needsReview} 待评审 · ${counts.blocked} 阻塞 · ${counts.followUp} 待跟进`,
+      `PR Launchpad: ${counts.mergeable} Mergeable · ${counts.needsReview} Review · ${counts.blocked} Blocked · ${counts.followUp} Follow-up`
+    );
+  }
 
   async function refreshLaunchpadPill(force) {
     const app = getApp();
     const pill = document.getElementById('btnLaunchpadPill');
-    const countEl = document.getElementById('launchpadPillCounts');
-    if (!app || !pill || !countEl) return;
+    if (!app || !pill) return;
+    const s = app.state.settings || {};
     const repos = Object.keys(app.state.repos || {});
-    if (repos.length === 0 || app.state.settings['git-map.pullRequests.enabled'] === false) {
+    if (repos.length === 0 || s['git-map.pullRequests.enabled'] === false || s['git-map.launchpad.indicator.enabled'] === false || s['git-map.integrations.pullRequestStatus.enabled'] === false) {
       pill.classList.add('hidden');
+      pill.classList.remove('gm-lp-error', 'gm-lp-warning');
       return;
     }
-    if (!force && Date.now() - lastLaunchpadRefresh < 45000) return;
+    if (!force && Date.now() - lastLaunchpadRefresh < 45000) {
+      renderLaunchpadPillFromCounts(lastLaunchpadCounts);
+      return;
+    }
     lastLaunchpadRefresh = Date.now();
     try {
       const res = await app.rpc('launchpad:prs', { repos: app.state.activeRepo ? [app.state.activeRepo] : repos.slice(0, 4), force: !!force });
-      const counts = res?.counts || { total: 0, mergeable: 0, blocked: 0, needsReview: 0, followUp: 0 };
-      if (counts.total > 0) {
-        pill.classList.remove('hidden');
-        countEl.textContent = String(counts.total);
-        pill.title = T(
-          `PR 工作台：${counts.mergeable} 可合并 · ${counts.needsReview} 待评审 · ${counts.blocked} 阻塞 · ${counts.followUp} 待跟进`,
-          `PR Launchpad: ${counts.mergeable} Mergeable · ${counts.needsReview} Review · ${counts.blocked} Blocked · ${counts.followUp} Follow-up`
-        );
-      } else {
-        pill.classList.add('hidden');
-      }
+      lastLaunchpadCounts = res?.counts || { total: 0, mergeable: 0, blocked: 0, needsReview: 0, followUp: 0 };
+      renderLaunchpadPillFromCounts(lastLaunchpadCounts);
     } catch (_) {
       // Non-blocking background PR status check
     }

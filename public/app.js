@@ -534,6 +534,7 @@
     if (brandImg) brandImg.src = `/resources/icons/${style}-${variant}.svg`;
     const fav = document.getElementById('appFavicon');
     if (fav) fav.href = `/resources/icons/${style}-${variant}.png`;
+    document.body.dataset.iconStyle = state.settings && state.settings['git-map.ui.iconColorStyle'] === 'colorful' ? 'colorful' : 'monochrome';
 
     if ((state.initLoaded || persistNative) && desktopApi && desktopApi.setAppIcon) {
       desktopApi.setAppIcon({ style, iconTheme: iconMode, uiTheme: state.themePref, persist: !!persistNative }).catch(() => {});
@@ -971,6 +972,7 @@
           state.iconTheme = state.settings['gitmap.app.iconTheme'];
         }
         applyAppIcon();
+        window.GitMapV28Workbench?.refreshLaunchpadPill?.(false);
         if (state.settings['git-map.language'] === 'Simplified Chinese' || state.settings['git-map.language'] === 'English') {
           const lang = state.settings['git-map.language'] === 'English' ? 'en' : 'zh';
           if (lang !== state.lang) {

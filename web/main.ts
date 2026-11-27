@@ -166,6 +166,7 @@ class GitGraphView {
 	constructor(viewElem: HTMLElement, prevState: WebViewState | null) {
 		this.gitRepos = initialState.repos;
 		this.config = initialState.config;
+		applyIconColorStyle(String((this.config.settingValues && this.config.settingValues['ui.iconColorStyle']) || this.config.iconColorStyle || 'monochrome'));
 		this.maxCommits = this.config.initialLoadCommits;
 		this.viewElem = viewElem;
 		this.actions = new ViewActions(this);
@@ -206,7 +207,7 @@ class GitGraphView {
 		sidebarToggleBtn.className = 'toolbarBtn';
 		sidebarToggleBtn.title = t('Toggle Repository Navigator Sidebar');
 		sidebarToggleBtn.setAttribute('aria-label', t('Toggle Repository Navigator Sidebar'));
-		sidebarToggleBtn.innerHTML = '<svg class="toolbarIcon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>';
+		sidebarToggleBtn.innerHTML = '<svg class="toolbarIcon iconTone-indigo" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>';
 		sidebarToggleBtn.addEventListener('click', () => this.toggleGraphSidebar());
 		this.controlsElem.insertBefore(sidebarToggleBtn, this.controlsElem.firstChild);
 		this.tableElem = document.getElementById('commitTable')!;
@@ -4205,20 +4206,28 @@ class GitGraphView {
 			const prevList = modal.querySelector<HTMLElement>('.cdvActionsModalList');
 			const savedScrollTop = prevList !== null ? prevList.scrollTop : 0;
 			let orderCounter = 0;
-			const checkedCount = items.filter((item) => item.checked).length;
+			const checkedItems = items.filter((item) => item.checked);
+			const checkedCount = checkedItems.length;
 			const positionHtml = isRow
 				? '<div class="cdvActionsModalPosition"><span class="cdvActionsModalPositionLabel">' + t('Position:') + '</span>' +
 					[['Pointer', t('Next to the Pointer')], ['Description', t('End of the Description Column')], ['Row', t('End of the Row')]].map((option) =>
 						'<span class="cdvActionsModalPositionOption' + (option[0] === position ? ' ' + CLASS_SELECTED : '') + '" data-position="' + option[0] + '" role="radio" aria-checked="' + (option[0] === position ? 'true' : 'false') + '">' + option[1] + '</span>'
 					).join('') + '</div>'
 				: '';
+			const previewHtml = isRow
+				? '<div class="cdvActionsModalPreview"><div class="cdvActionsPreviewLabel">' + escapeHtml(t('Live Preview')) + '</div>' +
+					'<div class="cdvActionsRowPreview pos-' + position.toLowerCase() + '"><span class="gitRef head">main</span><span class="cdvActionsRowMsg">feat: optimize parser</span>' +
+					'<span class="cdvActionsPreviewPill">' + checkedItems.map((item) => '<span class="cdvActionsPreviewBtn" title="' + escapeHtml(item.title) + '">' + item.icon + '</span>').join('') + '<span class="cdvActionsPreviewBtn muted">···</span></span>' +
+					'</div></div>'
+				: '<div class="cdvActionsModalPreview"><div class="cdvActionsPreviewLabel">' + escapeHtml(t('Live Preview')) + '</div>' +
+					'<div class="cdvActionsPreviewBar">' + checkedItems.map((item, idx) => '<span class="cdvActionsPreviewChip' + (idx === 0 ? ' primary' : '') + '">' + item.icon + '<span>' + escapeHtml(item.title) + '</span></span>').join('') + '<span class="cdvActionsPreviewChip">···</span></div></div>';
 			modal.innerHTML = '<div class="cdvActionsModalPanel" role="dialog" aria-modal="true" aria-label="' + escapeHtml(modalTitle) + '">' +
 				'<div class="aiCommitHeader"><span class="aiCommitTitle">' + MENU_ICONS.settings + '<span>' + modalTitle + '</span></span>' +
 				'<button type="button" class="aiCommitClose" data-cdv-custom="close" title="' + t('Close') + '" aria-label="' + escapeHtml(t('Close')) + '">' + SVG_ICONS.close + '</button></div>' +
 				'<div class="cdvActionsModalHint">' + (isRow
 				? t('Checked actions are buttons on the row the mouse is over; the others are folded into its "More Actions" menu. Drag or use the arrows to adjust their order.')
 				: t('Choose which actions appear in the Commit Details action bar, and drag or use the arrows to adjust their order.')) + '</div>' +
-				positionHtml +
+				positionHtml + previewHtml +
 				'<div class="cdvActionsModalList">' + items.map((item, index) => {
 				const badge = item.checked ? '<span class="cdvActionsOrderBadge' + (orderCounter === 0 && !isRow ? ' primary' : '') + '">#' + (++orderCounter) + '</span>' : '<span class="cdvActionsOrderBadge empty"></span>';
 				const condBadge = item.conditional ? '<span class="cdvActionsCondBadge" title="' + condTitle + '">' + t('Contextual') + '</span>' : '';

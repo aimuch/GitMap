@@ -2452,3 +2452,67 @@ body.vscode-light .gm-hm-cell.lv-4 { background: #166534; border-color: #14532d;
 .gm-v29-cell:hover { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; z-index: 1; }
 .gm-v29-cell span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gm-v29-treemap-hover { min-height: 18px; font-family: var(--vscode-editor-font-family); font-size: 11.5px; color: var(--vscode-descriptionForeground); }
+
+/* ===================================================================
+   vscode-git-map 2.9.2–2.9.3 ports: Global Icon Colour Style & Launchpad Pill Tones
+   =================================================================== */
+body[data-icon-style="colorful"] {
+  --gm-icon-blue: #60a5fa;
+  --gm-icon-purple: #c084fc;
+  --gm-icon-cyan: #22d3ee;
+  --gm-icon-green: #4ade80;
+  --gm-icon-amber: #fbbf24;
+  --gm-icon-red: #f87171;
+  --gm-icon-indigo: #818cf8;
+}
+body.vscode-light[data-icon-style="colorful"],
+body.theme-light[data-icon-style="colorful"] {
+  --gm-icon-blue: #2563eb;
+  --gm-icon-purple: #9333ea;
+  --gm-icon-cyan: #0891b2;
+  --gm-icon-green: #16a34a;
+  --gm-icon-amber: #d97706;
+  --gm-icon-red: #dc2626;
+  --gm-icon-indigo: #4f46e5;
+}
+body[data-icon-style="colorful"] .icon-slot[data-icon="folder"] svg,
+body[data-icon-style="colorful"] .icon-slot[data-icon="folderOpen"] svg,
+body[data-icon-style="colorful"] .icon-slot[data-icon="folderSearch"] svg { stroke: var(--gm-icon-amber); }
+body[data-icon-style="colorful"] .icon-slot[data-icon="commit"] svg,
+body[data-icon-style="colorful"] .icon-slot[data-icon="command"] svg { stroke: var(--gm-icon-blue); }
+body[data-icon-style="colorful"] .icon-slot[data-icon="branch"] svg,
+body[data-icon-style="colorful"] .icon-slot[data-icon="gitClone"] svg { stroke: var(--gm-icon-green); }
+body[data-icon-style="colorful"] .icon-slot[data-icon="layers"] svg,
+body[data-icon-style="colorful"] .icon-slot[data-icon="sidebar"] svg { stroke: var(--gm-icon-indigo); }
+body[data-icon-style="colorful"] .icon-slot[data-icon="terminal"] svg,
+body[data-icon-style="colorful"] .icon-slot[data-icon="refresh"] svg,
+body[data-icon-style="colorful"] .icon-slot[data-icon="transfers"] svg { stroke: var(--gm-icon-cyan); }
+body[data-icon-style="colorful"] .icon-slot[data-icon="settings"] svg,
+body[data-icon-style="colorful"] .icon-slot[data-icon="serverPlus"] svg { stroke: var(--gm-icon-purple); }
+body[data-icon-style="colorful"] #btnConnectSsh.primary-pill .icon-slot svg { stroke: currentColor; }
+
+.gm-launchpad-pill .gm-lp-svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.gm-launchpad-pill.gm-lp-error {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.14);
+  color: #fca5a5;
+}
+body.vscode-light .gm-launchpad-pill.gm-lp-error,
+body.theme-light .gm-launchpad-pill.gm-lp-error {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.12);
+}
+.gm-launchpad-pill.gm-lp-warning {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fcd34d;
+}
+body.vscode-light .gm-launchpad-pill.gm-lp-warning,
+body.theme-light .gm-launchpad-pill.gm-lp-warning {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.12);
+}

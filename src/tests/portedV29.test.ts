@@ -185,4 +185,21 @@ describe('Ported v2.9 Features', () => {
     assert.equal(isUnsafeRefName('a b'), true);
     assert.equal(isUnsafeRefName('HEAD@{1}'), true);
   });
+
+  it('exposes v2.9.3 iconColorStyle default and settings schema / l10n parity', async () => {
+    const { getConfig } = await import('../config');
+    assert.equal(getConfig().iconColorStyle, 'monochrome');
+
+    const rootDir = path.resolve(__dirname, '..', '..');
+    const schema = JSON.parse(fs.readFileSync(path.join(rootDir, 'resources', 'settings-schema.json'), 'utf8'));
+    assert.equal(schema.source, 'vscode-git-map 2.9.3');
+    assert.equal(schema.properties['git-map.ui.iconColorStyle']?.default, 'monochrome');
+    assert.deepEqual(schema.properties['git-map.ui.iconColorStyle']?.enum, ['monochrome', 'colorful']);
+
+    const zhBundle = JSON.parse(fs.readFileSync(path.join(rootDir, 'l10n', 'bundle.l10n.zh-cn.json'), 'utf8'));
+    assert.equal(zhBundle['Icon colour style'], '图标配色风格');
+    assert.equal(zhBundle['Colorful'], '彩色');
+    assert.equal(zhBundle['Monochrome'], '单色');
+    assert.equal(zhBundle['Live Preview: Custom Remotes'], '实时预览：自定义远程');
+  });
 });
